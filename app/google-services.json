@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "185520439473",
+    "project_id": "classseek-csuci",
+    "storage_bucket": "classseek-csuci.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:185520439473:android:edf470487e94fce0b4a290",
+        "android_client_info": {
+          "package_name": "com.example.classseek"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCc0dc2eXx8zhduXDyjr0rHRuqPGPbdC8k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
