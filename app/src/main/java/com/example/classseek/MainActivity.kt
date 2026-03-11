@@ -28,6 +28,8 @@ import androidx.compose.ui.tooling.preview.PreviewScreenSizes
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.firebase.FirebaseApp
 
+import com.example.classseek.ui.friends.FriendsScreen
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,16 +65,21 @@ fun ClassSeekApp() {
                 )
             }
         }
-    ) {
+    )
+    {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-            Greeting(
-                name = currentDestination.label,
-                modifier = Modifier.padding(innerPadding)
-            )
+            val contentModifier = Modifier.padding(innerPadding)
+
+            when (currentDestination) {
+                AppDestinations.FRIENDS -> FriendsScreen(modifier = contentModifier)
+                else -> Greeting(
+                    name = currentDestination.label,
+                    modifier = contentModifier
+                )
+            }
         }
     }
 }
-
 enum class AppDestinations(
     val label: String,
     val icon: ImageVector,
