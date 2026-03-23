@@ -17,6 +17,12 @@ data class Message(
     val replyToMessageId: String? = null
 )
 
+data class ChatListItem(
+    val id: String,
+    val title: String,
+    val lastMessageText: String? = null
+)
+
 class ChatRepository(private val db: FirebaseFirestore) {
 
     private val chatsRef = db.collection("chats")
@@ -29,7 +35,7 @@ class ChatRepository(private val db: FirebaseFirestore) {
      * Uses a deterministic dmKey so you never create duplicate DM chats:
      * dmKey = min(uidA, uidB) + "_" + max(uidA, uidB)
      */
-    suspend fun openOrCreateDm(uidA: String, uidB: String): String {
+    suspend fun openOrCreateDm(uidA: String, uidB: String, title: String?): String {
         val (a, b) = listOf(uidA, uidB).sorted()
         val dmKey = "${a}_$b"
         val dmDocRef = dmThreadsRef.document(dmKey)
@@ -42,12 +48,15 @@ class ChatRepository(private val db: FirebaseFirestore) {
 
         val newChatRef = chatsRef.document()
 
-        // Transaction prevents race conditions (two clients creating the DM at the same time)
         db.runTransaction { tx ->
             val now = Timestamp.now()
 
+            val finalTitle = if (title.isNullOrBlank()) "Chat" else title.trim()
+
             tx.set(newChatRef, mapOf(
                 "type" to "dm",
+                "title" to finalTitle,
+                "memberIds" to listOf(a, b),
                 "createdAt" to now,
                 "createdBy" to uidA,
                 "memberCount" to 2,
@@ -56,14 +65,12 @@ class ChatRepository(private val db: FirebaseFirestore) {
                 "lastMessageSenderId" to null
             ))
 
-            // membership docs are what rules use to validate access
             val memberARef = newChatRef.collection("members").document(a)
             val memberBRef = newChatRef.collection("members").document(b)
 
             tx.set(memberARef, mapOf("role" to "member", "joinedAt" to now, "lastReadAt" to null))
             tx.set(memberBRef, mapOf("role" to "member", "joinedAt" to now, "lastReadAt" to null))
 
-            // DM mapping so this pair always resolves to the same chat
             tx.set(dmDocRef, mapOf(
                 "chatId" to newChatRef.id,
                 "userA" to a,
@@ -75,47 +82,20 @@ class ChatRepository(private val db: FirebaseFirestore) {
         return newChatRef.id
     }
 
-    /**
-     * Create a group chat with initial members.
-     * Returns chatId.
-     *
-     * NOTE: For production, you'd enforce "who can add/remove members" via security rules + roles
-     * or via Cloud Functions.
-     */
-    suspend fun createGroupChat(
-        createdBy: String,
-        memberIds: List<String>,
-        title: String,
-        photoURL: String? = null
-    ): String {
-        require(memberIds.isNotEmpty()) { "memberIds cannot be empty" }
-        require(memberIds.contains(createdBy)) { "memberIds should include createdBy" }
+    suspend fun getMyChats(myUid: String): List<ChatListItem> {
+        val snap = chatsRef
+            .whereArrayContains("memberIds", myUid)
+            .orderBy("lastMessageAt", Query.Direction.DESCENDING)
+            .get()
+            .await()
 
-        val chatRef = chatsRef.document()
-
-        db.runTransaction { tx ->
-            val now = Timestamp.now()
-
-            tx.set(chatRef, mapOf(
-                "type" to "group",
-                "createdAt" to now,
-                "createdBy" to createdBy,
-                "memberCount" to memberIds.size,
-                "title" to title,
-                "photoURL" to (photoURL ?: ""),
-                "lastMessageAt" to null,
-                "lastMessageText" to null,
-                "lastMessageSenderId" to null
-            ))
-
-            memberIds.distinct().forEach { uid ->
-                val role = if (uid == createdBy) "owner" else "member"
-                val memberRef = chatRef.collection("members").document(uid)
-                tx.set(memberRef, mapOf("role" to role, "joinedAt" to now, "lastReadAt" to null))
-            }
-        }.await()
-
-        return chatRef.id
+        return snap.documents.map { doc ->
+            ChatListItem(
+                id = doc.id,
+                title = doc.getString("title") ?: "Untitled Chat",
+                lastMessageText = doc.getString("lastMessageText")
+            )
+        }
     }
 
     /**

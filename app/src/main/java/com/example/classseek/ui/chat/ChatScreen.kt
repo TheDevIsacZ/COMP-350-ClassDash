@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ChatScreen(
     chatId: String,
+    title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
@@ -51,7 +52,7 @@ fun ChatScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("DM Chat") },
+                title = { Text(title) },
                 navigationIcon = {
                     TextButton(onClick = onBack) { Text("Back") }
                 }
