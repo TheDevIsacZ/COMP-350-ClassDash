@@ -13,9 +13,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountBox
-import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -50,7 +53,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         Log.e("CALENDAR_DEBUG", "MainActivity: APP STARTED")
         logSha1()
 
@@ -85,9 +88,9 @@ class MainActivity : ComponentActivity() {
         return withContext(Dispatchers.IO) {
             try {
                 Log.e("CALENDAR_DEBUG", "getCalendarEvents: Starting for ${account.email}")
-                
+
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
-                
+
                 // Detailed check for permission
                 val hasPermission = GoogleSignIn.hasPermissions(account, Scope(calendarScope))
                 Log.e("CALENDAR_DEBUG", "getCalendarEvents: Has calendar permission? $hasPermission")
@@ -95,7 +98,7 @@ class MainActivity : ComponentActivity() {
                 val credential = GoogleAccountCredential.usingOAuth2(
                     this@MainActivity, listOf(calendarScope)
                 )
-                
+
                 credential.selectedAccountName = account.email
                 Log.e("CALENDAR_DEBUG", "getCalendarEvents: Credential setup with email: ${account.email}")
 
@@ -104,14 +107,14 @@ class MainActivity : ComponentActivity() {
                     GsonFactory.getDefaultInstance(),
                     credential
                 ).setApplicationName("ClassSeek").build()
-                
+
                 Log.e("CALENDAR_DEBUG", "getCalendarEvents: Calling Google Calendar API...")
                 val eventsResult = service.events().list("primary")
                     .setOrderBy("startTime")
                     .setSingleEvents(true)
                     .setMaxResults(50)
                     .execute()
-                
+
                 val items = eventsResult.items
                 Log.e("CALENDAR_DEBUG", "getCalendarEvents: SUCCESS! Found ${items?.size ?: 0} events")
                 items ?: emptyList()
@@ -124,13 +127,14 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+//@PreviewScreenSizes
 @Composable
 fun ClassSeekApp() {
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.HOME) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val activity = remember(context) { context as? MainActivity }
-    
+
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
@@ -143,8 +147,8 @@ fun ClassSeekApp() {
             val account = task.getResult(ApiException::class.java)
             signedInAccount = account
             Log.e("CALENDAR_DEBUG", "signInLauncher: Sign-in successful for: ${account?.email}")
-            
-            account?.let { 
+
+            account?.let {
                 scope.launch {
                     Log.e("CALENDAR_DEBUG", "signInLauncher: Launching event fetch coroutine")
                     val events = activity?.getCalendarEvents(it)
@@ -167,7 +171,12 @@ fun ClassSeekApp() {
         navigationSuiteItems = {
             AppDestinations.entries.forEach {
                 item(
-                    icon = { Icon(it.icon, contentDescription = it.label) },
+                    icon = {
+                        Icon(
+                            it.icon,
+                            contentDescription = it.label
+                        )
+                    },
                     label = { Text(it.label) },
                     selected = it == currentDestination,
                     onClick = { currentDestination = it }
@@ -177,35 +186,63 @@ fun ClassSeekApp() {
     ) {
         Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
             Box(modifier = Modifier.padding(innerPadding)) {
+                // This 'when' block acts as your router!
                 when (currentDestination) {
-                    AppDestinations.HOME -> CalendarScreen(
-                        signedInAccount = signedInAccount,
-                        calendarEvents = calendarEvents,
-                        onSignInClick = { intent -> 
-                            Log.e("CALENDAR_DEBUG", "onSignInClick: Launching Picker")
-                            signInLauncher.launch(intent) 
-                        },
-                        onSignOutClick = {
-                            Log.e("CALENDAR_DEBUG", "onSignOutClick: Clearing state")
-                            signedInAccount = null
-                            calendarEvents = emptyList()
-                        },
-                        onRefreshClick = { account ->
-                            Log.e("CALENDAR_DEBUG", "onRefreshClick: Manual refresh for ${account.email}")
-                            val events = activity?.getCalendarEvents(account)
-                            if (events != null) calendarEvents = events
-                        }
-                    )
-                    AppDestinations.FAVORITES -> Text("Favorites Screen", modifier = Modifier.padding(16.dp))
-                    AppDestinations.PROFILE -> Text("Profile Screen", modifier = Modifier.padding(16.dp))
+                    AppDestinations.CALENDAR -> {
+                        // This connects your Calendar logic to the new bottom nav button
+                        CalendarScreen(
+                            signedInAccount = signedInAccount,
+                            calendarEvents = calendarEvents,
+                            onSignInClick = { intent ->
+                                Log.e("CALENDAR_DEBUG", "onSignInClick: Launching Picker")
+                                signInLauncher.launch(intent)
+                            },
+                            onSignOutClick = {
+                                Log.e("CALENDAR_DEBUG", "onSignOutClick: Clearing state")
+                                signedInAccount = null
+                                calendarEvents = emptyList()
+                            },
+                            onRefreshClick = { account ->
+                                Log.e("CALENDAR_DEBUG", "onRefreshClick: Manual refresh for ${account.email}")
+                                val events = activity?.getCalendarEvents(account)
+                                if (events != null) calendarEvents = events
+                            }
+                        )
+                    }
+                    // Placeholders for the other dev branch tabs
+                    AppDestinations.HOME -> Greeting("Home")
+                    AppDestinations.FRIENDS -> Greeting("Friends")
+                    AppDestinations.MAP -> Greeting("Map")
+                    AppDestinations.SETTINGS -> Greeting("Settings")
                 }
             }
         }
     }
 }
 
-enum class AppDestinations(val label: String, val icon: ImageVector) {
+enum class AppDestinations(
+    val label: String,
+    val icon: ImageVector,
+) {
     HOME("Home", Icons.Default.Home),
-    FAVORITES("Favorites", Icons.Default.Favorite),
-    PROFILE("Profile", Icons.Default.AccountBox),
+    FRIENDS("Friends", Icons.Default.Person),
+    MAP("Map", Icons.Default.Place),
+    CALENDAR("Calendar", Icons.Default.DateRange),
+    SETTINGS("Settings", Icons.Default.Settings),
+}
+
+@Composable
+fun Greeting(name: String, modifier: Modifier = Modifier) {
+    Text(
+        text = "Hello $name!",
+        modifier = modifier
+    )
+}
+
+@Preview(showBackground = true)
+@Composable
+fun GreetingPreview() {
+    ClassSeekTheme {
+        Greeting("Android")
+    }
 }

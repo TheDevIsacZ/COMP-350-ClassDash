@@ -12,5 +12,5 @@ dont touch it
 put the file in /app/
 must be done everytime
 since the .json file is gitignored for privacy reasons
-https://console.firebase.google.com/project/classseek-csuci/overview?utm_source=studio
-the file is in general settings
+https://console.firebase.google.com/project/classseek-csuciteam/settings/general/android:com.example.classseek?utm_source=studio
+file is in general settings
