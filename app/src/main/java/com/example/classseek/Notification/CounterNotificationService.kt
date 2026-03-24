@@ -1,4 +1,4 @@
-package com.example.classseek.Notification
+.package com.example.classseek.Notification
 
 import android.app.Notification
 import android.app.NotificationChannel
