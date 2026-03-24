@@ -7,8 +7,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -194,21 +203,63 @@ fun FriendsScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
-                            .clickable {
-                                selectedChatId = chat.id
-                                selectedChatTitle = chat.title
-                            }
                     ) {
+                        var menuExpanded by remember { mutableStateOf(false) }
+
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = chat.title,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = chat.lastMessageText ?: "No messages yet",
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            selectedChatId = chat.id
+                                            selectedChatTitle = chat.title
+                                        }
+                                ) {
+                                    Text(
+                                        text = chat.title,
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+
+                                    Spacer(Modifier.height(4.dp))
+
+                                    Text(
+                                        text = chat.lastMessageText ?: "No messages yet",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+
+                                Box {
+                                    IconButton(
+                                        onClick = { menuExpanded = true }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.MoreVert,
+                                            contentDescription = "Chat options"
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = menuExpanded,
+                                        onDismissRequest = { menuExpanded = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Delete") },
+                                            onClick = {
+                                                menuExpanded = false
+                                                scope.launch {
+                                                    val uid = auth.currentUser?.uid ?: return@launch
+                                                    repo.hideChatForUser(chat.id, uid)
+                                                    refreshChats()
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

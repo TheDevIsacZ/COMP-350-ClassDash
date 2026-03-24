@@ -43,7 +43,15 @@ class ChatRepository(private val db: FirebaseFirestore) {
         val existing = dmDocRef.get().await()
         if (existing.exists()) {
             val chatId = existing.getString("chatId")
-            if (!chatId.isNullOrBlank()) return chatId
+
+            if (!chatId.isNullOrBlank()) {
+                val myMemberRef = chatsRef.document(chatId)
+                    .collection("members")
+                    .document(uidA)
+
+                myMemberRef.update("hidden", false).await()
+                return chatId
+            }
         }
 
         val newChatRef = chatsRef.document()
@@ -62,7 +70,8 @@ class ChatRepository(private val db: FirebaseFirestore) {
                 "memberCount" to 2,
                 "lastMessageAt" to null,
                 "lastMessageText" to null,
-                "lastMessageSenderId" to null
+                "lastMessageSenderId" to null,
+                "hidden" to false
             ))
 
             val memberARef = newChatRef.collection("members").document(a)
@@ -82,6 +91,10 @@ class ChatRepository(private val db: FirebaseFirestore) {
         return newChatRef.id
     }
 
+    /**
+     * Get a list of chat summaries for the current user.
+     * Checks for Hidden attribute to decide wether to display chat
+     */
     suspend fun getMyChats(myUid: String): List<ChatListItem> {
         val snap = chatsRef
             .whereArrayContains("memberIds", myUid)
@@ -89,13 +102,28 @@ class ChatRepository(private val db: FirebaseFirestore) {
             .get()
             .await()
 
-        return snap.documents.map { doc ->
-            ChatListItem(
-                id = doc.id,
-                title = doc.getString("title") ?: "Untitled Chat",
-                lastMessageText = doc.getString("lastMessageText")
+        val result = mutableListOf<ChatListItem>()
+
+        for (doc in snap.documents) {
+            val memberSnap = doc.reference
+                .collection("members")
+                .document(myUid)
+                .get()
+                .await()
+
+            val hidden = memberSnap.getBoolean("hidden") ?: false
+            if (hidden) continue
+
+            result.add(
+                ChatListItem(
+                    id = doc.id,
+                    title = doc.getString("title") ?: "Untitled Chat",
+                    lastMessageText = doc.getString("lastMessageText")
+                )
             )
         }
+
+        return result
     }
 
     /**
@@ -204,4 +232,16 @@ class ChatRepository(private val db: FirebaseFirestore) {
             replyToMessageId = doc.getString("replyToMessageId")
         )
     }
+
+    /**
+     * hides chats from users without deleting them from database
+     */
+    suspend fun hideChatForUser(chatId: String, myUid: String) {
+        val memberRef = chatsRef.document(chatId)
+            .collection("members")
+            .document(myUid)
+
+        memberRef.update("hidden", true).await()
+    }
+
 }
