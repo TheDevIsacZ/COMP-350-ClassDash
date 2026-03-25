@@ -223,7 +223,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                 // Bubbles and text show up when selected when zoomed in
                                 val isZoomedIn = currentZoom >= 16.5f
                                 val showBubble = isSelected || (selectedPlace == null && isZoomedIn)
-                                
+
                                 if (showBubble) {
                                     Surface(
                                         shape = RoundedCornerShape(3.3.dp), // size of text bubble. reduce if too big
