@@ -221,7 +221,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                 val isZoomedIn = currentZoom >= 16.5f
                                 // Names show if explicitly selected OR if no selection is visible and user is zoomed in
                                 val showBubble = isSelected || (!isSelectionVisible && isZoomedIn)
-                                
                                 if (showBubble) {
                                     Surface(
                                         shape = RoundedCornerShape(3.3.dp), // size of text bubble. reduce if too big
