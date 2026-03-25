@@ -63,6 +63,11 @@ dependencies {
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
 
+    // Google Maps and Location
+    implementation(libs.maps.compose)
+    implementation(libs.play.services.maps)
+    implementation(libs.play.services.location)
+
     // Google Calendar API Dependencies
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("com.google.api-client:google-api-client-android:2.7.2")
