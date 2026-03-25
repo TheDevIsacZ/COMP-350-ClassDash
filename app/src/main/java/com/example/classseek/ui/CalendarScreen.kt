@@ -24,14 +24,19 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,18 +63,23 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalendarScreen(
     signedInAccount: GoogleSignInAccount?,
     calendarEvents: List<Event>,
     onSignInClick: (Intent) -> Unit,
     onSignOutClick: () -> Unit,
-    onRefreshClick: suspend (GoogleSignInAccount) -> Unit
+    onRefreshClick: suspend (GoogleSignInAccount) -> Unit,
+    onAddEventClick: (Long) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    // For runtime permission requests
+    var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
+    var showBottomSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState()
+
     var hasCalendarPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED &&
@@ -84,7 +94,6 @@ fun CalendarScreen(
                 permissions[Manifest.permission.WRITE_CALENDAR] == true
     }
 
-    // Configure Google Sign-In
     val gso = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
@@ -93,9 +102,7 @@ fun CalendarScreen(
     }
     val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
 
-    // THE UPDATED UI FLOW
     if (!hasCalendarPermission) {
-        // State 1: Needs Permission (Centered UI)
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -114,7 +121,6 @@ fun CalendarScreen(
             }
         }
     } else if (signedInAccount == null) {
-        // State 2: Needs Sign-In (Centered UI)
         Column(
             modifier = Modifier.fillMaxSize().padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -129,108 +135,172 @@ fun CalendarScreen(
             }
         }
     } else {
-        // State 3: Fully Authorized Calendar View (Your original logic)
-        Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Schedule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                    Text(text = signedInAccount.email ?: "", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                }
-                Button(onClick = {
-                    googleSignInClient.signOut().addOnCompleteListener {
-                        onSignOutClick()
+        Scaffold { paddingValues ->
+            Column(modifier = Modifier.fillMaxSize().padding(paddingValues).padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Schedule", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Text(text = signedInAccount.email ?: "", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                     }
-                }) {
-                    Text("Sign Out")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Calendar Widget
-            AndroidView(
-                factory = { ctx -> CalendarView(ctx) },
-                modifier = Modifier.fillMaxWidth().wrapContentHeight()
-            )
-
-            HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray, modifier = Modifier.padding(vertical = 8.dp))
-
-            // Events List
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(text = "Upcoming Events", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Button(onClick = {
-                    scope.launch { onRefreshClick(signedInAccount) }
-                }) {
-                    Text("Refresh")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Filtering Logic
-            val now = System.currentTimeMillis()
-            val todayCal = JavaCalendar.getInstance().apply {
-                timeInMillis = now
-                set(JavaCalendar.HOUR_OF_DAY, 0)
-                set(JavaCalendar.MINUTE, 0)
-                set(JavaCalendar.SECOND, 0)
-                set(JavaCalendar.MILLISECOND, 0)
-            }
-            val todayStart = todayCal.timeInMillis
-            val todayLabel = formatDate(DateTime(todayStart))
-
-            val filteredEvents = calendarEvents.filter { event ->
-                val eventTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
-                eventTime >= todayStart
-            }
-
-            val groupedEvents = filteredEvents.groupBy { event ->
-                formatDate(event.start?.dateTime ?: event.start?.date)
-            }
-
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                item {
-                    Text(
-                        text = todayLabel,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    )
-                    if (groupedEvents[todayLabel] == null) {
-                        Text(text = "No events scheduled for today.", color = Color.Gray, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                    Button(onClick = {
+                        googleSignInClient.signOut().addOnCompleteListener {
+                            onSignOutClick()
+                        }
+                    }) {
+                        Text("Sign Out")
                     }
                 }
 
-                val todayEvents = groupedEvents[todayLabel]
-                if (todayEvents != null) {
-                    items(todayEvents) { event -> AgendaItem(event) }
+                Spacer(modifier = Modifier.height(8.dp))
+
+                AndroidView(
+                    factory = { ctx ->
+                        CalendarView(ctx).apply {
+                            setOnDateChangeListener { _, year, month, dayOfMonth ->
+                                val cal = JavaCalendar.getInstance()
+                                cal.set(year, month, dayOfMonth, 0, 0, 0)
+                                cal.set(JavaCalendar.MILLISECOND, 0)
+                                selectedDateMillis = cal.timeInMillis
+                                showBottomSheet = true
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().wrapContentHeight()
+                )
+
+                HorizontalDivider(thickness = 0.5.dp, color = Color.LightGray, modifier = Modifier.padding(vertical = 8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(text = "Upcoming Events", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Button(onClick = {
+                        scope.launch { onRefreshClick(signedInAccount) }
+                    }) {
+                        Text("Refresh")
+                    }
                 }
 
-                val futureDateLabels = groupedEvents.keys
-                    .filter { it != todayLabel }
-                    .sortedBy { label ->
-                        groupedEvents[label]?.firstOrNull()?.let {
-                            it.start?.dateTime?.value ?: it.start?.date?.value ?: 0L
-                        } ?: 0L
-                    }
+                Spacer(modifier = Modifier.height(12.dp))
 
-                futureDateLabels.forEach { dateLabel ->
+                val now = System.currentTimeMillis()
+                val todayCal = JavaCalendar.getInstance().apply {
+                    timeInMillis = now
+                    set(JavaCalendar.HOUR_OF_DAY, 0)
+                    set(JavaCalendar.MINUTE, 0)
+                    set(JavaCalendar.SECOND, 0)
+                    set(JavaCalendar.MILLISECOND, 0)
+                }
+                val todayStart = todayCal.timeInMillis
+                val todayLabel = formatDate(DateTime(todayStart))
+
+                val filteredEvents = calendarEvents.filter { event ->
+                    val eventTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
+                    eventTime >= todayStart
+                }
+
+                val groupedEvents = filteredEvents.groupBy { event ->
+                    formatDate(event.start?.dateTime ?: event.start?.date)
+                }
+
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
                     item {
                         Text(
-                            text = dateLabel,
+                            text = todayLabel,
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
+                        if (groupedEvents[todayLabel] == null) {
+                            Text(text = "No events scheduled for today.", color = Color.Gray, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 8.dp))
+                        }
                     }
-                    items(groupedEvents[dateLabel]!!) { event -> AgendaItem(event) }
+
+                    val todayEvents = groupedEvents[todayLabel]
+                    if (todayEvents != null) {
+                        items(todayEvents) { event -> AgendaItem(event) }
+                    }
+
+                    val futureDateLabels = groupedEvents.keys
+                        .filter { it != todayLabel }
+                        .sortedBy { label ->
+                            groupedEvents[label]?.firstOrNull()?.let {
+                                it.start?.dateTime?.value ?: it.start?.date?.value ?: 0L
+                            } ?: 0L
+                        }
+
+                    futureDateLabels.forEach { dateLabel ->
+                        item {
+                            Text(
+                                text = dateLabel,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            )
+                        }
+                        items(groupedEvents[dateLabel]!!) { event -> AgendaItem(event) }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showBottomSheet && selectedDateMillis != null) {
+        val dateLabel = formatDate(DateTime(selectedDateMillis!!))
+        val eventsForSelectedDate = calendarEvents.filter { event ->
+            val eventStartTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
+            formatDate(DateTime(eventStartTime)) == dateLabel
+        }
+
+        ModalBottomSheet(
+            onDismissRequest = { showBottomSheet = false },
+            sheetState = sheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .padding(bottom = 32.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = dateLabel,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Button(onClick = {
+                        showBottomSheet = false
+                        onAddEventClick(selectedDateMillis!!)
+                    }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Add Event")
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                if (eventsForSelectedDate.isEmpty()) {
+                    Text(
+                        text = "No events scheduled for this day.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.Gray,
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
+                } else {
+                    LazyColumn {
+                        items(eventsForSelectedDate) { event ->
+                            AgendaItem(event)
+                        }
+                    }
                 }
             }
         }
