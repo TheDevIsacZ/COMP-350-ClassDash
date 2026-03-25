@@ -74,7 +74,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
             MapPlace("Richard R Rush Hall", LatLng(34.16259, -119.04344), MarkerCategory.BUILDING),
             MapPlace("Academic Advising", LatLng(34.16118, -119.04292), MarkerCategory.STUDENT_SERVICE),
             MapPlace("Madera Hall", LatLng(34.16219, -119.04407), MarkerCategory.BUILDING),
-            MapPlace("Madera Hall", LatLng(34.16377, -119.04362), MarkerCategory.BUILDING),
             MapPlace("Solano Hall", LatLng(34.16335, -119.04513), MarkerCategory.BUILDING),
             MapPlace("Manzanita Hall", LatLng(34.16274, -119.04505), MarkerCategory.BUILDING),
             MapPlace("Chaparral Hall", LatLng(34.16209, -119.04570), MarkerCategory.BUILDING),
@@ -104,6 +103,13 @@ fun MapScreen(modifier: Modifier = Modifier) {
             val matchesSearch = place.name.contains(searchQuery, ignoreCase = true)
             val matchesCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
             matchesSearch && matchesCategory
+        }
+    }
+
+    // Clear selection if the filtered list no longer contains the selected place
+    LaunchedEffect(filteredPlaces) {
+        if (selectedPlace != null && !filteredPlaces.any { it.name == selectedPlace?.name }) {
+            selectedPlace = null
         }
     }
 
