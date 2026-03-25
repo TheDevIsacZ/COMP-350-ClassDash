@@ -106,18 +106,16 @@ fun MapScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    // Clear selection if the filtered list no longer contains the selected place
-    LaunchedEffect(filteredPlaces) {
-        if (selectedPlace != null && !filteredPlaces.any { it.name == selectedPlace?.name }) {
-            selectedPlace = null
-        }
+    // Immediately clear selection when user filters or searches to avoid "ghost" dimmed states
+    LaunchedEffect(searchQuery, selectedCategory) {
+        selectedPlace = null
     }
 
     // fusedLocationClient is for access to Google Play services location API
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
     var location by remember { mutableStateOf<Location?>(null) }
     
-    // Map control is all based in cameraPositionState
+    // Map control
     val cameraPositionState = rememberCameraPositionState()
     var hasCenteredCamera by remember { mutableStateOf(false) }
 
@@ -173,9 +171,9 @@ fun MapScreen(modifier: Modifier = Modifier) {
             GoogleMap( // GoogleMap creates the map
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
-                properties = MapProperties(mapType = MapType.SATELLITE), // google maps api version
-                uiSettings = MapUiSettings(mapToolbarEnabled = false), // this disables the directions/google maps toolbar when a marker is clicked
-                onMapClick = { selectedPlace = null } // clear selection when tapping map
+                properties = MapProperties(mapType = MapType.SATELLITE),
+                uiSettings = MapUiSettings(mapToolbarEnabled = false),
+                onMapClick = { selectedPlace = null }
             ) {
                 // User location marker
                 MarkerComposable(
@@ -196,12 +194,12 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 // fades markers from 1.0 at 15 zoom to 0.0 at 13 zoom
                 val buildingAlpha = ((currentZoom - 13f) / (15f - 13f)).coerceIn(0f, 1f)
 
-                // Render markers (keeping them in composition even if faded avoids logic reset)
+                val isSelectionVisible = filteredPlaces.any { it.name == selectedPlace?.name }
+
                 filteredPlaces.forEach { place ->
                     val isSelected = selectedPlace?.name == place.name
-                    val markerAlpha = if (selectedPlace == null || isSelected) buildingAlpha else buildingAlpha * 0.3f
+                    val markerAlpha = if (!isSelectionVisible || isSelected) buildingAlpha else buildingAlpha * 0.3f
 
-                    // FIX: We use 'key' to ensure each marker keeps its own correct state/position
                     key(place.name) {
                         val markerColor = when(place.category) {
                             MarkerCategory.BUILDING -> Color.Blue
@@ -216,13 +214,13 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             anchor = Offset(0.5f, 1.0f),
                             onClick = {
                                 selectedPlace = place
-                                true // return true to prevent default info window
+                                true
                             }
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                // Bubbles and text show up when selected when zoomed in
                                 val isZoomedIn = currentZoom >= 16.5f
-                                val showBubble = isSelected || (selectedPlace == null && isZoomedIn)
+                                // Names show if explicitly selected OR if no selection is visible and user is zoomed in
+                                val showBubble = isSelected || (!isSelectionVisible && isZoomedIn)
                                 
                                 if (showBubble) {
                                     Surface(
