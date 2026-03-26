@@ -12,6 +12,8 @@ android {
         }
     }
 
+    val mapsApiKey = project.findProperty("MAPS_API_KEY") as String? ?: ""
+
     defaultConfig {
         applicationId = "com.example.classseek"
         minSdk = 24
@@ -20,6 +22,10 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        android.buildFeatures.buildConfig = true
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
     }
 
     buildTypes {
@@ -62,6 +68,11 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
+
+    // Google Maps and Location
+    implementation(libs.maps.compose)
+    implementation(libs.play.services.maps)
+    implementation(libs.play.services.location)
 
     // Google Calendar API Dependencies
     implementation("com.google.android.gms:play-services-auth:21.3.0")
