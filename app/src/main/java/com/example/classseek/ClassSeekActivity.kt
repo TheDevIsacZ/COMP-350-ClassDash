@@ -38,6 +38,7 @@ import com.example.classseek.models.ClassSchedule
 import com.example.classseek.ui.AddEventScreen
 import com.example.classseek.ui.CalendarScreen
 import com.example.classseek.ui.MapScreen
+import com.example.classseek.ui.friends.FriendsScreen
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -49,6 +50,7 @@ import com.google.api.client.util.DateTime
 import com.google.api.services.calendar.Calendar
 import com.google.api.services.calendar.model.Event
 import com.google.api.services.calendar.model.EventDateTime
+import com.google.firebase.FirebaseApp
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +62,7 @@ class ClassSeekActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         enableEdgeToEdge()
+        FirebaseApp.initializeApp(this)
         setContent {
             ClassSeekTheme {
                 ClassSeekApp()
@@ -267,7 +270,7 @@ fun ClassSeekApp() {
                             )
                         }
                         AppDestinations.HOME -> Greeting("Home")
-                        AppDestinations.FRIENDS -> Greeting("Friends")
+                        AppDestinations.FRIENDS -> FriendsScreen()
                         AppDestinations.MAP -> MapScreen()
                         AppDestinations.SETTINGS -> Greeting("Settings")
                     }
