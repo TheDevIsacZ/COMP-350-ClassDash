@@ -66,6 +66,7 @@ dependencies {
     implementation(libs.androidx.compose.material3.adaptive.navigation.suite)
     implementation("androidx.compose.material:material-icons-extended")
     implementation(libs.firebase.auth)
+
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.googleid)
@@ -89,4 +90,20 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Firebase BOM
+    implementation(platform(libs.firebase.bom))
+
+    // Firebase libraries
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.messaging)
+    implementation(libs.firebase.storage)
+    implementation(libs.firebase.auth)
+
+    // gRPC dependencies to fix Firestore crash
+    implementation(libs.grpc.okhttp)
+    implementation(libs.grpc.android)
+
+    // Coroutines support for Firebase Tasks
+    implementation(libs.kotlinx.coroutines.play.services)
 }
