@@ -58,6 +58,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var selectedCategory by remember { mutableStateOf(MarkerCategory.ALL) }
     var isListVisible by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
+    var mapType by remember { mutableStateOf(MapType.SATELLITE) }
 
     // VERY TEMPORARY LIST BEFORE FIRESTORE
     val places = remember {
@@ -171,9 +172,9 @@ fun MapScreen(modifier: Modifier = Modifier) {
             GoogleMap( // GoogleMap creates the map
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
-                properties = MapProperties(mapType = MapType.SATELLITE),
-                uiSettings = MapUiSettings(mapToolbarEnabled = false),
-                onMapClick = { selectedPlace = null }
+                properties = MapProperties(mapType = mapType),
+                uiSettings = MapUiSettings(mapToolbarEnabled = false), // this disables the directions/google maps toolbar when a marker is clicked
+                onMapClick = { selectedPlace = null } // clear selection when tapping map
             ) {
                 // User location marker
                 MarkerComposable(
@@ -194,13 +195,12 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 // fades markers from 1.0 at 15 zoom to 0.0 at 13 zoom
                 val buildingAlpha = ((currentZoom - 13f) / (15f - 13f)).coerceIn(0f, 1f)
 
-                val isSelectionVisible = filteredPlaces.any { it.name == selectedPlace?.name }
-
+                // Render markers (keeping them in composition even if faded avoids logic reset)
                 filteredPlaces.forEach { place ->
                     val isSelected = selectedPlace?.name == place.name
-                    val markerAlpha = if (!isSelectionVisible || isSelected) buildingAlpha else buildingAlpha * 0.3f
+                    val markerAlpha = if (selectedPlace == null || isSelected) buildingAlpha else buildingAlpha * 0.3f
 
-                    key(place.name) {
+                    key(place.location.toString() + place.name) {
                         val markerColor = when(place.category) {
                             MarkerCategory.BUILDING -> Color.Blue
                             MarkerCategory.STUDENT_SERVICE -> Color.Magenta
@@ -214,13 +214,14 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             anchor = Offset(0.5f, 1.0f),
                             onClick = {
                                 selectedPlace = place
-                                true
+                                true // return true to prevent default info window
                             }
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                // Bubbles and text show up when selected when zoomed in
                                 val isZoomedIn = currentZoom >= 16.5f
-                                // Names show if explicitly selected OR if no selection is visible and user is zoomed in
-                                val showBubble = isSelected || (!isSelectionVisible && isZoomedIn)
+                                val showBubble = isSelected || (selectedPlace == null && isZoomedIn)
+                                
                                 if (showBubble) {
                                     Surface(
                                         shape = RoundedCornerShape(3.3.dp), // size of text bubble. reduce if too big
@@ -291,12 +292,16 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 MarkerCategory.entries.forEach { category ->
                     FilterChip(
                         selected = selectedCategory == category,
-                        onClick = { selectedCategory = category },
+                        onClick = {
+                            selectedCategory = category
+                            selectedPlace = null // Clear selection when filter changes
+                        },
                         label = { Text(category.label) },
                         colors = FilterChipDefaults.filterChipColors(
                             containerColor = Color.White.copy(alpha = 0.8f),
@@ -309,7 +314,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
             }
         }
 
-        // This is the list of buildings/services
+        // This is the list of buildings/services and map type toggle
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -371,17 +376,36 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     }
                 }
 
-                // Button to pull out filter
-                FloatingActionButton(
-                    onClick = { isListVisible = !isListVisible },
-                    containerColor = Color.White,
-                    contentColor = Color.Black,
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isListVisible) Icons.Default.Close else Icons.AutoMirrored.Filled.List,
-                        contentDescription = "Toggle List"
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Button to pull out building list
+                    FloatingActionButton(
+                        onClick = { isListVisible = !isListVisible },
+                        containerColor = Color.White,
+                        contentColor = Color.Black,
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isListVisible) Icons.Default.Close else Icons.AutoMirrored.Filled.List,
+                            contentDescription = "Toggle List"
+                        )
+                    }
+
+                    // Map Toggle Button
+                    FloatingActionButton(
+                        onClick = {
+                            mapType = if (mapType == MapType.SATELLITE) MapType.NORMAL else MapType.SATELLITE
+                        },
+                        containerColor = Color.White,
+                        contentColor = Color.Black,
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (mapType == MapType.SATELLITE) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = "Toggle Map Type"
+                        )
+                    }
                 }
             }
         }
