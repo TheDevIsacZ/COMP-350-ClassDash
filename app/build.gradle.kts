@@ -14,23 +14,25 @@ android {
         }
     }
 
-    val mapsApiKey = project.findProperty("MAPS_API_KEY") as String? ?: ""
+    // Load local.properties once to use for both Keystore and Maps API Key
+    val localProperties = Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { localProperties.load(it) }
+    }
+
+    val mapsApiKey = localProperties["MAPS_API_KEY"]?.toString() 
+        ?: project.findProperty("MAPS_API_KEY")?.toString() 
+        ?: ""
 
     signingConfigs {
         create("shared") {
-            // Load local.properties manually
-            val keystorePropertiesFile = rootProject.file("local.properties")
-            val keystoreProperties = Properties()
-            if (keystorePropertiesFile.exists()) {
-                keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
-            }
-
-            val keystorePath = keystoreProperties["RELEASE_STORE_FILE"]?.toString() ?: "team-release-key.jks"
+            val keystorePath = localProperties["RELEASE_STORE_FILE"]?.toString() ?: "team-release-key.jks"
             // Assumes the .jks file is in the project root
             storeFile = file("../$keystorePath")
-            storePassword = keystoreProperties["RELEASE_STORE_PASSWORD"]?.toString()
-            keyAlias = keystoreProperties["RELEASE_KEY_ALIAS"]?.toString()
-            keyPassword = keystoreProperties["RELEASE_KEY_PASSWORD"]?.toString()
+            storePassword = localProperties["RELEASE_STORE_PASSWORD"]?.toString()
+            keyAlias = localProperties["RELEASE_KEY_ALIAS"]?.toString()
+            keyPassword = localProperties["RELEASE_KEY_PASSWORD"]?.toString()
         }
     }
 
