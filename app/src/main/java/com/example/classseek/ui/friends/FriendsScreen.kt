@@ -33,6 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.classseek.data.ChatListItem
@@ -99,6 +100,28 @@ fun FriendsScreen(
             }
         )
         return
+    }
+
+    DisposableEffect(myUid) {
+        val uid = myUid
+        if (uid == null) {
+            onDispose { }
+        } else {
+            val registration = repo.listenToMyChats(
+                myUid = uid,
+                onSnapshot = { chats ->
+                    myChats.clear()
+                    myChats.addAll(chats)
+                },
+                onError = { e ->
+                    status = e.message ?: "Failed to listen to chats"
+                }
+            )
+
+            onDispose {
+                registration.remove()
+            }
+        }
     }
 
     LazyColumn(

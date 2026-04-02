@@ -30,6 +30,8 @@ class ChatRepository(private val db: FirebaseFirestore) {
 
     private val groupThreadsRef = db.collection("groupThreads")
 
+    private val usersRef = db.collection("users")
+
     /**
      * Open an existing DM between uidA and uidB, or create it if absent.
      * Returns the chatId.
@@ -47,11 +49,13 @@ class ChatRepository(private val db: FirebaseFirestore) {
             val chatId = existing.getString("chatId")
 
             if (!chatId.isNullOrBlank()) {
-                val myMemberRef = chatsRef.document(chatId)
+
+                /** val myMemberRef = chatsRef.document(chatId)
                     .collection("members")
                     .document(uidA)
+                */
 
-                myMemberRef.update("hidden", false).await()
+                inboxRef(uidA,chatId).update("hidden", false).await()
                 return chatId
             }
         }
@@ -81,6 +85,24 @@ class ChatRepository(private val db: FirebaseFirestore) {
 
             tx.set(memberARef, mapOf("role" to "member", "joinedAt" to now, "lastReadAt" to null))
             tx.set(memberBRef, mapOf("role" to "member", "joinedAt" to now, "lastReadAt" to null))
+
+            tx.set(inboxRef(a, newChatRef.id), mapOf(
+                "chatId" to newChatRef.id,
+                "title" to finalTitle,
+                "type" to "dm",
+                "lastMessageText" to null,
+                "lastMessageAt" to null,
+                "hidden" to false
+            ))
+
+            tx.set(inboxRef(b, newChatRef.id), mapOf(
+                "chatId" to newChatRef.id,
+                "title" to finalTitle,
+                "type" to "dm",
+                "lastMessageText" to null,
+                "lastMessageAt" to null,
+                "hidden" to false
+            ))
 
             tx.set(dmDocRef, mapOf(
                 "chatId" to newChatRef.id,
@@ -121,11 +143,14 @@ class ChatRepository(private val db: FirebaseFirestore) {
         if (existing.exists()) {
             val chatId = existing.getString("chatId")
             if (!chatId.isNullOrBlank()) {
+
+                /**
                 val myMemberRef = chatsRef.document(chatId)
                     .collection("members")
                     .document(createdBy)
+                */
 
-                myMemberRef.update("hidden", false).await()
+                inboxRef(createdBy, chatId).update("hidden", false).await()
                 return chatId
             }
         }
@@ -157,6 +182,14 @@ class ChatRepository(private val db: FirebaseFirestore) {
                     "lastReadAt" to null,
                     "hidden" to false
                 ))
+                    tx.set(inboxRef(uid, chatRef.id), mapOf(
+                        "chatId" to chatRef.id,
+                        "title" to title,
+                        "type" to "group",
+                        "lastMessageText" to null,
+                        "lastMessageAt" to null,
+                        "hidden" to false
+                    ))
             }
 
             tx.set(groupThreadRef, mapOf(
@@ -172,37 +205,23 @@ class ChatRepository(private val db: FirebaseFirestore) {
 
     /**
      * Get a list of chat summaries for the current user.
-     * Checks for Hidden attribute to decide wether to display chat
+     * Checks for Hidden attribute to decide whether to display chat
      */
     suspend fun getMyChats(myUid: String): List<ChatListItem> {
-        val snap = chatsRef
-            .whereArrayContains("memberIds", myUid)
+        val snap = usersRef.document(myUid)
+            .collection("inbox")
+            .whereEqualTo("hidden", false)
             .orderBy("lastMessageAt", Query.Direction.DESCENDING)
             .get()
             .await()
 
-        val result = mutableListOf<ChatListItem>()
-
-        for (doc in snap.documents) {
-            val memberSnap = doc.reference
-                .collection("members")
-                .document(myUid)
-                .get()
-                .await()
-
-            val hidden = memberSnap.getBoolean("hidden") ?: false
-            if (hidden) continue
-
-            result.add(
-                ChatListItem(
-                    id = doc.id,
-                    title = doc.getString("title") ?: "Untitled Chat",
-                    lastMessageText = doc.getString("lastMessageText")
-                )
+        return snap.documents.map { doc ->
+            ChatListItem(
+                id = doc.id,
+                title = doc.getString("title") ?: "Untitled Chat",
+                lastMessageText = doc.getString("lastMessageText")
             )
         }
-
-        return result
     }
 
     /**
@@ -223,6 +242,9 @@ class ChatRepository(private val db: FirebaseFirestore) {
         val chatRef = chatsRef.document(chatId)
         val messageRef = chatRef.collection("messages").document(messageId)
 
+        val chatSnap = chatRef.get().await()
+        val memberIds = (chatSnap.get("memberIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+
         val messageData = mapOf(
             "senderId" to senderId,
             "type" to "text",
@@ -238,11 +260,26 @@ class ChatRepository(private val db: FirebaseFirestore) {
             "lastMessageText" to text,
             "lastMessageSenderId" to senderId
         ))
+
+        memberIds.forEach { uid ->
+            batch.set(
+                inboxRef(uid, chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to (chatSnap.getString("title") ?: "Chat"),
+                    "type" to (chatSnap.getString("type") ?: "dm"),
+                    "lastMessageText" to text,
+                    "lastMessageAt" to now
+                ),
+                com.google.firebase.firestore.SetOptions.merge()
+            )
+        }
+
         batch.commit().await()
     }
 
     /**
-     * Listen to recent messages in realtime.
+     * Listen to recent messages in realtime for chat logs.
      * Returns a ListenerRegistration; call remove() when the screen is disposed.
      */
     fun listenMessagesRealtime(
@@ -269,6 +306,41 @@ class ChatRepository(private val db: FirebaseFirestore) {
             val messages = docs.mapNotNull { docToMessage(it) }
             onSnapshot(messages, docs)
         }
+    }
+
+    /**
+     * This function specifically updates the most recent messages of each saved chat in the Friends Screen
+     */
+    fun listenToMyChats(
+        myUid: String,
+        onSnapshot: (List<ChatListItem>) -> Unit,
+        onError: ((Exception) -> Unit)? = null
+    ): ListenerRegistration {
+        return usersRef.document(myUid)
+            .collection("inbox")
+            .whereEqualTo("hidden", false)
+            .orderBy("lastMessageAt", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, err ->
+                if (err != null) {
+                    onError?.invoke(err)
+                    return@addSnapshotListener
+                }
+
+                if (snap == null) {
+                    onSnapshot(emptyList())
+                    return@addSnapshotListener
+                }
+
+                val chats = snap.documents.map { doc ->
+                    ChatListItem(
+                        id = doc.id,
+                        title = doc.getString("title") ?: "Untitled Chat",
+                        lastMessageText = doc.getString("lastMessageText")
+                    )
+                }
+
+                onSnapshot(chats)
+            }
     }
 
     /**
@@ -316,16 +388,22 @@ class ChatRepository(private val db: FirebaseFirestore) {
      * hides chats from users without deleting them from database
      */
     suspend fun hideChatForUser(chatId: String, myUid: String) {
+
+        /**
         val memberRef = chatsRef.document(chatId)
             .collection("members")
             .document(myUid)
+        */
 
-        memberRef.update("hidden", true).await()
+        inboxRef(myUid,chatId).update("hidden", true).await()
     }
 
     suspend fun getChatTitle(chatId: String): String {
         val doc = chatsRef.document(chatId).get().await()
         return doc.getString("title") ?: "Chat"
     }
+
+    private fun inboxRef(uid: String, chatId: String) =
+        usersRef.document(uid).collection("inbox").document(chatId)
 
 }
