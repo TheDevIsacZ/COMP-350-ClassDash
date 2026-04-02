@@ -147,7 +147,7 @@ fun FriendsScreen(
 
                         val targetUid = otherUid.trim()
                         val defaultTitle = "Chat ${myChats.size + 1}"
-                        val finalTitle = if (chatTitle.trim().isBlank()) {
+                        val firstTitle = if (chatTitle.trim().isBlank()) {
                             defaultTitle
                         } else {
                             chatTitle.trim()
@@ -156,8 +156,10 @@ fun FriendsScreen(
                         val createdChatId = repo.openOrCreateDm(
                             uidA = uid,
                             uidB = targetUid,
-                            title = finalTitle
+                            title = firstTitle
                         )
+
+                        val finalTitle = repo.getChatTitle(createdChatId)
 
                         refreshChats()
                         selectedChatId = createdChatId

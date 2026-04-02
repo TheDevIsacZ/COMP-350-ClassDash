@@ -244,4 +244,9 @@ class ChatRepository(private val db: FirebaseFirestore) {
         memberRef.update("hidden", true).await()
     }
 
+    suspend fun getChatTitle(chatId: String): String {
+        val doc = chatsRef.document(chatId).get().await()
+        return doc.getString("title") ?: "Chat"
+    }
+
 }
