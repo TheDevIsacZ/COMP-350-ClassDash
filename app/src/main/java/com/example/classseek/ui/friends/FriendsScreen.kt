@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
@@ -62,6 +63,12 @@ fun FriendsScreen(
 
     val myChats = remember { mutableStateListOf<ChatListItem>() }
 
+    /**
+    Temporary vars for temp group chat UI to test groupchat implementation
+     */
+    var groupTitle by remember { mutableStateOf("") }
+    var groupMembersInput by remember { mutableStateOf("") }
+
     suspend fun refreshChats() {
         val uid = auth.currentUser?.uid ?: return
         val chats = repo.getMyChats(uid)
@@ -94,95 +101,194 @@ fun FriendsScreen(
         return
     }
 
-    Column(
+    LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("=== DEBUG INFO ===")
-        Text("Signed in: $isSignedIn")
-        Text("My UID: ${myUid ?: "NULL"}")
+        item {
+            Text("=== DEBUG INFO ===")
+            Text("Signed in: $isSignedIn")
+            Text("My UID: ${myUid ?: "NULL"}")
 
-        Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(16.dp))
 
-        Text(
-            text = "Create DM",
-            style = MaterialTheme.typography.headlineSmall
-        )
+            Text(
+                text = "Create DM",
+                style = MaterialTheme.typography.headlineSmall
+            )
+        }
+        item {
+            Spacer(Modifier.height(12.dp))
 
-        Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = otherUid,
+                onValueChange = { otherUid = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Enter friend's UID") },
+                singleLine = true,
+                enabled = !working
+            )
+        }
 
-        OutlinedTextField(
-            value = otherUid,
-            onValueChange = { otherUid = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Enter friend's UID") },
-            singleLine = true,
-            enabled = !working
-        )
+        item {
+            Spacer(Modifier.height(8.dp))
 
-        Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = chatTitle,
+                onValueChange = { chatTitle = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Chat name (optional)") },
+                singleLine = true,
+                enabled = !working
+            )
+        }
 
-        OutlinedTextField(
-            value = chatTitle,
-            onValueChange = { chatTitle = it },
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("Chat name (optional)") },
-            singleLine = true,
-            enabled = !working
-        )
+        item {
+            Spacer(Modifier.height(12.dp))
 
-        Spacer(Modifier.height(12.dp))
+            Button(
+                enabled = otherUid.trim().isNotEmpty() && !working && isSignedIn,
+                onClick = {
+                    scope.launch {
+                        try {
+                            working = true
+                            status = null
 
-        Button(
-            enabled = otherUid.trim().isNotEmpty() && !working && isSignedIn,
-            onClick = {
-                scope.launch {
-                    try {
-                        working = true
-                        status = null
+                            val uid = auth.currentUser?.uid
+                                ?: throw Exception("User not signed in")
 
-                        val uid = auth.currentUser?.uid
-                            ?: throw Exception("User not signed in")
+                            val targetUid = otherUid.trim()
+                            val defaultTitle = "Chat ${myChats.size + 1}"
+                            val firstTitle = if (chatTitle.trim().isBlank()) {
+                                defaultTitle
+                            } else {
+                                chatTitle.trim()
+                            }
 
-                        val targetUid = otherUid.trim()
-                        val defaultTitle = "Chat ${myChats.size + 1}"
-                        val firstTitle = if (chatTitle.trim().isBlank()) {
-                            defaultTitle
-                        } else {
-                            chatTitle.trim()
+                            val createdChatId = repo.openOrCreateDm(
+                                uidA = uid,
+                                uidB = targetUid,
+                                title = firstTitle
+                            )
+
+                            val finalTitle = repo.getChatTitle(createdChatId)
+
+                            refreshChats()
+                            selectedChatId = createdChatId
+                            selectedChatTitle = finalTitle
+                            chatTitle = ""
+                            otherUid = ""
+
+                        } catch (e: Exception) {
+                            status = e.message ?: "Failed to create DM"
+                        } finally {
+                            working = false
                         }
-
-                        val createdChatId = repo.openOrCreateDm(
-                            uidA = uid,
-                            uidB = targetUid,
-                            title = firstTitle
-                        )
-
-                        val finalTitle = repo.getChatTitle(createdChatId)
-
-                        refreshChats()
-                        selectedChatId = createdChatId
-                        selectedChatTitle = finalTitle
-                        chatTitle = ""
-                        otherUid = ""
-
-                    } catch (e: Exception) {
-                        status = e.message ?: "Failed to create DM"
-                    } finally {
-                        working = false
                     }
                 }
+            ) {
+                Text(if (working) "Working…" else "Create DM")
             }
-        ) {
-            Text(if (working) "Working…" else "Create DM")
+
+            if (status != null) {
+                Spacer(Modifier.height(12.dp))
+                Text("Status: $status")
+            }
         }
 
-        if (status != null) {
+        /**
+        temporary implementation of groupchat UI
+         */
+        item {
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = "Create Group Chat",
+                style = MaterialTheme.typography.headlineSmall
+            )
+        }
+
+        item {
             Spacer(Modifier.height(12.dp))
-            Text("Status: $status")
+
+            OutlinedTextField(
+                value = groupTitle,
+                onValueChange = { groupTitle = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Group name") },
+                singleLine = true,
+                enabled = !working
+            )
         }
 
+        item {
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = groupMembersInput,
+                onValueChange = { groupMembersInput = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Enter member UIDs, comma separated") },
+                enabled = !working
+            )
+        }
+
+        item {
+            Spacer(Modifier.height(12.dp))
+
+            Button(
+                enabled = groupTitle.trim().isNotEmpty() && !working && isSignedIn,
+                onClick = {
+                    scope.launch {
+                        try {
+                            working = true
+                            status = null
+
+                            val myUid = auth.currentUser?.uid
+                                ?: throw Exception("User not signed in")
+
+                            val otherMembers = groupMembersInput
+                                .split(",")
+                                .map { it.trim() }
+                                .filter { it.isNotBlank() }
+
+                            val allMembers = (listOf(myUid) + otherMembers).distinct()
+
+                            if (allMembers.size < 2) {
+                                throw Exception("Enter at least one other UID")
+                            }
+
+                            val newChatId = repo.openOrCreateGroupChat(
+                                createdBy = myUid,
+                                memberIds = allMembers,
+                                title = groupTitle.trim()
+                            )
+
+                            val actualTitle = repo.getChatTitle(newChatId)
+
+                            refreshChats()
+                            selectedChatId = newChatId
+                            selectedChatTitle = actualTitle
+
+                            groupTitle = ""
+                            groupMembersInput = ""
+
+                        } catch (e: Exception) {
+                            status = e.message ?: "Failed to create group"
+                        } finally {
+                            working = false
+                        }
+                    }
+                }
+            ) {
+                Text(if (working) "Working…" else "Create Group")
+            }
+        }
+
+        item {
         Spacer(Modifier.height(20.dp))
         HorizontalDivider()
         Spacer(Modifier.height(12.dp))
@@ -191,15 +297,17 @@ fun FriendsScreen(
             text = "Saved Chats",
             style = MaterialTheme.typography.headlineSmall
         )
+            }
 
+        item {
         Spacer(Modifier.height(8.dp))
+            }
 
         if (myChats.isEmpty()) {
-            Text("No chats yet.")
+            item {
+                Text("No chats yet.")
+            }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth()
-            ) {
                 items(myChats, key = { it.id }) { chat ->
                     Card(
                         modifier = Modifier
@@ -268,4 +376,3 @@ fun FriendsScreen(
             }
         }
     }
-}

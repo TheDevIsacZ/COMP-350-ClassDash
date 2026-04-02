@@ -28,6 +28,8 @@ class ChatRepository(private val db: FirebaseFirestore) {
     private val chatsRef = db.collection("chats")
     private val dmThreadsRef = db.collection("dmThreads")
 
+    private val groupThreadsRef = db.collection("groupThreads")
+
     /**
      * Open an existing DM between uidA and uidB, or create it if absent.
      * Returns the chatId.
@@ -89,6 +91,83 @@ class ChatRepository(private val db: FirebaseFirestore) {
         }.await()
 
         return newChatRef.id
+    }
+
+    /**
+    Possibly temporary until real user accounts are created.
+     */
+    private fun buildGroupKey(memberIds: List<String>): String {
+        return memberIds
+            .distinct()
+            .sorted()
+            .joinToString("_")
+    }
+
+    suspend fun openOrCreateGroupChat(
+        createdBy: String,
+        memberIds: List<String>,
+        title: String,
+        photoURL: String? = null
+    ): String {
+        require(memberIds.isNotEmpty()) { "memberIds cannot be empty" }
+
+        val uniqueMembers = memberIds.distinct()
+        require(uniqueMembers.contains(createdBy)) { "memberIds should include createdBy" }
+
+        val groupKey = buildGroupKey(uniqueMembers)
+        val groupThreadRef = groupThreadsRef.document(groupKey)
+
+        val existing = groupThreadRef.get().await()
+        if (existing.exists()) {
+            val chatId = existing.getString("chatId")
+            if (!chatId.isNullOrBlank()) {
+                val myMemberRef = chatsRef.document(chatId)
+                    .collection("members")
+                    .document(createdBy)
+
+                myMemberRef.update("hidden", false).await()
+                return chatId
+            }
+        }
+
+        val chatRef = chatsRef.document()
+
+        db.runTransaction { tx ->
+            val now = Timestamp.now()
+
+            tx.set(chatRef, mapOf(
+                "type" to "group",
+                "title" to title,
+                "memberIds" to uniqueMembers,
+                "createdAt" to now,
+                "createdBy" to createdBy,
+                "memberCount" to uniqueMembers.size,
+                "photoURL" to (photoURL ?: ""),
+                "lastMessageAt" to null,
+                "lastMessageText" to null,
+                "lastMessageSenderId" to null
+            ))
+
+            uniqueMembers.forEach { uid ->
+                val role = if (uid == createdBy) "owner" else "member"
+                val memberRef = chatRef.collection("members").document(uid)
+                tx.set(memberRef, mapOf(
+                    "role" to role,
+                    "joinedAt" to now,
+                    "lastReadAt" to null,
+                    "hidden" to false
+                ))
+            }
+
+            tx.set(groupThreadRef, mapOf(
+                "chatId" to chatRef.id,
+                "groupKey" to groupKey,
+                "memberIds" to uniqueMembers,
+                "createdAt" to now
+            ))
+        }.await()
+
+        return chatRef.id
     }
 
     /**
