@@ -49,12 +49,6 @@ class ChatRepository(private val db: FirebaseFirestore) {
             val chatId = existing.getString("chatId")
 
             if (!chatId.isNullOrBlank()) {
-
-                /** val myMemberRef = chatsRef.document(chatId)
-                    .collection("members")
-                    .document(uidA)
-                */
-
                 inboxRef(uidA,chatId).update("hidden", false).await()
                 return chatId
             }
@@ -143,13 +137,6 @@ class ChatRepository(private val db: FirebaseFirestore) {
         if (existing.exists()) {
             val chatId = existing.getString("chatId")
             if (!chatId.isNullOrBlank()) {
-
-                /**
-                val myMemberRef = chatsRef.document(chatId)
-                    .collection("members")
-                    .document(createdBy)
-                */
-
                 inboxRef(createdBy, chatId).update("hidden", false).await()
                 return chatId
             }
@@ -388,13 +375,6 @@ class ChatRepository(private val db: FirebaseFirestore) {
      * hides chats from users without deleting them from database
      */
     suspend fun hideChatForUser(chatId: String, myUid: String) {
-
-        /**
-        val memberRef = chatsRef.document(chatId)
-            .collection("members")
-            .document(myUid)
-        */
-
         inboxRef(myUid,chatId).update("hidden", true).await()
     }
 
