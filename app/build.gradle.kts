@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -12,7 +14,27 @@ android {
         }
     }
 
-    val mapsApiKey = project.findProperty("MAPS_API_KEY") as String? ?: ""
+    // Load local.properties once to use for both Keystore and Maps API Key
+    val localProperties = Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { localProperties.load(it) }
+    }
+
+    val mapsApiKey = localProperties["MAPS_API_KEY"]?.toString() 
+        ?: project.findProperty("MAPS_API_KEY")?.toString() 
+        ?: ""
+
+    signingConfigs {
+        create("shared") {
+            val keystorePath = localProperties["RELEASE_STORE_FILE"]?.toString() ?: "team-release-key.jks"
+            // Assumes the .jks file is in the project root
+            storeFile = file("../$keystorePath")
+            storePassword = localProperties["RELEASE_STORE_PASSWORD"]?.toString()
+            keyAlias = localProperties["RELEASE_KEY_ALIAS"]?.toString()
+            keyPassword = localProperties["RELEASE_KEY_PASSWORD"]?.toString()
+        }
+    }
 
     defaultConfig {
         applicationId = "com.example.classseek"
@@ -29,8 +51,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("shared")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("shared")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
