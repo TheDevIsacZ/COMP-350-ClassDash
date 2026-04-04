@@ -36,20 +36,27 @@ fun ChatScreen(
     val messages = remember(chatId) { mutableStateListOf<Message>() }
     val listState = rememberLazyListState()
 
-    var input by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    var sending by remember { mutableStateOf(false) }
+    var input by remember(chatId) { mutableStateOf("") }
+    var error by remember(chatId) { mutableStateOf<String?>(null) }
+    var sending by remember(chatId) { mutableStateOf(false) }
 
     var initialReadMarked by remember(chatId) { mutableStateOf(false) }
     var initialScrollDone by remember(chatId) { mutableStateOf(false) }
-    var isChatVisible by remember { mutableStateOf(false) }
+    var isChatVisible by remember(chatId) { mutableStateOf(false) }
     var lastMarkedIncomingMessageId by remember(chatId) { mutableStateOf<String?>(null) }
 
     var myLastReadMessageId by remember(chatId) { mutableStateOf<String?>(null) }
     var otherUserLastReadMessageId by remember(chatId) { mutableStateOf<String?>(null) }
 
-    var pendingScrollToOwnMessage by remember(chatId) { mutableStateOf(false) }
-    var lastAutoScrolledToMyMessageId by remember(chatId) { mutableStateOf<String?>(null) }
+    var pendingScrollToMessageId by remember(chatId) { mutableStateOf<String?>(null) }
+    var lastAutoScrolledToMessageId by remember(chatId) { mutableStateOf<String?>(null) }
+
+    // Helps avoid initial-position scroll before my read-state listener has had a chance to respond.
+    var myReadStateLoaded by remember(chatId) { mutableStateOf(false) }
+
+    // Once the user has sent a message in this screen instance,
+    // never allow the initial "scroll to last read" logic to run again.
+    var hasSentMessageThisSession by remember(chatId) { mutableStateOf(false) }
 
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
@@ -66,7 +73,7 @@ fun ChatScreen(
                 otherUserLastReadMessageId == latest.id
     }
 
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, chatId) {
         val observer = LifecycleEventObserver { _, event ->
             isChatVisible = event == Lifecycle.Event.ON_RESUME
         }
@@ -77,6 +84,9 @@ fun ChatScreen(
         }
     }
 
+    /**
+     * Initial mark-read.
+     */
     LaunchedEffect(chatId, myUid, messages.size) {
         val uid = myUid ?: return@LaunchedEffect
         val newest = newestVisible ?: return@LaunchedEffect
@@ -91,6 +101,9 @@ fun ChatScreen(
         }
     }
 
+    /**
+     * While visible, mark newly arrived incoming messages as read.
+     */
     LaunchedEffect(chatId, myUid, isChatVisible, newestVisible?.id) {
         val uid = myUid ?: return@LaunchedEffect
         val newest = newestVisible ?: return@LaunchedEffect
@@ -108,8 +121,27 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size, myLastReadMessageId, chatId) {
-        if (initialScrollDone || messages.isEmpty()) return@LaunchedEffect
+    /**
+     * Initial snap to last-read position.
+     *
+     * IMPORTANT:
+     * - Do not run if a send-scroll is pending.
+     * - Do not run if the user has already sent a message in this session.
+     * - Only run once.
+     */
+    LaunchedEffect(
+        messages.size,
+        myLastReadMessageId,
+        myReadStateLoaded,
+        pendingScrollToMessageId,
+        hasSentMessageThisSession,
+        chatId
+    ) {
+        if (initialScrollDone) return@LaunchedEffect
+        if (messages.isEmpty()) return@LaunchedEffect
+        if (!myReadStateLoaded) return@LaunchedEffect
+        if (pendingScrollToMessageId != null) return@LaunchedEffect
+        if (hasSentMessageThisSession) return@LaunchedEffect
 
         val targetIndex = when {
             myLastReadMessageId != null -> {
@@ -124,25 +156,35 @@ fun ChatScreen(
         }
 
         awaitFrame()
+        awaitFrame()
         listState.scrollToItem(targetIndex)
         initialScrollDone = true
     }
 
-    LaunchedEffect(latestMyMessageId, messages.size, pendingScrollToOwnMessage, sending) {
-        if (!pendingScrollToOwnMessage) return@LaunchedEffect
+    /**
+     * Sent-message snap.
+     *
+     * This has priority over everything else.
+     */
+    LaunchedEffect(messages.size, pendingScrollToMessageId, chatId) {
+        val targetMessageId = pendingScrollToMessageId ?: return@LaunchedEffect
         if (messages.isEmpty()) return@LaunchedEffect
+        if (targetMessageId == lastAutoScrolledToMessageId) return@LaunchedEffect
 
-        val latest = myLatestMessage ?: return@LaunchedEffect
-        if (latest.id == lastAutoScrolledToMyMessageId) return@LaunchedEffect
-
-        awaitFrame()
-        listState.scrollToItem(0)
+        val targetIndex = messages.indexOfFirst { it.id == targetMessageId }
+        if (targetIndex < 0) return@LaunchedEffect
 
         awaitFrame()
-        listState.scrollToItem(0)
+        awaitFrame()
+        listState.scrollToItem(targetIndex)
 
-        lastAutoScrolledToMyMessageId = latest.id
-        pendingScrollToOwnMessage = false
+        // Extra pass for IME/layout changes
+        awaitFrame()
+        listState.scrollToItem(targetIndex)
+
+        lastAutoScrolledToMessageId = targetMessageId
+        pendingScrollToMessageId = null
+        initialScrollDone = true
     }
 
     DisposableEffect(chatId) {
@@ -150,15 +192,8 @@ fun ChatScreen(
             chatId = chatId,
             pageSize = 50,
             onSnapshot = { newMessages, _ ->
-                val sortedMessages = newMessages.sortedWith(
-                    compareByDescending<Message> { it.hasPendingWrites }
-                        .thenByDescending { it.createdAt?.seconds ?: Long.MIN_VALUE }
-                        .thenByDescending { it.createdAt?.nanoseconds ?: Int.MIN_VALUE }
-                        .thenByDescending { it.id }
-                )
-
                 messages.clear()
-                messages.addAll(sortedMessages)
+                messages.addAll(newMessages)
                 error = null
             },
             onError = { e ->
@@ -197,9 +232,11 @@ fun ChatScreen(
                 myUid = myUid,
                 onSnapshot = { lastReadId ->
                     myLastReadMessageId = lastReadId
+                    myReadStateLoaded = true
                 },
                 onError = { e ->
                     error = e.message ?: "My read state listener error"
+                    myReadStateLoaded = true
                 }
             )
 
@@ -238,9 +275,12 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(top = 16.dp, bottom = 16.dp)
+                contentPadding = PaddingValues(top = 16.dp, bottom = 72.dp)
             ) {
-                items(messages, key = { it.id }) { msg ->
+                items(
+                    items = messages,
+                    key = { it.id }
+                ) { msg ->
                     MessageRow(
                         msg = msg,
                         isMine = (myUid != null && msg.senderId == myUid),
@@ -286,19 +326,32 @@ fun ChatScreen(
                         val text = input.trim()
 
                         sending = true
-                        pendingScrollToOwnMessage = true
+                        hasSentMessageThisSession = true
+                        initialScrollDone = true
 
                         scope.launch {
                             try {
-                                repo.sendTextMessage(
+                                val sentMessageId = repo.sendTextMessage(
                                     chatId = chatId,
                                     senderId = uid,
                                     text = text
                                 )
+
+                                // Scroll to the exact message that was sent.
+                                pendingScrollToMessageId = sentMessageId
+
+                                // Keep my own read state aligned with my newest sent message too.
+                                // This prevents late read-state updates from pointing to an older anchor.
+                                try {
+                                    repo.updateMyLastRead(chatId, uid, sentMessageId)
+                                    myLastReadMessageId = sentMessageId
+                                } catch (_: Exception) {
+                                }
+
                                 input = ""
                             } catch (e: Exception) {
                                 error = e.message ?: "Send failed"
-                                pendingScrollToOwnMessage = false
+                                pendingScrollToMessageId = null
                             } finally {
                                 sending = false
                             }

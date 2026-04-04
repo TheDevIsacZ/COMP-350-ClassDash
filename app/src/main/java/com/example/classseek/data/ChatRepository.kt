@@ -7,6 +7,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 import java.util.UUID
 
@@ -48,7 +49,7 @@ class ChatRepository(private val db: FirebaseFirestore) {
      */
     suspend fun openOrCreateDm(uidA: String, uidB: String, title: String?): String {
         val (a, b) = listOf(uidA, uidB).sorted()
-        val dmKey = "${a}_$b"
+        val dmKey = "${a}_${b}"
         val dmDocRef = dmThreadsRef.document(dmKey)
 
         val existing = dmDocRef.get().await()
@@ -262,7 +263,7 @@ class ChatRepository(private val db: FirebaseFirestore) {
 
     /**
      * Send a text message to a chat.
-     * Writes message + updates chat summary in one batch.
+     * Returns the exact messageId so the UI can scroll to the exact message sent.
      *
      * IMPORTANT: Updating each member's inbox/unread count is best done in Cloud Functions.
      */
@@ -271,7 +272,7 @@ class ChatRepository(private val db: FirebaseFirestore) {
         senderId: String,
         text: String,
         replyToMessageId: String? = null
-    ) {
+    ): String {
         val messageId = UUID.randomUUID().toString()
 
         val chatRef = chatsRef.document(chatId)
@@ -311,16 +312,21 @@ class ChatRepository(private val db: FirebaseFirestore) {
                     "lastMessageText" to text,
                     "lastMessageAt" to FieldValue.serverTimestamp()
                 ),
-                com.google.firebase.firestore.SetOptions.merge()
+                SetOptions.merge()
             )
         }
 
         batch.commit().await()
+        return messageId
     }
 
     /**
      * Listen to recent messages in realtime for chat logs.
      * Returns a ListenerRegistration; call remove() when the screen is disposed.
+     *
+     * Firestore already returns these ordered by createdAt DESC.
+     * We preserve snapshot order in the UI instead of re-sorting by hasPendingWrites,
+     * because re-sorting by metadata can make messages jump around.
      */
     fun listenMessagesRealtime(
         chatId: String,
