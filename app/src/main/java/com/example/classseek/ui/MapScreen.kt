@@ -5,15 +5,14 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Looper
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -34,17 +33,20 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.firebase.Firebase
+import com.google.firebase.firestore.firestore
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.launch
 
 enum class MarkerCategory(val label: String, val icon: ImageVector, val color: Color) {
     ALL("All", Icons.Default.Place, Color.Gray),
-    BUILDING("Building", Icons.Default.Business, Color.Blue),
-    STUDENT_SERVICE("Student Service", Icons.Default.School, Color.Magenta),
+    BUILDING("Building", Icons.Default.Business, Color(0xFF2596BE)), // Tealish
+    STUDENT_SERVICE("Student Service", Icons.Default.School, Color(0xFFE580FF)),
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)) // Orange
 }
 
-// temp data class to represent a building on the map
+// Data class to represent a building on the map
 data class MapPlace(
     val name: String,
     val location: LatLng,
@@ -65,46 +67,47 @@ fun MapScreen(modifier: Modifier = Modifier) {
 
     val bounds = remember {
         LatLngBounds(
-            LatLng(34.145212979093237, -119.06231174893205), // Southwest (50% smaller)
-            LatLng(34.17362219575424, -119.02008304987806)  // Northeast (50% smaller)
+            LatLng(34.14521297909, -119.0623117489), // Southwest (50% smaller)
+            LatLng(34.1736221957, -119.0200830498)  // Northeast (50% smaller)
         )
     }
 
-    // VERY TEMPORARY LIST BEFORE FIRESTORE
-    val places = remember {
-        listOf(
-            MapPlace("West Bell Tower", LatLng(34.160741, -119.043908), MarkerCategory.BUILDING),
-            MapPlace("East Bell Tower", LatLng(34.16135, -119.04195), MarkerCategory.BUILDING),
-            MapPlace("Ojai Hall", LatLng(34.16164, -119.04253), MarkerCategory.BUILDING),
-            MapPlace("Sierra Hall", LatLng(34.162240, -119.044611), MarkerCategory.BUILDING),
-            MapPlace("Del Norte Hall", LatLng(34.163146, -119.044120), MarkerCategory.BUILDING),
-            MapPlace("Napa Hall", LatLng(34.163696, -119.045389), MarkerCategory.BUILDING),
-            MapPlace("Student Union", LatLng(34.16147, -119.04409), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Tortillas Grill", LatLng(34.16300, -119.03939), MarkerCategory.DINING),
-            MapPlace("Mom Wong Kitchen", LatLng(34.16280, -119.03934), MarkerCategory.DINING),
-            MapPlace("Richard R Rush Hall", LatLng(34.16259, -119.04344), MarkerCategory.BUILDING),
-            MapPlace("Academic Advising", LatLng(34.16118, -119.04292), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Madera Hall", LatLng(34.16219, -119.04407), MarkerCategory.BUILDING),
-            MapPlace("Solano Hall", LatLng(34.16335, -119.04513), MarkerCategory.BUILDING),
-            MapPlace("Manzanita Hall", LatLng(34.16274, -119.04505), MarkerCategory.BUILDING),
-            MapPlace("Chaparral Hall", LatLng(34.16209, -119.04570), MarkerCategory.BUILDING),
-            MapPlace("Gateway Hall", LatLng(34.16460, -119.04458), MarkerCategory.BUILDING),
-            MapPlace("Marin Hall", LatLng(34.16445, -119.04532), MarkerCategory.BUILDING),
-            MapPlace("El Dorado Hall", LatLng(34.16421, -119.04714), MarkerCategory.BUILDING),
-            MapPlace("Enrollment Ctr", LatLng(34.16407, -119.04224), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Student Health Services", LatLng(34.16399, -119.04109), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("John Spoor Broome Library", LatLng(34.16270, -119.04086), MarkerCategory.BUILDING),
-            MapPlace("Learning Resource Center", LatLng(34.16257, -119.04067), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Malibu Hall", LatLng(34.16122, -119.04098), MarkerCategory.BUILDING),
-            MapPlace("Arroyo Hall", LatLng(34.16038, -119.04496), MarkerCategory.BUILDING),
-            MapPlace("Recreational Center", LatLng(34.16062, -119.04519), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Aliso Hall", LatLng(34.16110, -119.04531), MarkerCategory.BUILDING),
-            MapPlace("Ironwood Hall", LatLng(34.16256, -119.04654), MarkerCategory.BUILDING),
-            MapPlace("Modoc Hall", LatLng(34.16408, -119.04839), MarkerCategory.BUILDING),
-            MapPlace("Islands Cafe", LatLng(34.16031, -119.04186), MarkerCategory.DINING),
-            MapPlace("Anacapa Village", LatLng(34.15938, -119.04491), MarkerCategory.BUILDING),
-            MapPlace("Lindero Hall", LatLng(34.15948, -119.04143), MarkerCategory.BUILDING),
-        )
+    // List of places loaded from Firestore
+    var places by remember { mutableStateOf<List<MapPlace>>(emptyList()) }
+
+    // Fetch data from Firestore
+    LaunchedEffect(Unit) {
+        val db = Firebase.firestore
+        db.collection("mapScreenData")
+            .get()
+            .addOnSuccessListener { result ->
+                val fetchedPlaces = result.mapNotNull { doc ->
+                    try {
+                        val name = doc.getString("name") ?: return@mapNotNull null
+                        val lat = doc.getDouble("latitude") ?: 0.0
+                        val lng = doc.getDouble("longitude") ?: 0.0
+                        val markerType = doc.getString("markerType") ?: "BUILDING"
+                        
+                        MapPlace(
+                            name = name,
+                            location = LatLng(lat, lng),
+                            category = try {
+                                MarkerCategory.valueOf(markerType)
+                            } catch (e: Exception) {
+                                MarkerCategory.BUILDING
+                            }
+                        )
+                    } catch (e: Exception) {
+                        Log.e("MapScreen", "Error parsing document ${doc.id}", e)
+                        null
+                    }
+                }
+                places = fetchedPlaces
+                Log.d("MapScreen", "Loaded ${places.size} places from Firestore")
+            }
+            .addOnFailureListener { e ->
+                Log.e("MapScreen", "Error fetching places from Firestore", e)
+            }
     }
 
     // fusedLocationClient is for access to Google Play services location API
@@ -170,7 +173,31 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 properties = MapProperties(
                     mapType = mapType,
                     latLngBoundsForCameraTarget = bounds,
-                    minZoomPreference = 14.5f
+                    minZoomPreference = 14.5f,
+                    mapStyleOptions = MapStyleOptions(
+                        """
+                        [
+                          {
+                            "elementType": "labels",
+                            "stylers": [
+                              { "visibility": "off" }
+                            ]
+                          },
+                          {
+                            "featureType": "poi",
+                            "stylers": [
+                              { "visibility": "off" }
+                            ]
+                          },
+                          {
+                            "featureType": "transit",
+                            "stylers": [
+                              { "visibility": "off" }
+                            ]
+                          }
+                        ]
+                        """.trimIndent()
+                    )
                 ),
                 uiSettings = MapUiSettings(mapToolbarEnabled = false), // this disables the directions/google maps toolbar when a marker is clicked
                 onMapClick = { selectedPlace = null } // clear selection when tapping map
@@ -184,7 +211,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     Icon(
                         imageVector = Icons.Default.PersonPinCircle,
                         contentDescription = null,
-                        tint = Color.Red,
+                        tint = Color(0x80FF0000), // Red with 50% opacity (#80ff0000)
                         modifier = Modifier.size(24.dp) // size of marker. reduce if too big
                     )
                 }
@@ -203,7 +230,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         1.0f
                     }
 
-                    key(place.location.toString() + place.name) {
+                    key(place.name) {
                         MarkerComposable(
                             state = rememberMarkerState(position = place.location),
                             alpha = markerAlpha,
@@ -285,7 +312,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { 
+                            IconButton(onClick = {
                                 searchQuery = ""
                                 selectedCategory = MarkerCategory.ALL
                                 selectedPlace = null
@@ -440,7 +467,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
                     ) {
                         Icon(
-                            imageVector = if (mapType == MapType.SATELLITE) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            imageVector = Icons.Default.Visibility,
                             contentDescription = "Toggle Map Type"
                         )
                     }
