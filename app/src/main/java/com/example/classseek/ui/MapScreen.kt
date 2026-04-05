@@ -211,7 +211,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     Icon(
                         imageVector = Icons.Default.PersonPinCircle,
                         contentDescription = null,
-                        tint = Color(0x80FF0000), // Red with 50% opacity (#80ff0000)
+                        tint = Color(0xffff6347), // Red with 50% opacity
                         modifier = Modifier.size(24.dp) // size of marker. reduce if too big
                     )
                 }
