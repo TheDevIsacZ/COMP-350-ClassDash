@@ -5,15 +5,14 @@ import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Looper
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -24,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -32,17 +32,21 @@ import com.google.android.gms.location.*
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.gms.maps.model.MapStyleOptions
+import com.google.firebase.Firebase
+import com.google.firebase.firestore.firestore
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.launch
 
-enum class MarkerCategory(val label: String) {
-    ALL("All"),
-    BUILDING("Building"),
-    STUDENT_SERVICE("Student Service"),
-    DINING("Dining")
+enum class MarkerCategory(val label: String, val icon: ImageVector, val color: Color) {
+    ALL("All", Icons.Default.Place, Color.Gray),
+    BUILDING("Building", Icons.Default.Business, Color(0xFF2596BE)), // Tealish
+    STUDENT_SERVICE("Student Service", Icons.Default.School, Color(0xFFE580FF)),
+    DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)) // Orange
 }
 
-// temp data class to represent a building on the map
+// Data class to represent a building on the map
 data class MapPlace(
     val name: String,
     val location: LatLng,
@@ -58,57 +62,52 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var selectedCategory by remember { mutableStateOf(MarkerCategory.ALL) }
     var isListVisible by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
+    var mapType by remember { mutableStateOf(MapType.SATELLITE) }
+    var isFilterMenuExpanded by remember { mutableStateOf(false) }
 
-    // VERY TEMPORARY LIST BEFORE FIRESTORE
-    val places = remember {
-        listOf(
-            MapPlace("West Bell Tower", LatLng(34.160741, -119.043908), MarkerCategory.BUILDING),
-            MapPlace("East Bell Tower", LatLng(34.16135, -119.04195), MarkerCategory.BUILDING),
-            MapPlace("Ojai Hall", LatLng(34.16164, -119.04253), MarkerCategory.BUILDING),
-            MapPlace("Sierra Hall", LatLng(34.162240, -119.044611), MarkerCategory.BUILDING),
-            MapPlace("Del Norte Hall", LatLng(34.163146, -119.044120), MarkerCategory.BUILDING),
-            MapPlace("Napa Hall", LatLng(34.163696, -119.045389), MarkerCategory.BUILDING),
-            MapPlace("Student Union", LatLng(34.16147, -119.04409), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Tortillas Grill", LatLng(34.16300, -119.03939), MarkerCategory.DINING),
-            MapPlace("Mom Wong Kitchen", LatLng(34.16280, -119.03934), MarkerCategory.DINING),
-            MapPlace("Richard R Rush Hall", LatLng(34.16259, -119.04344), MarkerCategory.BUILDING),
-            MapPlace("Academic Advising", LatLng(34.16118, -119.04292), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Madera Hall", LatLng(34.16219, -119.04407), MarkerCategory.BUILDING),
-            MapPlace("Solano Hall", LatLng(34.16335, -119.04513), MarkerCategory.BUILDING),
-            MapPlace("Manzanita Hall", LatLng(34.16274, -119.04505), MarkerCategory.BUILDING),
-            MapPlace("Chaparral Hall", LatLng(34.16209, -119.04570), MarkerCategory.BUILDING),
-            MapPlace("Gateway Hall", LatLng(34.16460, -119.04458), MarkerCategory.BUILDING),
-            MapPlace("Marin Hall", LatLng(34.16445, -119.04532), MarkerCategory.BUILDING),
-            MapPlace("El Dorado Hall", LatLng(34.16421, -119.04714), MarkerCategory.BUILDING),
-            MapPlace("Enrollment Ctr", LatLng(34.16407, -119.04224), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Student Health Services", LatLng(34.16399, -119.04109), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("John Spoor Broome Library", LatLng(34.16270, -119.04086), MarkerCategory.BUILDING),
-            MapPlace("Learning Resource Center", LatLng(34.16257, -119.04067), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Malibu Hall", LatLng(34.16122, -119.04098), MarkerCategory.BUILDING),
-            MapPlace("Arroyo Hall", LatLng(34.16038, -119.04496), MarkerCategory.BUILDING),
-            MapPlace("Recreational Center", LatLng(34.16062, -119.04519), MarkerCategory.STUDENT_SERVICE),
-            MapPlace("Aliso Hall", LatLng(34.16110, -119.04531), MarkerCategory.BUILDING),
-            MapPlace("Chaparral Hall", LatLng(34.16207, -119.04566), MarkerCategory.BUILDING),
-            MapPlace("Ironwood Hall", LatLng(34.16256, -119.04654), MarkerCategory.BUILDING),
-            MapPlace("Modoc Hall", LatLng(34.16408, -119.04839), MarkerCategory.BUILDING),
-            MapPlace("Islands Cafe", LatLng(34.16031, -119.04186), MarkerCategory.DINING),
-            MapPlace("Anacapa Village", LatLng(34.15938, -119.04491), MarkerCategory.BUILDING),
-            MapPlace("Lindero Hall", LatLng(34.15948, -119.04143), MarkerCategory.BUILDING),
+    val bounds = remember {
+        LatLngBounds(
+            LatLng(34.14521297909, -119.0623117489), // Southwest (50% smaller)
+            LatLng(34.1736221957, -119.0200830498)  // Northeast (50% smaller)
         )
     }
 
-    // Filter places is used to update the list of places currently displayed on map (because of filter AND selection)
-    val filteredPlaces = remember(searchQuery, selectedCategory) {
-        places.filter { place ->
-            val matchesSearch = place.name.contains(searchQuery, ignoreCase = true)
-            val matchesCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
-            matchesSearch && matchesCategory
-        }
-    }
+    // List of places loaded from Firestore
+    var places by remember { mutableStateOf<List<MapPlace>>(emptyList()) }
 
-    // Immediately clear selection when user filters or searches to avoid "ghost" dimmed states
-    LaunchedEffect(searchQuery, selectedCategory) {
-        selectedPlace = null
+    // Fetch data from Firestore
+    LaunchedEffect(Unit) {
+        val db = Firebase.firestore
+        db.collection("mapScreenData")
+            .get()
+            .addOnSuccessListener { result ->
+                val fetchedPlaces = result.mapNotNull { doc ->
+                    try {
+                        val name = doc.getString("name") ?: return@mapNotNull null
+                        val lat = doc.getDouble("latitude") ?: 0.0
+                        val lng = doc.getDouble("longitude") ?: 0.0
+                        val markerType = doc.getString("markerType") ?: "BUILDING"
+                        
+                        MapPlace(
+                            name = name,
+                            location = LatLng(lat, lng),
+                            category = try {
+                                MarkerCategory.valueOf(markerType)
+                            } catch (e: Exception) {
+                                MarkerCategory.BUILDING
+                            }
+                        )
+                    } catch (e: Exception) {
+                        Log.e("MapScreen", "Error parsing document ${doc.id}", e)
+                        null
+                    }
+                }
+                places = fetchedPlaces
+                Log.d("MapScreen", "Loaded ${places.size} places from Firestore")
+            }
+            .addOnFailureListener { e ->
+                Log.e("MapScreen", "Error fetching places from Firestore", e)
+            }
     }
 
     // fusedLocationClient is for access to Google Play services location API
@@ -171,9 +170,37 @@ fun MapScreen(modifier: Modifier = Modifier) {
             GoogleMap( // GoogleMap creates the map
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
-                properties = MapProperties(mapType = MapType.SATELLITE),
-                uiSettings = MapUiSettings(mapToolbarEnabled = false),
-                onMapClick = { selectedPlace = null }
+                properties = MapProperties(
+                    mapType = mapType,
+                    latLngBoundsForCameraTarget = bounds,
+                    minZoomPreference = 14.5f,
+                    mapStyleOptions = MapStyleOptions(
+                        """
+                        [
+                          {
+                            "elementType": "labels",
+                            "stylers": [
+                              { "visibility": "off" }
+                            ]
+                          },
+                          {
+                            "featureType": "poi",
+                            "stylers": [
+                              { "visibility": "off" }
+                            ]
+                          },
+                          {
+                            "featureType": "transit",
+                            "stylers": [
+                              { "visibility": "off" }
+                            ]
+                          }
+                        ]
+                        """.trimIndent()
+                    )
+                ),
+                uiSettings = MapUiSettings(mapToolbarEnabled = false), // this disables the directions/google maps toolbar when a marker is clicked
+                onMapClick = { selectedPlace = null } // clear selection when tapping map
             ) {
                 // User location marker
                 MarkerComposable(
@@ -182,63 +209,55 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     onClick = { true }
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Place,
+                        imageVector = Icons.Default.PersonPinCircle,
                         contentDescription = null,
-                        tint = Color.Red,
+                        tint = Color(0xffff6347), // Red with 50% opacity
                         modifier = Modifier.size(24.dp) // size of marker. reduce if too big
                     )
                 }
 
-                // Observing zoom level directly from state to ensure markers react to zooming
-                val currentZoom = cameraPositionState.position.zoom
-                // fades markers from 1.0 at 15 zoom to 0.0 at 13 zoom
-                val buildingAlpha = ((currentZoom - 13f) / (15f - 13f)).coerceIn(0f, 1f)
-
-                val isSelectionVisible = filteredPlaces.any { it.name == selectedPlace?.name }
-
-                filteredPlaces.forEach { place ->
+                // Render markers (all of them are rendered, but some may be transparent)
+                places.forEach { place ->
                     val isSelected = selectedPlace?.name == place.name
-                    val markerAlpha = if (!isSelectionVisible || isSelected) buildingAlpha else buildingAlpha * 0.3f
+                    val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
+                    
+                    // Determine alpha based on selection and category filter
+                    val markerAlpha = if (selectedPlace != null) {
+                        if (isSelected) 1.0f else 0.35f
+                    } else if (selectedCategory != MarkerCategory.ALL) {
+                        if (isInSelectedCategory) 1.0f else 0.35f
+                    } else {
+                        1.0f
+                    }
 
                     key(place.name) {
-                        val markerColor = when(place.category) {
-                            MarkerCategory.BUILDING -> Color.Blue
-                            MarkerCategory.STUDENT_SERVICE -> Color.Magenta
-                            MarkerCategory.DINING -> Color(0xFFFFA500) // Orange
-                            else -> Color.Gray
-                        }
-
                         MarkerComposable(
                             state = rememberMarkerState(position = place.location),
                             alpha = markerAlpha,
                             anchor = Offset(0.5f, 1.0f),
                             onClick = {
                                 selectedPlace = place
-                                true
+                                true // return true to prevent default info window
                             }
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                val isZoomedIn = currentZoom >= 16.5f
-                                // Names show if explicitly selected OR if no selection is visible and user is zoomed in
-                                val showBubble = isSelected || (!isSelectionVisible && isZoomedIn)
-                                if (showBubble) {
-                                    Surface(
-                                        shape = RoundedCornerShape(3.3.dp), // size of text bubble. reduce if too big
-                                        color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                        modifier = Modifier.padding(bottom = 1.4.dp) // size of text bubble. reduce if too big
-                                    ) {
-                                        Text(
-                                            text = place.name,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp), // size of text in bubble. reduce if too big
-                                            modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp), // size of text in bubble. reduce if too big
-                                            color = Color.Black.copy(alpha = if (selectedPlace != null && !isSelected) 0.3f else 1f)
-                                        )
-                                    }
+                                // All building names hovering above the marker
+                                Surface(
+                                    shape = RoundedCornerShape(3.3.dp), // size of text bubble. reduce if too big
+                                    color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                                    modifier = Modifier.padding(bottom = 1.4.dp) // size of text bubble. reduce if too big
+                                ) {
+                                    Text(
+                                        text = place.name,
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp), // size of text in bubble. reduce if too big
+                                        modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp), // size of text in bubble. reduce if too big
+                                        color = Color.Black
+                                    )
                                 }
                                 Icon(
-                                    imageVector = Icons.Default.Place,
+                                    imageVector = place.category.icon,
                                     contentDescription = null,
-                                    tint = markerColor,
+                                    tint = place.category.color,
                                     modifier = Modifier.size(19.8.dp) // Reduced to 90% of 22dp
                                 )
                             }
@@ -252,64 +271,117 @@ fun MapScreen(modifier: Modifier = Modifier) {
             Text("Fetching live location...", Modifier.align(Alignment.Center))
         }
 
-        // Search bar and filter (filter is temporary, there will be more than 3 selections)
+        // Search bar and filter menu
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
                 .align(Alignment.TopCenter)
         ) {
-            // Search bar updates searchQuery
-            TextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search facilities...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear")
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Search bar updates searchQuery
+                TextField(
+                    value = searchQuery,
+                    onValueChange = { newValue ->
+                        searchQuery = newValue
+                        selectedCategory = MarkerCategory.ALL
+                        
+                        val match = if (newValue.isNotEmpty()) {
+                            places.find { it.name.contains(newValue, ignoreCase = true) }
+                        } else null
+                        
+                        if (match != null) {
+                            if (match != selectedPlace) {
+                                selectedPlace = match
+                                scope.launch {
+                                    cameraPositionState.animate(
+                                        update = CameraUpdateFactory.newLatLngZoom(match.location, 18f),
+                                        durationMs = 1000
+                                    )
+                                }
+                            }
+                        } else {
+                            selectedPlace = null
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search facilities...") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = {
+                                searchQuery = ""
+                                selectedCategory = MarkerCategory.ALL
+                                selectedPlace = null
+                            }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(24.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.White.copy(alpha = 0.9f),
+                        unfocusedContainerColor = Color.White.copy(alpha = 0.9f),
+                        disabledContainerColor = Color.White.copy(alpha = 0.9f),
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    )
+                )
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Dropdown menu for filters
+                Box {
+                    FloatingActionButton(
+                        onClick = { isFilterMenuExpanded = true },
+                        modifier = Modifier.size(48.dp),
+                        containerColor = Color.White.copy(alpha = 0.9f),
+                        contentColor = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(24.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FilterList,
+                            contentDescription = "Filter Options"
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = isFilterMenuExpanded,
+                        onDismissRequest = { isFilterMenuExpanded = false },
+                        modifier = Modifier.background(Color.White.copy(alpha = 0.95f))
+                    ) {
+                        MarkerCategory.entries.forEach { category ->
+                            DropdownMenuItem(
+                                text = { Text(category.label) },
+                                onClick = {
+                                    selectedCategory = category
+                                    selectedPlace = null
+                                    isFilterMenuExpanded = false
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = category.icon,
+                                        contentDescription = null,
+                                        tint = category.color,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                },
+                                trailingIcon = if (selectedCategory == category) {
+                                    { Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.size(16.dp)) }
+                                } else null
+                            )
                         }
                     }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(24.dp),
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.White.copy(alpha = 0.9f),
-                    unfocusedContainerColor = Color.White.copy(alpha = 0.9f),
-                    disabledContainerColor = Color.White.copy(alpha = 0.9f),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                )
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // chips on the search bar for filter
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                MarkerCategory.entries.forEach { category ->
-                    FilterChip(
-                        selected = selectedCategory == category,
-                        onClick = { selectedCategory = category },
-                        label = { Text(category.label) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = Color.White.copy(alpha = 0.8f),
-                            selectedContainerColor = Color.White,
-                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            selectedLabelColor = Color.Black
-                        )
-                    )
                 }
             }
         }
 
-        // This is the list of buildings/services
+        // This is the list of buildings/services and map type toggle
         Box(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -345,13 +417,11 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                         headlineContent = { Text(place.name) },
                                         supportingContent = { Text(place.category.label) },
                                         leadingContent = {
-                                            val iconColor = when(place.category) {
-                                                MarkerCategory.BUILDING -> Color.Blue
-                                                MarkerCategory.STUDENT_SERVICE -> Color.Magenta
-                                                MarkerCategory.DINING -> Color(0xFFFFA500)
-                                                else -> Color.Gray
-                                            }
-                                            Icon(Icons.Default.Place, contentDescription = null, tint = iconColor)
+                                            Icon(
+                                                imageVector = place.category.icon,
+                                                contentDescription = null,
+                                                tint = place.category.color
+                                            )
                                         },
                                         modifier = Modifier.clickable {
                                             scope.launch {
@@ -371,17 +441,36 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     }
                 }
 
-                // Button to pull out filter
-                FloatingActionButton(
-                    onClick = { isListVisible = !isListVisible },
-                    containerColor = Color.White,
-                    contentColor = Color.Black,
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isListVisible) Icons.Default.Close else Icons.AutoMirrored.Filled.List,
-                        contentDescription = "Toggle List"
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    // Button to pull out building list
+                    FloatingActionButton(
+                        onClick = { isListVisible = !isListVisible },
+                        containerColor = Color.White,
+                        contentColor = Color.Black,
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isListVisible) Icons.Default.Close else Icons.AutoMirrored.Filled.List,
+                            contentDescription = "Toggle List"
+                        )
+                    }
+
+                    // Map Toggle Button
+                    FloatingActionButton(
+                        onClick = {
+                            mapType = if (mapType == MapType.SATELLITE) MapType.NORMAL else MapType.SATELLITE
+                        },
+                        containerColor = Color.White,
+                        contentColor = Color.Black,
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Visibility,
+                            contentDescription = "Toggle Map Type"
+                        )
+                    }
                 }
             }
         }
