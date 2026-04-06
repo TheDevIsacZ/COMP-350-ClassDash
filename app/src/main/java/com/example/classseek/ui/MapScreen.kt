@@ -115,8 +115,12 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var location by remember { mutableStateOf<Location?>(null) }
     
     // Map control
-    val cameraPositionState = rememberCameraPositionState()
-    var hasCenteredCamera by remember { mutableStateOf(false) }
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(
+            LatLng(34.16206611807645, -119.04347370723949), 17f
+        )
+    }
+    var hasCenteredCamera by remember { mutableStateOf(true) }
 
     var hasPermission by remember {
         mutableStateOf(
