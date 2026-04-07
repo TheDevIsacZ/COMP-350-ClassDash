@@ -130,6 +130,9 @@ dependencies {
     implementation(libs.grpc.okhttp)
     implementation(libs.grpc.android)
 
+    // Image loading
+    implementation("io.coil-kt:coil-compose:2.5.0")
+
     // Coroutines support for Firebase Tasks
     implementation(libs.kotlinx.coroutines.play.services)
 }

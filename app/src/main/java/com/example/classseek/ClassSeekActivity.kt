@@ -13,36 +13,24 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.classseek.models.ClassSchedule
-import com.example.classseek.ui.AddEventScreen
-import com.example.classseek.ui.CalendarScreen
-import com.example.classseek.ui.MapScreen
+import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.*
 import com.example.classseek.ui.friends.FriendsScreen
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.javanet.NetHttpTransport
@@ -52,18 +40,21 @@ import com.google.api.services.calendar.Calendar
 import com.google.api.services.calendar.model.Event
 import com.google.api.services.calendar.model.EventDateTime
 import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-private const val schoolCalendarID = "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com" // Public CI Events -Miles
+private const val schoolCalendarID = "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com"
 
 class ClassSeekActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         enableEdgeToEdge()
         FirebaseApp.initializeApp(this)
         setContent {
@@ -202,8 +193,14 @@ class ClassSeekActivity : ComponentActivity() {
 
 @Composable
 fun ClassSeekApp() {
+    val auth = FirebaseAuth.getInstance()
+    var firebaseUser by remember { mutableStateOf(auth.currentUser) }
+    var userProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var isLoadingProfile by remember { mutableStateOf(true) }
+
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.CALENDAR) }
     var isAddingEvent by remember { mutableStateOf(false) }
+    var isEditingProfile by remember { mutableStateOf(false) }
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
 
     val scope = rememberCoroutineScope()
@@ -213,6 +210,37 @@ fun ClassSeekApp() {
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
+    val db = FirebaseFirestore.getInstance()
+
+    // Fetch profile whenever firebaseUser changes
+    LaunchedEffect(firebaseUser) {
+        if (firebaseUser != null) {
+            isLoadingProfile = true
+            try {
+                val doc = db.collection("users").document(firebaseUser!!.uid).get().await()
+                if (doc.exists()) {
+                    userProfile = doc.toObject(UserProfile::class.java)
+                } else {
+                    userProfile = null
+                }
+            } catch (e: Exception) {
+                Log.e("AUTH_DEBUG", "Error fetching profile", e)
+            } finally {
+                isLoadingProfile = false
+            }
+        } else {
+            userProfile = null
+            isLoadingProfile = false
+        }
+    }
+
+    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+        .requestIdToken(context.getString(R.string.default_web_client_id))
+        .requestEmail()
+        .requestScopes(com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/calendar"))
+        .build()
+    val googleSignInClient = GoogleSignIn.getClient(context, gso)
+
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -220,10 +248,19 @@ fun ClassSeekApp() {
         try {
             val account = task.getResult(ApiException::class.java)
             signedInAccount = account
-            account?.let {
+            account?.idToken?.let { idToken ->
+                val credential = GoogleAuthProvider.getCredential(idToken, null)
                 scope.launch {
-                    val events = activity?.getCalendarEvents(it)
-                    if (events != null) calendarEvents = events
+                    try {
+                        val authResult = auth.signInWithCredential(credential).await()
+                        firebaseUser = authResult.user
+                        
+                        // After signing in, try to fetch calendar events
+                        val events = activity?.getCalendarEvents(account)
+                        if (events != null) calendarEvents = events
+                    } catch (e: Exception) {
+                        Log.e("AUTH_DEBUG", "Firebase auth failed", e)
+                    }
                 }
             }
         } catch (e: ApiException) {
@@ -231,7 +268,38 @@ fun ClassSeekApp() {
         }
     }
 
-    if (isAddingEvent) {
+    if (firebaseUser == null) {
+        LoginScreen(onSignInClick = {
+            signInLauncher.launch(googleSignInClient.signInIntent)
+        })
+    } else if (isLoadingProfile) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    } else if (userProfile == null || isEditingProfile) {
+        ProfileCreationScreen(
+            initialProfile = userProfile,
+            initialName = firebaseUser?.displayName ?: "",
+            initialEmail = firebaseUser?.email ?: "",
+            onSaveProfile = { newProfile ->
+                scope.launch {
+                    val profileWithId = newProfile.copy(uid = firebaseUser!!.uid)
+                    try {
+                        // Persist user profile data to Firestore
+                        db.collection("users").document(firebaseUser!!.uid).set(profileWithId).await()
+                        userProfile = profileWithId
+                        isEditingProfile = false
+                    } catch (e: Exception) {
+                        Log.e("AUTH_DEBUG", "Error saving profile", e)
+                    }
+                }
+            },
+            // Show back button only when editing an existing profile
+            onBack = if (isEditingProfile) {
+                { isEditingProfile = false }
+            } else null
+        )
+    } else if (isAddingEvent) {
         AddEventScreen(
             initialDateMillis = initialDateForNewEvent,
             onBackClick = { isAddingEvent = false },
@@ -270,6 +338,9 @@ fun ClassSeekApp() {
                                 calendarEvents = calendarEvents,
                                 onSignInClick = { intent -> signInLauncher.launch(intent) },
                                 onSignOutClick = {
+                                    auth.signOut()
+                                    googleSignInClient.signOut()
+                                    firebaseUser = null
                                     signedInAccount = null
                                     calendarEvents = emptyList()
                                 },
@@ -283,7 +354,41 @@ fun ClassSeekApp() {
                                 }
                             )
                         }
-                        AppDestinations.PROFILE -> Greeting("Profile")
+                        AppDestinations.PROFILE -> {
+                            ProfileScreen(
+                                userProfile = userProfile!!,
+                                onSignOut = {
+                                    auth.signOut()
+                                    googleSignInClient.signOut()
+                                    firebaseUser = null
+                                    signedInAccount = null
+                                    calendarEvents = emptyList()
+                                },
+                                onEditProfile = {
+                                    isEditingProfile = true
+                                },
+                                onDeleteAccount = {
+                                    scope.launch {
+                                        try {
+                                            // WARNING: This only deletes the Firestore profile data.
+                                            // To fully delete the account, re-authentication is required to delete from Firebase Auth.
+                                            // 1. Delete user document from Firestore
+                                            db.collection("users").document(firebaseUser!!.uid).delete().await()
+                                            
+                                            // 2. Sign out and reset local app state
+                                            auth.signOut()
+                                            googleSignInClient.signOut()
+                                            firebaseUser = null
+                                            signedInAccount = null
+                                            calendarEvents = emptyList()
+                                            userProfile = null
+                                        } catch (e: Exception) {
+                                            Log.e("AUTH_DEBUG", "Error deleting account", e)
+                                        }
+                                    }
+                                }
+                            )
+                        }
                         AppDestinations.FRIENDS -> FriendsScreen()
                         AppDestinations.MAP -> MapScreen()
                         AppDestinations.SETTINGS -> Greeting("Settings")
