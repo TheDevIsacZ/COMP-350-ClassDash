@@ -46,7 +46,6 @@ enum class MarkerCategory(val label: String, val icon: ImageVector, val color: C
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)) // Orange
 }
 
-// Data class to represent a building on the map
 data class MapPlace(
     val name: String,
     val location: LatLng,
@@ -58,7 +57,7 @@ data class MapPlace(
 fun MapScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var searchQuery by remember { mutableStateOf("") } // tracks the search text
+    var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(MarkerCategory.ALL) }
     var isListVisible by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
@@ -67,15 +66,23 @@ fun MapScreen(modifier: Modifier = Modifier) {
 
     val bounds = remember {
         LatLngBounds(
-            LatLng(34.14521297909, -119.0623117489), // Southwest (50% smaller)
-            LatLng(34.1736221957, -119.0200830498)  // Northeast (50% smaller)
+            LatLng(34.14521297909, -119.0623117489),
+            LatLng(34.1736221957, -119.0200830498)
         )
     }
 
     // List of places loaded from Firestore
     var places by remember { mutableStateOf<List<MapPlace>>(emptyList()) }
 
-    // Fetch data from Firestore
+    // Filtered list based on selected category and search query
+    val displayPlaces = remember(places, selectedCategory, searchQuery) {
+        places.filter { place ->
+            val matchesCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
+            val matchesSearch = searchQuery.isEmpty() || place.name.contains(searchQuery, ignoreCase = true)
+            matchesCategory && matchesSearch
+        }
+    }
+
     LaunchedEffect(Unit) {
         val db = Firebase.firestore
         db.collection("mapScreenData")
@@ -110,17 +117,14 @@ fun MapScreen(modifier: Modifier = Modifier) {
             }
     }
 
-    // fusedLocationClient is for access to Google Play services location API
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
     var location by remember { mutableStateOf<Location?>(null) }
-    
-    // Map control
+
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(
-            LatLng(34.16206611807645, -119.04347370723949), 17f
-        )
+            LatLng(34.16206611807, -119.0434737072), 17f
+        ) // lat long is center of campus
     }
-    var hasCenteredCamera by remember { mutableStateOf(true) }
 
     var hasPermission by remember {
         mutableStateOf(
@@ -131,27 +135,18 @@ fun MapScreen(modifier: Modifier = Modifier) {
         )
     }
 
-    // launcher requests the necessary location permissions from the user
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
         onResult = { isGranted -> hasPermission = isGranted }
     )
 
-    // DisposableEffect starts tracking when the screen is open and when it is not
     DisposableEffect(hasPermission) {
         if (hasPermission) {
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
             val locationCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
                     result.lastLocation?.let { newLoc ->
-                        location = newLoc // Updates the location on first open
-
-                        if (!hasCenteredCamera) {
-                            cameraPositionState.position = CameraPosition.fromLatLngZoom(
-                                LatLng(newLoc.latitude, newLoc.longitude), 17f
-                            )
-                            hasCenteredCamera = true
-                        }
+                        location = newLoc
                     }
                 }
             }
@@ -161,7 +156,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 fusedLocationClient.removeLocationUpdates(locationCallback)
             }
         } else {
-            launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION) // this displays location request
+            launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
             onDispose {}
         }
     }
@@ -171,7 +166,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
         if (hasPermission && location != null) {
             val currentLatLng = LatLng(location!!.latitude, location!!.longitude)
 
-            GoogleMap( // GoogleMap creates the map
+            GoogleMap(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
                 properties = MapProperties(
@@ -203,8 +198,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         """.trimIndent()
                     )
                 ),
-                uiSettings = MapUiSettings(mapToolbarEnabled = false), // this disables the directions/google maps toolbar when a marker is clicked
-                onMapClick = { selectedPlace = null } // clear selection when tapping map
+                uiSettings = MapUiSettings(mapToolbarEnabled = false),
+                onMapClick = { selectedPlace = null }
             ) {
                 // User location marker
                 MarkerComposable(
@@ -215,8 +210,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     Icon(
                         imageVector = Icons.Default.PersonPinCircle,
                         contentDescription = null,
-                        tint = Color(0xffff6347), // Red with 50% opacity
-                        modifier = Modifier.size(24.dp) // size of marker. reduce if too big
+                        tint = Color(0xffff6347),
+                        modifier = Modifier.size(24.dp)
                     )
                 }
 
@@ -225,7 +220,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     val isSelected = selectedPlace?.name == place.name
                     val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
                     
-                    // Determine alpha based on selection and category filter
+                    // Determine selection based on selection and category filter
                     val markerAlpha = if (selectedPlace != null) {
                         if (isSelected) 1.0f else 0.35f
                     } else if (selectedCategory != MarkerCategory.ALL) {
@@ -241,20 +236,19 @@ fun MapScreen(modifier: Modifier = Modifier) {
                             anchor = Offset(0.5f, 1.0f),
                             onClick = {
                                 selectedPlace = place
-                                true // return true to prevent default info window
+                                true
                             }
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                // All building names hovering above the marker
                                 Surface(
-                                    shape = RoundedCornerShape(3.3.dp), // size of text bubble. reduce if too big
+                                    shape = RoundedCornerShape(3.3.dp),
                                     color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                    modifier = Modifier.padding(bottom = 1.4.dp) // size of text bubble. reduce if too big
+                                    modifier = Modifier.padding(bottom = 1.4.dp)
                                 ) {
                                     Text(
                                         text = place.name,
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp), // size of text in bubble. reduce if too big
-                                        modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp), // size of text in bubble. reduce if too big
+                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                        modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
                                         color = Color.Black
                                     )
                                 }
@@ -262,7 +256,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                     imageVector = place.category.icon,
                                     contentDescription = null,
                                     tint = place.category.color,
-                                    modifier = Modifier.size(19.8.dp) // Reduced to 90% of 22dp
+                                    modifier = Modifier.size(19.8.dp)
                                 )
                             }
                         }
@@ -286,7 +280,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Search bar updates searchQuery
                 TextField(
                     value = searchQuery,
                     onValueChange = { newValue ->
@@ -410,13 +403,13 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                     .padding(8.dp)
                             ) {
                                 Text(
-                                    text = "Campus Locations",
+                                    text = if (selectedCategory == MarkerCategory.ALL) "Campus Locations" else "${selectedCategory.label} Locations",
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                             LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                                items(places) { place ->
+                                items(displayPlaces) { place ->
                                     ListItem(
                                         headlineContent = { Text(place.name) },
                                         supportingContent = { Text(place.category.label) },
@@ -429,13 +422,13 @@ fun MapScreen(modifier: Modifier = Modifier) {
                                         },
                                         modifier = Modifier.clickable {
                                             scope.launch {
-                                                selectedPlace = place // select item when clicking list
+                                                selectedPlace = place
                                                 cameraPositionState.animate(
                                                     update = CameraUpdateFactory.newLatLngZoom(place.location, 18f),
                                                     durationMs = 1000
                                                 )
                                             }
-                                            isListVisible = false // Close list after selection
+                                            isListVisible = false
                                         }
                                     )
                                     HorizontalDivider(modifier = Modifier.padding(horizontal = 8.dp), thickness = 0.5.dp)
