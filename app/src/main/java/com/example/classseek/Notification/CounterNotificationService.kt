@@ -1,7 +1,6 @@
 package com.example.classseek.Notification
 
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -9,7 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import com.example.classseek.ClassSeekActivity
+import com.example.classseek.ui.ClassSeekActivity
 import com.example.classseek.R
 
 class CounterNotificationService(private val context: Context) {

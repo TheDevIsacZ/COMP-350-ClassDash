@@ -1,7 +1,5 @@
-package com.example.classseek
+package com.example.classseek.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -18,7 +16,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -33,11 +30,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import com.example.classseek.models.ClassSchedule
-import com.example.classseek.ui.AddEventScreen
-import com.example.classseek.ui.CalendarScreen
-import com.example.classseek.ui.MapScreen
+import com.example.classseek.ui.calendar.AddEventScreen
+import androidx.compose.runtime.LaunchedEffect
+import com.example.classseek.ui.calendar.CalendarScreen
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.Scope
+import com.example.classseek.ui.map.MapScreen
 import com.example.classseek.ui.friends.FriendsScreen
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -212,6 +211,36 @@ fun ClassSeekApp() {
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
+    val gso = remember {
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope("https://www.googleapis.com/auth/calendar"))
+            .build()
+    }
+
+    LaunchedEffect(Unit) {
+        val client = GoogleSignIn.getClient(context, gso)
+        client.silentSignIn().addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val account = task.result
+                signedInAccount = account
+                scope.launch {
+                    val events = activity?.getCalendarEvents(account)
+                    if (events != null) calendarEvents = events
+                }
+            } else {
+                val account = GoogleSignIn.getLastSignedInAccount(context)
+                if (account != null) {
+                    signedInAccount = account
+                    scope.launch {
+                        val events = activity?.getCalendarEvents(account)
+                        if (events != null) calendarEvents = events
+                    }
+                }
+            }
+        }
+    }
+
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -271,10 +300,6 @@ fun ClassSeekApp() {
                                 onSignOutClick = {
                                     signedInAccount = null
                                     calendarEvents = emptyList()
-                                },
-                                onRefreshClick = { account ->
-                                    val events = activity?.getCalendarEvents(account)
-                                    if (events != null) calendarEvents = events
                                 },
                                 onAddEventClick = { dateMillis ->
                                     initialDateForNewEvent = dateMillis
