@@ -57,6 +57,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private const val schoolCalendarID = "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com" // Public CI Events -Miles
+
 class ClassSeekActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,7 +93,18 @@ class ClassSeekActivity : ComponentActivity() {
                     .setMaxResults(50)
                     .execute()
 
-                eventsResult.items ?: emptyList()
+                val schoolEvents = try {
+                    service.events().list(schoolCalendarID)
+                        .setOrderBy("startTime")
+                        .setSingleEvents(true)
+                        .setMaxResults(50)
+                        .execute().items ?: emptyList()
+                } catch (e: Exception) {
+                    Log.e("CALENDAR_DEBUG", "Failed to fetch school events", e)
+                    emptyList()
+                }
+
+                (eventsResult.items ?: emptyList()) + schoolEvents
             } catch (e: Exception) {
                 Log.e("CALENDAR_DEBUG", "getCalendarEvents: ERROR", e)
                 null
