@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
@@ -282,7 +283,7 @@ fun ClassSeekApp() {
                                 }
                             )
                         }
-                        AppDestinations.HOME -> Greeting("Home")
+                        AppDestinations.PROFILE -> Greeting("Profile")
                         AppDestinations.FRIENDS -> FriendsScreen()
                         AppDestinations.MAP -> MapScreen()
                         AppDestinations.SETTINGS -> Greeting("Settings")
@@ -297,8 +298,8 @@ enum class AppDestinations(
     val label: String,
     val icon: ImageVector,
 ) {
-    HOME("Home", Icons.Default.Home),
-    FRIENDS("Friends", Icons.Default.Person),
+    PROFILE("Profile", Icons.Default.Person),
+    FRIENDS("Friends", Icons.Default.People),
     CALENDAR("Calendar", Icons.Default.DateRange),
     MAP("Map", Icons.Default.Place),
     SETTINGS("Settings", Icons.Default.Settings),
