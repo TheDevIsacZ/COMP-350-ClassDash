@@ -299,8 +299,8 @@ enum class AppDestinations(
 ) {
     HOME("Home", Icons.Default.Home),
     FRIENDS("Friends", Icons.Default.Person),
-    MAP("Map", Icons.Default.Place),
     CALENDAR("Calendar", Icons.Default.DateRange),
+    MAP("Map", Icons.Default.Place),
     SETTINGS("Settings", Icons.Default.Settings),
 }
 
