@@ -1,7 +1,5 @@
-package com.example.classseek
+package com.example.classseek.ui
 
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -13,7 +11,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.*
@@ -22,16 +24,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
+import com.example.classseek.R
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.models.UserProfile
-import com.example.classseek.ui.*
+import com.example.classseek.ui.calendar.AddEventScreen
+import com.example.classseek.ui.calendar.CalendarScreen
+import com.example.classseek.ui.map.MapScreen
 import com.example.classseek.ui.friends.FriendsScreen
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.json.gson.GsonFactory
@@ -234,12 +239,36 @@ fun ClassSeekApp() {
         }
     }
 
-    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-        .requestIdToken(context.getString(R.string.default_web_client_id))
-        .requestEmail()
-        .requestScopes(com.google.android.gms.common.api.Scope("https://www.googleapis.com/auth/calendar"))
-        .build()
-    val googleSignInClient = GoogleSignIn.getClient(context, gso)
+    val gso = remember {
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(context.getString(R.string.default_web_client_id))
+            .requestEmail()
+            .requestScopes(Scope("https://www.googleapis.com/auth/calendar"))
+            .build()
+    }
+    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+
+    LaunchedEffect(Unit) {
+        googleSignInClient.silentSignIn().addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val account = task.result
+                signedInAccount = account
+                scope.launch {
+                    val events = activity?.getCalendarEvents(account)
+                    if (events != null) calendarEvents = events
+                }
+            } else {
+                val account = GoogleSignIn.getLastSignedInAccount(context)
+                if (account != null) {
+                    signedInAccount = account
+                    scope.launch {
+                        val events = activity?.getCalendarEvents(account)
+                        if (events != null) calendarEvents = events
+                    }
+                }
+            }
+        }
+    }
 
     val signInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
@@ -254,7 +283,7 @@ fun ClassSeekApp() {
                     try {
                         val authResult = auth.signInWithCredential(credential).await()
                         firebaseUser = authResult.user
-                        
+
                         // After signing in, try to fetch calendar events
                         val events = activity?.getCalendarEvents(account)
                         if (events != null) calendarEvents = events
@@ -333,26 +362,15 @@ fun ClassSeekApp() {
                 Box(modifier = Modifier.padding(innerPadding)) {
                     when (currentDestination) {
                         AppDestinations.CALENDAR -> {
-                            CalendarScreen(
-                                signedInAccount = signedInAccount,
-                                calendarEvents = calendarEvents,
-                                onSignInClick = { intent -> signInLauncher.launch(intent) },
-                                onSignOutClick = {
-                                    auth.signOut()
-                                    googleSignInClient.signOut()
-                                    firebaseUser = null
-                                    signedInAccount = null
-                                    calendarEvents = emptyList()
-                                },
-                                onRefreshClick = { account ->
-                                    val events = activity?.getCalendarEvents(account)
-                                    if (events != null) calendarEvents = events
-                                },
-                                onAddEventClick = { dateMillis ->
-                                    initialDateForNewEvent = dateMillis
-                                    isAddingEvent = true
-                                }
-                            )
+                                CalendarScreen(
+                                    signedInAccount = signedInAccount,
+                                    calendarEvents = calendarEvents,
+                                    onSignInClick = { intent -> signInLauncher.launch(intent) },
+                                    onAddEventClick = { dateMillis ->
+                                        initialDateForNewEvent = dateMillis
+                                        isAddingEvent = true
+                                    }
+                                )
                         }
                         AppDestinations.PROFILE -> {
                             ProfileScreen(
@@ -374,7 +392,7 @@ fun ClassSeekApp() {
                                             // To fully delete the account, re-authentication is required to delete from Firebase Auth.
                                             // 1. Delete user document from Firestore
                                             db.collection("users").document(firebaseUser!!.uid).delete().await()
-                                            
+
                                             // 2. Sign out and reset local app state
                                             auth.signOut()
                                             googleSignInClient.signOut()

@@ -1,4 +1,4 @@
-package com.example.classseek.ui
+package com.example.classseek.ui.map
 
 import android.Manifest
 import android.annotation.SuppressLint
