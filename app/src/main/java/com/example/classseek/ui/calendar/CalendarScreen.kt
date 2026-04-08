@@ -69,7 +69,6 @@ fun CalendarScreen(
     signedInAccount: GoogleSignInAccount?,
     calendarEvents: List<Event>,
     onSignInClick: (Intent) -> Unit,
-    onSignOutClick: () -> Unit,
     onAddEventClick: (Long) -> Unit
 ) {
     val context = LocalContext.current
@@ -182,16 +181,6 @@ fun CalendarScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
-                    }
-                    Button(
-                        onClick = {
-                            googleSignInClient.signOut().addOnCompleteListener {
-                                onSignOutClick()
-                            }
-                        },
-                        modifier = Modifier.padding(end = 16.dp)
-                    ) {
-                        Text("Sign Out")
                     }
                 }
 

@@ -362,22 +362,15 @@ fun ClassSeekApp() {
                 Box(modifier = Modifier.padding(innerPadding)) {
                     when (currentDestination) {
                         AppDestinations.CALENDAR -> {
-                            CalendarScreen(
-                                signedInAccount = signedInAccount,
-                                calendarEvents = calendarEvents,
-                                onSignInClick = { intent -> signInLauncher.launch(intent) },
-                                onSignOutClick = {
-                                    auth.signOut()
-                                    googleSignInClient.signOut()
-                                    firebaseUser = null
-                                    signedInAccount = null
-                                    calendarEvents = emptyList()
-                                },
-                                onAddEventClick = { dateMillis ->
-                                    initialDateForNewEvent = dateMillis
-                                    isAddingEvent = true
-                                }
-                            )
+                                CalendarScreen(
+                                    signedInAccount = signedInAccount,
+                                    calendarEvents = calendarEvents,
+                                    onSignInClick = { intent -> signInLauncher.launch(intent) },
+                                    onAddEventClick = { dateMillis ->
+                                        initialDateForNewEvent = dateMillis
+                                        isAddingEvent = true
+                                    }
+                                )
                         }
                         AppDestinations.PROFILE -> {
                             ProfileScreen(
