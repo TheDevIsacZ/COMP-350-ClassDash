@@ -33,7 +33,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+<<<<<<< Updated upstream:app/src/main/java/com/example/classseek/ClassSeekActivity.kt
 import androidx.compose.ui.unit.dp
+=======
+import android.widget.Toast
+import com.example.classseek.R
+>>>>>>> Stashed changes:app/src/main/java/com/example/classseek/ui/ClassSeekActivity.kt
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.ui.AddEventScreen
 import com.example.classseek.ui.CalendarScreen
@@ -51,6 +56,13 @@ import com.google.api.services.calendar.Calendar
 import com.google.api.services.calendar.model.Event
 import com.google.api.services.calendar.model.EventDateTime
 import com.google.firebase.FirebaseApp
+<<<<<<< Updated upstream:app/src/main/java/com/example/classseek/ClassSeekActivity.kt
+=======
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.messaging.FirebaseMessaging
+>>>>>>> Stashed changes:app/src/main/java/com/example/classseek/ui/ClassSeekActivity.kt
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.Dispatchers
@@ -63,6 +75,19 @@ class ClassSeekActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         FirebaseApp.initializeApp(this)
+
+        // --- FCM Token Retrieval (fixed) ---
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val token = task.result
+                Log.d("FCM_TOKEN", "Device token: $token")
+                // Optional: show a toast (make sure to import Toast)
+                Toast.makeText(applicationContext, "Token: $token", Toast.LENGTH_SHORT).show()
+            } else {
+                Log.w("FCM_TOKEN", "Failed to get token", task.exception)
+            }
+        }
+
         setContent {
             ClassSeekTheme {
                 ClassSeekApp()
