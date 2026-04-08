@@ -1,25 +1,99 @@
 package com.example.classseek.ui.chat
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import coil.compose.AsyncImage
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.data.Message
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
-@OptIn(ExperimentalMaterial3Api::class)
+data class ChatUserProfile(
+    val uid: String,
+    val displayName: String,
+    val email: String,
+    val profilePictureUrl: String
+)
+
+@Composable
+private fun ProfileAvatar(
+    imageUrl: String,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    if (imageUrl.isNotBlank()) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = "$label profile picture",
+            modifier = modifier
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Surface(
+            modifier = modifier.clip(CircleShape),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = label.take(1).uppercase(),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     chatId: String,
@@ -31,6 +105,7 @@ fun ChatScreen(
 ) {
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val db = remember { FirebaseFirestore.getInstance() }
     val myUid = auth.currentUser?.uid
 
     val messages = remember(chatId) { mutableStateListOf<Message>() }
@@ -46,31 +121,93 @@ fun ChatScreen(
     var lastMarkedIncomingMessageId by remember(chatId) { mutableStateOf<String?>(null) }
 
     var myLastReadMessageId by remember(chatId) { mutableStateOf<String?>(null) }
-    var otherUserLastReadMessageId by remember(chatId) { mutableStateOf<String?>(null) }
 
     var pendingScrollToMessageId by remember(chatId) { mutableStateOf<String?>(null) }
     var lastAutoScrolledToMessageId by remember(chatId) { mutableStateOf<String?>(null) }
 
-    // Helps avoid initial-position scroll before my read-state listener has had a chance to respond.
     var myReadStateLoaded by remember(chatId) { mutableStateOf(false) }
-
-    // Once the user has sent a message in this screen instance,
-    // never allow the initial "scroll to last read" logic to run again.
     var hasSentMessageThisSession by remember(chatId) { mutableStateOf(false) }
+
+    val memberLastReadByUid = remember(chatId) { mutableStateMapOf<String, String?>() }
+    val userProfiles = remember(chatId) { mutableStateMapOf<String, ChatUserProfile>() }
 
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
     val latestMyMessageId = myLatestMessage?.id
 
+    fun userLabel(uid: String): String {
+        val profile = userProfiles[uid]
+        return when {
+            uid == myUid -> "You"
+            profile?.displayName?.isNotBlank() == true -> profile.displayName
+            profile?.email?.isNotBlank() == true -> profile.email.substringBefore("@")
+            else -> uid
+        }
+    }
+
+    fun hasUserSeenMessage(lastReadMessageId: String?, targetMessageId: String): Boolean {
+        if (lastReadMessageId == null) return false
+
+        val lastReadIndex = messages.indexOfFirst { it.id == lastReadMessageId }
+        val targetIndex = messages.indexOfFirst { it.id == targetMessageId }
+
+        if (lastReadIndex == -1 || targetIndex == -1) return false
+
+        // reverseLayout = true, so smaller index means newer.
+        return lastReadIndex <= targetIndex
+    }
+
     val latestSeen = remember(
-        myLatestMessage?.id,
-        myLatestMessage?.hasPendingWrites,
-        otherUserLastReadMessageId
+        latestMyMessageId,
+        messages.size,
+        memberLastReadByUid.toMap()
     ) {
-        val latest = myLatestMessage
-        latest != null &&
-                !latest.hasPendingWrites &&
-                otherUserLastReadMessageId == latest.id
+        val latestId = latestMyMessageId ?: return@remember false
+
+        memberLastReadByUid.any { (uid, lastReadId) ->
+            uid != myUid && hasUserSeenMessage(lastReadId, latestId)
+        }
+    }
+
+    suspend fun loadMissingUserProfiles(uids: List<String>) {
+        val missing = uids
+            .filter { it.isNotBlank() }
+            .distinct()
+            .filter { uid ->
+                val existing = userProfiles[uid]
+                existing == null || (
+                        existing.displayName.isBlank() &&
+                                existing.email.isBlank() &&
+                                existing.profilePictureUrl.isBlank()
+                        )
+            }
+
+        for (uid in missing) {
+            try {
+                val doc = db.collection("users")
+                    .document(uid)
+                    .get()
+                    .await()
+
+                val displayName = doc.getString("displayName")?.trim().orEmpty()
+                    .ifBlank { doc.getString("name")?.trim().orEmpty() }
+
+                val email = doc.getString("email")?.trim().orEmpty()
+                val profilePictureUrl = doc.getString("profilePictureUrl")?.trim().orEmpty()
+
+                if (displayName.isNotBlank() || email.isNotBlank() || profilePictureUrl.isNotBlank()) {
+                    userProfiles[uid] = ChatUserProfile(
+                        uid = uid,
+                        displayName = displayName,
+                        email = email,
+                        profilePictureUrl = profilePictureUrl
+                    )
+                }
+            } catch (_: Exception) {
+                // Do not cache a blank profile.
+                // Let a later effect retry.
+            }
+        }
     }
 
     DisposableEffect(lifecycleOwner, chatId) {
@@ -84,9 +221,23 @@ fun ChatScreen(
         }
     }
 
-    /**
-     * Initial mark-read.
-     */
+    val senderIdsKey = messages.map { it.senderId }.distinct().sorted().joinToString("|")
+    val memberIdsKey = memberLastReadByUid.keys.sorted().joinToString("|")
+
+    LaunchedEffect(chatId, senderIdsKey, memberIdsKey) {
+        try {
+            val allUids = buildList {
+                addAll(messages.map { it.senderId })
+                addAll(memberLastReadByUid.keys)
+            }.distinct()
+
+            loadMissingUserProfiles(allUids)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+    }
+
     LaunchedEffect(chatId, myUid, messages.size) {
         val uid = myUid ?: return@LaunchedEffect
         val newest = newestVisible ?: return@LaunchedEffect
@@ -101,9 +252,6 @@ fun ChatScreen(
         }
     }
 
-    /**
-     * While visible, mark newly arrived incoming messages as read.
-     */
     LaunchedEffect(chatId, myUid, isChatVisible, newestVisible?.id) {
         val uid = myUid ?: return@LaunchedEffect
         val newest = newestVisible ?: return@LaunchedEffect
@@ -121,14 +269,6 @@ fun ChatScreen(
         }
     }
 
-    /**
-     * Initial snap to last-read position.
-     *
-     * IMPORTANT:
-     * - Do not run if a send-scroll is pending.
-     * - Do not run if the user has already sent a message in this session.
-     * - Only run once.
-     */
     LaunchedEffect(
         messages.size,
         myLastReadMessageId,
@@ -146,11 +286,7 @@ fun ChatScreen(
         val targetIndex = when {
             myLastReadMessageId != null -> {
                 val idx = messages.indexOfFirst { it.id == myLastReadMessageId }
-                if (idx >= 0) {
-                    (idx - 1).coerceAtLeast(0)
-                } else {
-                    0
-                }
+                if (idx >= 0) (idx - 1).coerceAtLeast(0) else 0
             }
             else -> 0
         }
@@ -161,11 +297,6 @@ fun ChatScreen(
         initialScrollDone = true
     }
 
-    /**
-     * Sent-message snap.
-     *
-     * This has priority over everything else.
-     */
     LaunchedEffect(messages.size, pendingScrollToMessageId, chatId) {
         val targetMessageId = pendingScrollToMessageId ?: return@LaunchedEffect
         if (messages.isEmpty()) return@LaunchedEffect
@@ -178,7 +309,6 @@ fun ChatScreen(
         awaitFrame()
         listState.scrollToItem(targetIndex)
 
-        // Extra pass for IME/layout changes
         awaitFrame()
         listState.scrollToItem(targetIndex)
 
@@ -208,39 +338,27 @@ fun ChatScreen(
         if (myUid == null) {
             onDispose { }
         } else {
-            val receiptReg = repo.listenToDmReadReceipt(
-                chatId = chatId,
-                myUid = myUid,
-                onSnapshot = { state ->
-                    otherUserLastReadMessageId = state.otherUserLastReadMessageId
-                },
-                onError = { e ->
-                    error = e.message ?: "Read receipt listener error"
-                }
-            )
+            val reg = db.collection("chats")
+                .document(chatId)
+                .collection("members")
+                .addSnapshotListener { snapshot, e ->
+                    if (e != null) {
+                        error = e.message ?: "Member listener error"
+                        return@addSnapshotListener
+                    }
 
-            onDispose { receiptReg.remove() }
-        }
-    }
+                    val docs = snapshot?.documents.orEmpty()
 
-    DisposableEffect(chatId, myUid) {
-        if (myUid == null) {
-            onDispose { }
-        } else {
-            val myReadReg = repo.listenToMyReadState(
-                chatId = chatId,
-                myUid = myUid,
-                onSnapshot = { lastReadId ->
-                    myLastReadMessageId = lastReadId
-                    myReadStateLoaded = true
-                },
-                onError = { e ->
-                    error = e.message ?: "My read state listener error"
+                    memberLastReadByUid.clear()
+                    for (doc in docs) {
+                        memberLastReadByUid[doc.id] = doc.getString("lastReadMessageId")
+                    }
+
+                    myLastReadMessageId = memberLastReadByUid[myUid]
                     myReadStateLoaded = true
                 }
-            )
 
-            onDispose { myReadReg.remove() }
+            onDispose { reg.remove() }
         }
     }
 
@@ -281,9 +399,21 @@ fun ChatScreen(
                     items = messages,
                     key = { it.id }
                 ) { msg ->
+                    val isMine = (myUid != null && msg.senderId == myUid)
+
+                    val seenByProfiles = memberLastReadByUid
+                        .filter { (uid, lastReadId) ->
+                            uid != myUid && hasUserSeenMessage(lastReadId, msg.id)
+                        }
+                        .keys
+                        .mapNotNull { uid -> userProfiles[uid] }
+                        .distinctBy { it.uid }
+
                     MessageRow(
                         msg = msg,
-                        isMine = (myUid != null && msg.senderId == myUid),
+                        isMine = isMine,
+                        senderLabel = if (isMine) "You" else userLabel(msg.senderId),
+                        senderAvatarUrl = if (isMine) "" else (userProfiles[msg.senderId]?.profilePictureUrl ?: ""),
                         showReceipt = msg.id == latestMyMessageId,
                         receiptText = if (msg.id == latestMyMessageId) {
                             when {
@@ -293,7 +423,8 @@ fun ChatScreen(
                             }
                         } else {
                             null
-                        }
+                        },
+                        seenByProfiles = if (isMine) seenByProfiles else emptyList()
                     )
                 }
             }
@@ -337,11 +468,8 @@ fun ChatScreen(
                                     text = text
                                 )
 
-                                // Scroll to the exact message that was sent.
                                 pendingScrollToMessageId = sentMessageId
 
-                                // Keep my own read state aligned with my newest sent message too.
-                                // This prevents late read-state updates from pointing to an older anchor.
                                 try {
                                     repo.updateMyLastRead(chatId, uid, sentMessageId)
                                     myLastReadMessageId = sentMessageId
@@ -349,6 +477,8 @@ fun ChatScreen(
                                 }
 
                                 input = ""
+                            } catch (e: CancellationException) {
+                                throw e
                             } catch (e: Exception) {
                                 error = e.message ?: "Send failed"
                                 pendingScrollToMessageId = null
@@ -369,34 +499,80 @@ fun ChatScreen(
 private fun MessageRow(
     msg: Message,
     isMine: Boolean,
+    senderLabel: String,
+    senderAvatarUrl: String,
     showReceipt: Boolean = false,
-    receiptText: String? = null
+    receiptText: String? = null,
+    seenByProfiles: List<ChatUserProfile> = emptyList()
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
     ) {
-        Surface(
-            tonalElevation = 1.dp,
-            shape = MaterialTheme.shapes.medium
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Bottom
         ) {
-            Column(Modifier.padding(10.dp)) {
-                Text(msg.text ?: "[${msg.type}]")
+            if (!isMine) {
+                ProfileAvatar(
+                    imageUrl = senderAvatarUrl,
+                    label = senderLabel,
+                    modifier = Modifier.size(32.dp)
+                )
             }
-        }
 
-        Spacer(Modifier.height(2.dp))
+            Column(
+                horizontalAlignment = if (isMine) Alignment.End else Alignment.Start
+            ) {
+                Surface(
+                    tonalElevation = 1.dp,
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(msg.text ?: "[${msg.type}]")
+                    }
+                }
 
-        Text(
-            text = if (isMine) "You" else msg.senderId,
-            style = MaterialTheme.typography.labelSmall
-        )
+                Spacer(Modifier.height(2.dp))
 
-        if (isMine && showReceipt && receiptText != null) {
-            Text(
-                text = receiptText,
-                style = MaterialTheme.typography.labelSmall
-            )
+                Text(
+                    text = senderLabel,
+                    style = MaterialTheme.typography.labelSmall
+                )
+
+                if (isMine && showReceipt && receiptText != null) {
+                    Text(
+                        text = receiptText,
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+
+                if (isMine && seenByProfiles.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        seenByProfiles.take(6).forEach { profile ->
+                            ProfileAvatar(
+                                imageUrl = profile.profilePictureUrl,
+                                label = profile.displayName.ifBlank {
+                                    profile.email.ifBlank { "?" }
+                                },
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+
+                        if (seenByProfiles.size > 6) {
+                            Text(
+                                text = "+${seenByProfiles.size - 6}",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -49,10 +49,10 @@ import com.example.classseek.ui.chat.ChatScreen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.CancellationException
 
 data class UserSearchItem(
     val uid: String,
@@ -223,6 +223,9 @@ fun FriendsScreen(
         try {
             if (myUid != null) {
                 refreshChats()
+                if (status == "Please sign in first.") {
+                    status = null
+                }
             } else {
                 myChats.clear()
                 searchResults.clear()
@@ -230,6 +233,8 @@ fun FriendsScreen(
                 selectedGroupMembers.clear()
                 status = "Please sign in first."
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             status = "Failed to load chats: ${e.message}"
         }
@@ -241,6 +246,9 @@ fun FriendsScreen(
 
         if (query.isBlank()) {
             searchResults.clear()
+            if (status?.startsWith("Search failed:") == true) {
+                status = null
+            }
             return@LaunchedEffect
         }
 
@@ -250,6 +258,10 @@ fun FriendsScreen(
             val results = searchUsers(query, uid)
             searchResults.clear()
             searchResults.addAll(results)
+
+            if (status?.startsWith("Search failed:") == true) {
+                status = null
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -297,14 +309,14 @@ fun FriendsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item {
+        item("debug_info") {
             Text("=== DEBUG INFO ===")
             Text("Signed in: $isSignedIn")
             Text("My UID: ${myUid ?: "NULL"}")
             Text("My Email: ${myEmail ?: "NULL"}")
         }
 
-        item {
+        item("find_users_header") {
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
@@ -315,7 +327,7 @@ fun FriendsScreen(
             )
         }
 
-        item {
+        item("search_box") {
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
@@ -328,11 +340,13 @@ fun FriendsScreen(
 
         if (searchQuery.isNotBlank()) {
             if (searchResults.isEmpty()) {
-                item {
+                item("no_search_results") {
                     Text("No users found.")
                 }
             } else {
-                items(searchResults, key = { it.uid }) { user ->
+                items(searchResults, key = { "search_${it.uid}" }) { user ->
+                    val alreadySelected = selectedGroupMembers.any { it.uid == user.uid }
+
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier
@@ -383,14 +397,14 @@ fun FriendsScreen(
 
                                     Button(
                                         onClick = {
-                                            if (selectedGroupMembers.none { it.uid == user.uid }) {
+                                            if (!alreadySelected) {
                                                 selectedGroupMembers.add(user)
                                                 status = "Added ${user.email} to group"
                                             }
                                         },
-                                        enabled = !working
+                                        enabled = !working && !alreadySelected
                                     ) {
-                                        Text("Add to Group")
+                                        Text(if (alreadySelected) "Added" else "Add to Group")
                                     }
                                 }
                             }
@@ -400,7 +414,7 @@ fun FriendsScreen(
             }
         }
 
-        item {
+        item("dm_header") {
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
@@ -411,7 +425,7 @@ fun FriendsScreen(
             )
         }
 
-        item {
+        item("dm_selected_user") {
             Text(
                 text = selectedDmUser?.let {
                     "Selected user: ${userLabel(it)} (${it.email})"
@@ -420,7 +434,7 @@ fun FriendsScreen(
             )
         }
 
-        item {
+        item("dm_title_input") {
             OutlinedTextField(
                 value = dmTitle,
                 onValueChange = { dmTitle = it },
@@ -431,7 +445,7 @@ fun FriendsScreen(
             )
         }
 
-        item {
+        item("dm_create_button") {
             Button(
                 enabled = selectedDmUser != null && !working && isSignedIn,
                 onClick = {
@@ -474,6 +488,8 @@ fun FriendsScreen(
                             selectedDmUser = null
                             searchQuery = ""
                             searchResults.clear()
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             status = e.message ?: "Failed to create DM"
                         } finally {
@@ -491,7 +507,7 @@ fun FriendsScreen(
             }
         }
 
-        item {
+        item("group_header") {
             Spacer(Modifier.height(24.dp))
             HorizontalDivider()
             Spacer(Modifier.height(16.dp))
@@ -502,7 +518,7 @@ fun FriendsScreen(
             )
         }
 
-        item {
+        item("group_title_input") {
             OutlinedTextField(
                 value = groupTitle,
                 onValueChange = { groupTitle = it },
@@ -514,14 +530,14 @@ fun FriendsScreen(
         }
 
         if (selectedGroupMembers.isNotEmpty()) {
-            item {
+            item("selected_group_members_header") {
                 Text(
                     text = "Selected group members",
                     style = MaterialTheme.typography.titleMedium
                 )
             }
 
-            items(selectedGroupMembers, key = { it.uid }) { member ->
+            items(selectedGroupMembers, key = { "group_${it.uid}" }) { member ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier
@@ -548,6 +564,9 @@ fun FriendsScreen(
                             text = "Remove",
                             modifier = Modifier.clickable {
                                 selectedGroupMembers.removeAll { it.uid == member.uid }
+                                if (status?.startsWith("Added ") == true) {
+                                    status = null
+                                }
                             }
                         )
                     }
@@ -555,7 +574,7 @@ fun FriendsScreen(
             }
         }
 
-        item {
+        item("group_create_button") {
             Button(
                 enabled = groupTitle.trim().isNotEmpty() &&
                         selectedGroupMembers.isNotEmpty() &&
@@ -593,6 +612,8 @@ fun FriendsScreen(
                             selectedGroupMembers.clear()
                             searchQuery = ""
                             searchResults.clear()
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             status = e.message ?: "Failed to create group"
                         } finally {
@@ -605,7 +626,7 @@ fun FriendsScreen(
             }
         }
 
-        item {
+        item("saved_chats_header") {
             Spacer(Modifier.height(20.dp))
             HorizontalDivider()
             Spacer(Modifier.height(12.dp))
@@ -617,11 +638,11 @@ fun FriendsScreen(
         }
 
         if (myChats.isEmpty()) {
-            item {
+            item("no_chats") {
                 Text("No chats yet.")
             }
         } else {
-            items(myChats, key = { it.id }) { chat ->
+            items(myChats, key = { "chat_${it.id}" }) { chat ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -674,9 +695,15 @@ fun FriendsScreen(
                                         onClick = {
                                             menuExpanded = false
                                             scope.launch {
-                                                val uid = auth.currentUser?.uid ?: return@launch
-                                                repo.hideChatForUser(chat.id, uid)
-                                                refreshChats()
+                                                try {
+                                                    val uid = auth.currentUser?.uid ?: return@launch
+                                                    repo.hideChatForUser(chat.id, uid)
+                                                    refreshChats()
+                                                } catch (e: CancellationException) {
+                                                    throw e
+                                                } catch (e: Exception) {
+                                                    status = e.message ?: "Failed to delete chat"
+                                                }
                                             }
                                         }
                                     )
