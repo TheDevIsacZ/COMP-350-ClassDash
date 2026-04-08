@@ -2,6 +2,7 @@ package com.example.classseek.ui
 
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -48,6 +49,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.messaging.FirebaseMessaging
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +64,19 @@ class ClassSeekActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         FirebaseApp.initializeApp(this)
+
+        // --- FCM Token Retrieval (fixed) ---
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val token = task.result
+                Log.d("FCM_TOKEN", "Device token: $token")
+                // Optional: show a toast (make sure to import Toast)
+                Toast.makeText(applicationContext, "Token: $token", Toast.LENGTH_SHORT).show()
+            } else {
+                Log.w("FCM_TOKEN", "Failed to get token", task.exception)
+            }
+        }
+
         setContent {
             ClassSeekTheme {
                 ClassSeekApp()
