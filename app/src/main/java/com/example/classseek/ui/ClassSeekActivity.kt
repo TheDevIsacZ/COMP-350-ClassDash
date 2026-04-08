@@ -312,10 +312,39 @@ fun ClassSeekApp() {
             initialEmail = firebaseUser?.email ?: "",
             onSaveProfile = { newProfile ->
                 scope.launch {
-                    val profileWithId = newProfile.copy(uid = firebaseUser!!.uid)
                     try {
-                        // Persist user profile data to Firestore
-                        db.collection("users").document(firebaseUser!!.uid).set(profileWithId).await()
+                        val user = firebaseUser ?: throw Exception("No signed-in user")
+
+                        val profileWithId = newProfile.copy(uid = user.uid)
+
+                        val normalizedEmail = profileWithId.email.trim().lowercase()
+                        val trimmedDisplayName = profileWithId.name.trim()
+
+                        val userDoc = mapOf(
+                            "uid" to user.uid,
+                            "name" to trimmedDisplayName,
+                            "displayName" to trimmedDisplayName,
+                            "email" to normalizedEmail,
+                            "searchEmail" to normalizedEmail,
+                            "searchName" to trimmedDisplayName.lowercase(),
+                            "major" to profileWithId.major.trim(),
+                            "bio" to profileWithId.bio.trim(),
+                            "location" to profileWithId.location.trim(),
+                            "githubUrl" to profileWithId.githubUrl.trim(),
+                            "profilePictureUrl" to profileWithId.profilePictureUrl,
+                            "bannerUrl" to profileWithId.bannerUrl,
+                            "joinDate" to profileWithId.joinDate,
+                            "followersCount" to profileWithId.followersCount,
+                            "followingCount" to profileWithId.followingCount,
+                            "isProfileComplete" to true,
+                            "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                        )
+
+                        db.collection("users")
+                            .document(user.uid)
+                            .set(userDoc, com.google.firebase.firestore.SetOptions.merge())
+                            .await()
+
                         userProfile = profileWithId
                         isEditingProfile = false
                     } catch (e: Exception) {
