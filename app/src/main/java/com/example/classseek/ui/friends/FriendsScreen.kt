@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenu
@@ -28,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -130,16 +132,17 @@ fun FriendsScreen(
     var myEmail by remember { mutableStateOf<String?>(null) }
     var isSignedIn by remember { mutableStateOf(false) }
 
-    var dmTitle by remember { mutableStateOf("") }
     var groupTitle by remember { mutableStateOf("") }
 
     var searchQuery by remember { mutableStateOf("") }
     val searchResults = remember { mutableStateListOf<UserSearchItem>() }
 
-    var selectedDmUser by remember { mutableStateOf<UserSearchItem?>(null) }
     val selectedGroupMembers = remember { mutableStateListOf<UserSearchItem>() }
-
     val myChats = remember { mutableStateListOf<ChatListItem>() }
+
+    var showDmNameDialog by remember { mutableStateOf(false) }
+    var pendingDmUser by remember { mutableStateOf<UserSearchItem?>(null) }
+    var pendingDmTitle by remember { mutableStateOf("") }
 
     suspend fun refreshChats() {
         val uid = auth.currentUser?.uid ?: return
@@ -203,6 +206,57 @@ fun FriendsScreen(
         }
     }
 
+    suspend fun openExistingOrCreateDm(target: UserSearchItem) {
+        val currentUid = auth.currentUser?.uid
+            ?: throw Exception("User not signed in")
+
+        if (target.uid == currentUid) {
+            throw Exception("You cannot message yourself")
+        }
+
+        val existingChatId = repo.findExistingDmChatId(currentUid, target.uid)
+
+        if (existingChatId != null) {
+            val existingTitle = repo.getChatTitle(existingChatId)
+            refreshChats()
+            selectedChatId = existingChatId
+            selectedChatTitle = existingTitle
+            return
+        }
+
+        pendingDmUser = target
+        pendingDmTitle = ""
+        showDmNameDialog = true
+    }
+
+    suspend fun createNewDmWithUser(target: UserSearchItem) {
+        val currentUid = auth.currentUser?.uid
+            ?: throw Exception("User not signed in")
+
+        if (target.uid == currentUid) {
+            throw Exception("You cannot message yourself")
+        }
+
+        val defaultTitle = userLabel(target)
+        val finalRequestedTitle = pendingDmTitle.trim().ifBlank { defaultTitle }
+
+        val createdChatId = repo.openOrCreateDm(
+            uidA = currentUid,
+            uidB = target.uid,
+            title = finalRequestedTitle
+        )
+
+        val finalTitle = repo.getChatTitle(createdChatId)
+
+        refreshChats()
+        selectedChatId = createdChatId
+        selectedChatTitle = finalTitle
+
+        pendingDmUser = null
+        pendingDmTitle = ""
+        showDmNameDialog = false
+    }
+
     DisposableEffect(auth) {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
@@ -229,7 +283,6 @@ fun FriendsScreen(
             } else {
                 myChats.clear()
                 searchResults.clear()
-                selectedDmUser = null
                 selectedGroupMembers.clear()
                 status = "Please sign in first."
             }
@@ -254,7 +307,6 @@ fun FriendsScreen(
 
         try {
             delay(250)
-
             val results = searchUsers(query, uid)
             searchResults.clear()
             searchResults.addAll(results)
@@ -267,6 +319,69 @@ fun FriendsScreen(
         } catch (e: Exception) {
             status = "Search failed: ${e.message}"
         }
+    }
+
+    if (showDmNameDialog && pendingDmUser != null) {
+        val user = pendingDmUser!!
+
+        AlertDialog(
+            onDismissRequest = {
+                if (!working) {
+                    showDmNameDialog = false
+                    pendingDmUser = null
+                    pendingDmTitle = ""
+                }
+            },
+            title = { Text("Start chat with ${userLabel(user)}") },
+            text = {
+                Column {
+                    Text("Enter a chat name, or leave it blank to use the default name.")
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = pendingDmTitle,
+                        onValueChange = { pendingDmTitle = it },
+                        label = { Text("Chat name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        enabled = !working
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !working,
+                    onClick = {
+                        scope.launch {
+                            try {
+                                working = true
+                                status = null
+                                createNewDmWithUser(user)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                status = e.message ?: "Failed to create chat"
+                            } finally {
+                                working = false
+                            }
+                        }
+                    }
+                ) {
+                    Text(if (working) "Opening..." else "Open")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !working,
+                    onClick = {
+                        showDmNameDialog = false
+                        pendingDmUser = null
+                        pendingDmTitle = ""
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (selectedChatId != null) {
@@ -309,17 +424,8 @@ fun FriendsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item("debug_info") {
-            Text("=== DEBUG INFO ===")
-            Text("Signed in: $isSignedIn")
-            Text("My UID: ${myUid ?: "NULL"}")
-            Text("My Email: ${myEmail ?: "NULL"}")
-        }
 
         item("find_users_header") {
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
 
             Text(
                 text = "Find Users",
@@ -387,12 +493,23 @@ fun FriendsScreen(
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Button(
                                         onClick = {
-                                            selectedDmUser = user
-                                            status = "Selected ${user.email} for DM"
+                                            scope.launch {
+                                                try {
+                                                    working = true
+                                                    status = null
+                                                    openExistingOrCreateDm(user)
+                                                } catch (e: CancellationException) {
+                                                    throw e
+                                                } catch (e: Exception) {
+                                                    status = e.message ?: "Failed to open chat"
+                                                } finally {
+                                                    working = false
+                                                }
+                                            }
                                         },
                                         enabled = !working
                                     ) {
-                                        Text("Select for DM")
+                                        Text("Message")
                                     }
 
                                     Button(
@@ -411,99 +528,6 @@ fun FriendsScreen(
                         }
                     }
                 }
-            }
-        }
-
-        item("dm_header") {
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(8.dp))
-
-            Text(
-                text = "Create DM",
-                style = MaterialTheme.typography.headlineSmall
-            )
-        }
-
-        item("dm_selected_user") {
-            Text(
-                text = selectedDmUser?.let {
-                    "Selected user: ${userLabel(it)} (${it.email})"
-                } ?: "Select a user from the search results above.",
-                style = MaterialTheme.typography.bodyMedium
-            )
-        }
-
-        item("dm_title_input") {
-            OutlinedTextField(
-                value = dmTitle,
-                onValueChange = { dmTitle = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Chat name (optional)") },
-                singleLine = true,
-                enabled = !working
-            )
-        }
-
-        item("dm_create_button") {
-            Button(
-                enabled = selectedDmUser != null && !working && isSignedIn,
-                onClick = {
-                    scope.launch {
-                        try {
-                            working = true
-                            status = null
-
-                            val currentUid = auth.currentUser?.uid
-                                ?: throw Exception("User not signed in")
-
-                            val target = selectedDmUser
-                                ?: throw Exception("Select a user first")
-
-                            if (target.uid == currentUid) {
-                                throw Exception("You cannot message yourself")
-                            }
-
-                            val defaultTitle = userLabel(target)
-
-                            val firstTitle = if (dmTitle.trim().isBlank()) {
-                                defaultTitle
-                            } else {
-                                dmTitle.trim()
-                            }
-
-                            val createdChatId = repo.openOrCreateDm(
-                                uidA = currentUid,
-                                uidB = target.uid,
-                                title = firstTitle
-                            )
-
-                            val finalTitle = repo.getChatTitle(createdChatId)
-
-                            refreshChats()
-                            selectedChatId = createdChatId
-                            selectedChatTitle = finalTitle
-
-                            dmTitle = ""
-                            selectedDmUser = null
-                            searchQuery = ""
-                            searchResults.clear()
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            status = e.message ?: "Failed to create DM"
-                        } finally {
-                            working = false
-                        }
-                    }
-                }
-            ) {
-                Text(if (working) "Working..." else "Create DM")
-            }
-
-            if (status != null) {
-                Spacer(Modifier.height(12.dp))
-                Text("Status: $status")
             }
         }
 
@@ -623,6 +647,11 @@ fun FriendsScreen(
                 }
             ) {
                 Text(if (working) "Working..." else "Create Group")
+            }
+
+            if (status != null) {
+                Spacer(Modifier.height(12.dp))
+                Text("Status: $status")
             }
         }
 

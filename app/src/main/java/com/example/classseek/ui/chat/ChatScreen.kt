@@ -1,6 +1,7 @@
 package com.example.classseek.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,7 +19,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -46,12 +49,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
+import com.example.classseek.data.ChatInfo
 import com.example.classseek.data.ChatRepository
+import com.example.classseek.data.GroupMember
 import com.example.classseek.data.Message
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.android.awaitFrame
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -131,9 +137,23 @@ fun ChatScreen(
     val memberLastReadByUid = remember(chatId) { mutableStateMapOf<String, String?>() }
     val userProfiles = remember(chatId) { mutableStateMapOf<String, ChatUserProfile>() }
 
+    var chatInfo by remember(chatId) { mutableStateOf<ChatInfo?>(null) }
+    var myRole by remember(chatId) { mutableStateOf<String?>(null) }
+    var showManageDialog by remember(chatId) { mutableStateOf(false) }
+    var groupMembers by remember(chatId) { mutableStateOf<List<GroupMember>>(emptyList()) }
+    var memberSearchQuery by remember(chatId) { mutableStateOf("") }
+    val memberSearchResults = remember(chatId) { mutableStateListOf<ChatUserProfile>() }
+    var managingGroup by remember(chatId) { mutableStateOf(false) }
+    var confirmDeleteGroup by remember(chatId) { mutableStateOf(false) }
+
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
     val latestMyMessageId = myLatestMessage?.id
+
+    fun isGroupChat(): Boolean = chatInfo?.type == "group"
+    fun canManageMembers(): Boolean = myRole == "owner" || myRole == "cohost"
+    fun canEditRoles(): Boolean = myRole == "owner"
+    fun canDeleteGroup(): Boolean = myRole == "owner"
 
     fun userLabel(uid: String): String {
         val profile = userProfiles[uid]
@@ -141,7 +161,7 @@ fun ChatScreen(
             uid == myUid -> "You"
             profile?.displayName?.isNotBlank() == true -> profile.displayName
             profile?.email?.isNotBlank() == true -> profile.email.substringBefore("@")
-            else -> uid
+            else -> "User"
         }
     }
 
@@ -153,7 +173,6 @@ fun ChatScreen(
 
         if (lastReadIndex == -1 || targetIndex == -1) return false
 
-        // reverseLayout = true, so smaller index means newer.
         return lastReadIndex <= targetIndex
     }
 
@@ -204,10 +223,80 @@ fun ChatScreen(
                     )
                 }
             } catch (_: Exception) {
-                // Do not cache a blank profile.
-                // Let a later effect retry.
             }
         }
+    }
+
+    suspend fun refreshGroupMeta() {
+        val uid = myUid ?: return
+        val info = repo.getChatInfo(chatId)
+        chatInfo = info
+        myRole = repo.getMyRole(chatId, uid)
+        if (info.type == "group") {
+            groupMembers = repo.getGroupMembers(chatId)
+        } else {
+            groupMembers = emptyList()
+        }
+    }
+
+    suspend fun searchUsersForGroup(query: String): List<ChatUserProfile> {
+        val normalized = query.trim().lowercase()
+        if (normalized.isBlank()) return emptyList()
+
+        val emailDocs = db.collection("users")
+            .whereEqualTo("isProfileComplete", true)
+            .orderBy("searchEmail")
+            .startAt(normalized)
+            .endAt(normalized + "\uf8ff")
+            .limit(10)
+            .get()
+            .await()
+            .documents
+
+        val nameDocs = db.collection("users")
+            .whereEqualTo("isProfileComplete", true)
+            .orderBy("searchName")
+            .startAt(normalized)
+            .endAt(normalized + "\uf8ff")
+            .limit(10)
+            .get()
+            .await()
+            .documents
+
+        return (emailDocs + nameDocs)
+            .distinctBy { it.id }
+            .mapNotNull { doc ->
+                val uid = doc.id
+                val displayName = doc.getString("displayName")?.trim().orEmpty()
+                    .ifBlank { doc.getString("name")?.trim().orEmpty() }
+                val email = doc.getString("email")?.trim().orEmpty()
+                val profilePictureUrl = doc.getString("profilePictureUrl")?.trim().orEmpty()
+
+                if (email.isBlank()) return@mapNotNull null
+
+                ChatUserProfile(
+                    uid = uid,
+                    displayName = displayName,
+                    email = email,
+                    profilePictureUrl = profilePictureUrl
+                )
+            }
+            .filter { candidate ->
+                candidate.uid != myUid &&
+                        groupMembers.none { it.uid == candidate.uid }
+            }
+            .sortedWith(
+                compareBy<ChatUserProfile> {
+                    when {
+                        it.email.lowercase() == normalized -> 0
+                        it.email.lowercase().startsWith(normalized) -> 1
+                        it.displayName.lowercase().startsWith(normalized) -> 2
+                        else -> 3
+                    }
+                }.thenBy {
+                    it.displayName.ifBlank { it.email }.lowercase()
+                }
+            )
     }
 
     DisposableEffect(lifecycleOwner, chatId) {
@@ -221,20 +310,56 @@ fun ChatScreen(
         }
     }
 
+    LaunchedEffect(chatId, myUid) {
+        try {
+            refreshGroupMeta()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = e.message ?: "Failed to load chat info"
+        }
+    }
+
     val senderIdsKey = messages.map { it.senderId }.distinct().sorted().joinToString("|")
     val memberIdsKey = memberLastReadByUid.keys.sorted().joinToString("|")
+    val groupMemberIdsKey = groupMembers.map { it.uid }.distinct().sorted().joinToString("|")
 
-    LaunchedEffect(chatId, senderIdsKey, memberIdsKey) {
+    LaunchedEffect(chatId, senderIdsKey, memberIdsKey, groupMemberIdsKey) {
         try {
             val allUids = buildList {
                 addAll(messages.map { it.senderId })
                 addAll(memberLastReadByUid.keys)
+                addAll(groupMembers.map { it.uid })
             }.distinct()
 
             loadMissingUserProfiles(allUids)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {
+        }
+    }
+
+    LaunchedEffect(memberSearchQuery, showManageDialog, chatId, groupMemberIdsKey) {
+        if (!showManageDialog) {
+            memberSearchResults.clear()
+            return@LaunchedEffect
+        }
+
+        val query = memberSearchQuery.trim()
+        if (query.isBlank()) {
+            memberSearchResults.clear()
+            return@LaunchedEffect
+        }
+
+        try {
+            delay(250)
+            val results = searchUsersForGroup(query)
+            memberSearchResults.clear()
+            memberSearchResults.addAll(results)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            error = e.message ?: "Failed to search users"
         }
     }
 
@@ -362,6 +487,333 @@ fun ChatScreen(
         }
     }
 
+    if (showManageDialog && isGroupChat()) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!managingGroup) {
+                    showManageDialog = false
+                    memberSearchQuery = ""
+                    memberSearchResults.clear()
+                }
+            },
+            title = { Text("Manage Group") },
+            text = {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item("group_manage_header") {
+                        Column {
+                            Text("Your role: ${myRole ?: "member"}")
+
+                            if (canManageMembers()) {
+                                Spacer(Modifier.height(8.dp))
+
+                                OutlinedTextField(
+                                    value = memberSearchQuery,
+                                    onValueChange = { memberSearchQuery = it },
+                                    label = { Text("Search users by name or email") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true,
+                                    enabled = !managingGroup
+                                )
+
+                                if (memberSearchQuery.isNotBlank()) {
+                                    Spacer(Modifier.height(8.dp))
+
+                                    if (memberSearchResults.isEmpty()) {
+                                        Text(
+                                            text = "No users found.",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    } else {
+                                        Column(
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            memberSearchResults.forEach { candidate ->
+                                                Card(
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(10.dp),
+                                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        ProfileAvatar(
+                                                            imageUrl = candidate.profilePictureUrl,
+                                                            label = candidate.displayName.ifBlank { candidate.email },
+                                                            modifier = Modifier.size(36.dp)
+                                                        )
+
+                                                        Column(modifier = Modifier.weight(1f)) {
+                                                            Text(
+                                                                text = candidate.displayName.ifBlank { candidate.email },
+                                                                style = MaterialTheme.typography.bodyMedium
+                                                            )
+                                                            if (candidate.displayName.isNotBlank()) {
+                                                                Text(
+                                                                    text = candidate.email,
+                                                                    style = MaterialTheme.typography.bodySmall
+                                                                )
+                                                            }
+                                                        }
+
+                                                        Button(
+                                                            enabled = !managingGroup,
+                                                            onClick = {
+                                                                scope.launch {
+                                                                    try {
+                                                                        managingGroup = true
+                                                                        repo.addGroupMember(
+                                                                            chatId = chatId,
+                                                                            actingUid = myUid ?: throw Exception("Not signed in"),
+                                                                            newMemberUid = candidate.uid
+                                                                        )
+
+                                                                        memberSearchQuery = ""
+                                                                        memberSearchResults.clear()
+                                                                        refreshGroupMeta()
+                                                                    } catch (e: CancellationException) {
+                                                                        throw e
+                                                                    } catch (e: Exception) {
+                                                                        error = e.message ?: "Failed to add member"
+                                                                    } finally {
+                                                                        managingGroup = false
+                                                                    }
+                                                                }
+                                                            }
+                                                        ) {
+                                                            Text("Add")
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    items(groupMembers, key = { "member_${it.uid}" }) { member ->
+                        val label = when {
+                            member.displayName.isNotBlank() -> member.displayName
+                            member.email.isNotBlank() -> member.email
+                            else -> member.uid
+                        }
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                ProfileAvatar(
+                                    imageUrl = member.profilePictureUrl,
+                                    label = label,
+                                    modifier = Modifier.size(36.dp)
+                                )
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(label)
+                                    if (member.email.isNotBlank()) {
+                                        Text(
+                                            member.email,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    Text(
+                                        "Role: ${member.role}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.height(6.dp))
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (canEditRoles() && member.uid != myUid && member.role != "owner") {
+                                    Button(
+                                        enabled = !managingGroup && member.role != "cohost",
+                                        onClick = {
+                                            scope.launch {
+                                                try {
+                                                    managingGroup = true
+                                                    repo.updateGroupMemberRole(
+                                                        chatId = chatId,
+                                                        actingUid = myUid ?: throw Exception("Not signed in"),
+                                                        targetUid = member.uid,
+                                                        newRole = "cohost"
+                                                    )
+                                                    refreshGroupMeta()
+                                                } catch (e: CancellationException) {
+                                                    throw e
+                                                } catch (e: Exception) {
+                                                    error = e.message ?: "Failed to promote member"
+                                                } finally {
+                                                    managingGroup = false
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Text("Make cohost")
+                                    }
+
+                                    Button(
+                                        enabled = !managingGroup && member.role == "cohost",
+                                        onClick = {
+                                            scope.launch {
+                                                try {
+                                                    managingGroup = true
+                                                    repo.updateGroupMemberRole(
+                                                        chatId = chatId,
+                                                        actingUid = myUid ?: throw Exception("Not signed in"),
+                                                        targetUid = member.uid,
+                                                        newRole = "member"
+                                                    )
+                                                    refreshGroupMeta()
+                                                } catch (e: CancellationException) {
+                                                    throw e
+                                                } catch (e: Exception) {
+                                                    error = e.message ?: "Failed to demote cohost"
+                                                } finally {
+                                                    managingGroup = false
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Text("Remove cohost")
+                                    }
+                                }
+
+                                if (
+                                    !managingGroup &&
+                                    (
+                                            (myRole == "owner" && member.uid != myUid && member.role != "owner") ||
+                                                    (myRole == "cohost" && member.uid != myUid && member.role == "member")
+                                            )
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            scope.launch {
+                                                try {
+                                                    managingGroup = true
+                                                    repo.removeGroupMember(
+                                                        chatId = chatId,
+                                                        actingUid = myUid ?: throw Exception("Not signed in"),
+                                                        targetUid = member.uid
+                                                    )
+                                                    refreshGroupMeta()
+                                                } catch (e: CancellationException) {
+                                                    throw e
+                                                } catch (e: Exception) {
+                                                    error = e.message ?: "Failed to remove member"
+                                                } finally {
+                                                    managingGroup = false
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Text("Remove")
+                                    }
+                                }
+                            }
+
+                            //dividers to make space for the Delete group chat functionality - currently removed since it is not implemented
+
+                            // Spacer(Modifier.height(8.dp))
+                            // HorizontalDivider()
+                        }
+                    }
+
+                    /**
+                     * Currently this feature is not implemented
+                     *
+                    if (canDeleteGroup()) {
+                        item("delete_group_section") {
+                            Spacer(Modifier.height(12.dp))
+                            Button(
+                                enabled = !managingGroup,
+                                onClick = { confirmDeleteGroup = true }
+                            ) {
+                                Text("Delete Group Permanently")
+                            }
+                        }
+                    }
+                    */
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showManageDialog = false
+                        memberSearchQuery = ""
+                        memberSearchResults.clear()
+                    },
+                    enabled = !managingGroup
+                ) {
+                    Text("Close")
+                }
+            },
+            dismissButton = {}
+        )
+    }
+/**
+ * Currently this feature is not implemented
+ *
+    if (confirmDeleteGroup) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!managingGroup) confirmDeleteGroup = false
+            },
+            title = { Text("Delete group permanently?") },
+            text = {
+                Text("This will delete the group for everyone and cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = {
+                        scope.launch {
+                            try {
+                                managingGroup = true
+                                repo.deleteGroupChatPermanently(
+                                    chatId = chatId,
+                                    actingUid = myUid ?: throw Exception("Not signed in")
+                                )
+                                confirmDeleteGroup = false
+                                showManageDialog = false
+                                onBack()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                error = e.message ?: "Failed to delete group"
+                            } finally {
+                                managingGroup = false
+                            }
+                        }
+                    }
+                ) {
+                    Text("Delete")
+                }
+
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = { confirmDeleteGroup = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    */
+
     Scaffold(
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
@@ -375,6 +827,15 @@ fun ChatScreen(
                 title = { Text(title) },
                 navigationIcon = {
                     TextButton(onClick = onBack) { Text("Back") }
+                },
+                actions = {
+                    if (isGroupChat()) {
+                        TextButton(
+                            onClick = { showManageDialog = true }
+                        ) {
+                            Text("Manage")
+                        }
+                    }
                 }
             )
 
