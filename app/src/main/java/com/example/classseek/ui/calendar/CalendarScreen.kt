@@ -26,12 +26,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -69,7 +73,8 @@ fun CalendarScreen(
     signedInAccount: GoogleSignInAccount?,
     calendarEvents: List<Event>,
     onSignInClick: (Intent) -> Unit,
-    onAddEventClick: (Long) -> Unit
+    onAddEventClick: (Long) -> Unit,
+    onDeleteEventClick: (String) -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -245,7 +250,13 @@ fun CalendarScreen(
 
                     val todayEvents = groupedEvents[todayLabel]
                     if (todayEvents != null) {
-                        items(todayEvents) { event -> AgendaItem(event) }
+                        items(todayEvents) { event ->
+                            AgendaItem(
+                                event = event,
+                                canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
+                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
+                            )
+                        }
                     }
 
                     val futureDateLabels = groupedEvents.keys
@@ -265,7 +276,13 @@ fun CalendarScreen(
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
-                        items(groupedEvents[dateLabel]!!) { event -> AgendaItem(event) }
+                        items(groupedEvents[dateLabel]!!) { event ->
+                            AgendaItem(
+                                event = event,
+                                canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
+                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
+                            )
+                        }
                     }
                 }
             }
@@ -321,7 +338,11 @@ fun CalendarScreen(
                 } else {
                     LazyColumn {
                         items(eventsForSelectedDate) { event ->
-                            AgendaItem(event)
+                            AgendaItem(
+                                event = event,
+                                canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
+                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
+                            )
                         }
                     }
                 }
@@ -331,10 +352,15 @@ fun CalendarScreen(
 }
 
 @Composable
-fun AgendaItem(event: Event) {
+fun AgendaItem(
+    event: Event,
+    canDelete: Boolean = false,
+    onDeleteClick: () -> Unit = {}
+) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
     val eventColor = Color(0xFF4285F4)
+    var showMenu by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -361,10 +387,29 @@ fun AgendaItem(event: Event) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.width(4.dp).height(24.dp).background(eventColor, RoundedCornerShape(2.dp)))
                     Spacer(modifier = Modifier.width(12.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(text = event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                         if (!event.location.isNullOrEmpty()) {
                             Text(text = event.location, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        }
+                    }
+                    if (canDelete) {
+                        Box {
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            }
+                            DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Delete") },
+                                    onClick = {
+                                        showMenu = false
+                                        onDeleteClick()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
