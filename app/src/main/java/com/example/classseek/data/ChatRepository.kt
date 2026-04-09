@@ -1,8 +1,6 @@
 package com.example.classseek.data
 
 import com.google.firebase.Timestamp
-import com.google.firebase.firestore.DocumentChange
-import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -12,7 +10,6 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 import java.security.MessageDigest
-import java.util.UUID
 
 data class ChatListItem(
     val id: String = "",
@@ -342,6 +339,69 @@ class ChatRepository(
         return doc.getString("role")
     }
 
+    private suspend fun getUserDisplayName(uid: String): String {
+        val doc = users.document(uid).get().await()
+
+        return doc.getString("displayName")
+            ?.trim()
+            .orEmpty()
+            .ifBlank { doc.getString("name")?.trim().orEmpty() }
+            .ifBlank { doc.getString("email")?.substringBefore("@").orEmpty() }
+            .ifBlank { "User" }
+    }
+
+    private suspend fun sendSystemMembershipMessage(
+        chatId: String,
+        senderId: String,
+        text: String
+    ): String {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) throw Exception("Message cannot be empty")
+
+        val chat = getChatInfo(chatId)
+        val msgRef = chatMessagesRef(chatId).document()
+        val now = FieldValue.serverTimestamp()
+        val batch = db.batch()
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "system",
+                "text" to trimmed,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to trimmed,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to trimmed,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
+    }
+
     suspend fun addGroupMember(
         chatId: String,
         actingUid: String,
@@ -395,6 +455,13 @@ class ChatRepository(
         )
 
         batch.commit().await()
+
+        val newMemberName = getUserDisplayName(newMemberUid)
+        sendSystemMembershipMessage(
+            chatId = chatId,
+            senderId = actingUid,
+            text = "$newMemberName has been added"
+        )
     }
 
     suspend fun removeGroupMember(
@@ -420,6 +487,7 @@ class ChatRepository(
         val updatedMemberIds = chat.memberIds.filter { it != targetUid }
         if (updatedMemberIds.size < 2) throw Exception("Group must keep at least 2 members")
 
+        val targetName = getUserDisplayName(targetUid)
         val batch = db.batch()
 
         batch.update(
@@ -434,6 +502,12 @@ class ChatRepository(
         batch.delete(userInboxRef(targetUid).document(chatId))
 
         batch.commit().await()
+
+        sendSystemMembershipMessage(
+            chatId = chatId,
+            senderId = actingUid,
+            text = "$targetName has been removed"
+        )
     }
 
     suspend fun leaveGroupChat(chatId: String, myUid: String) {
@@ -526,6 +600,8 @@ class ChatRepository(
 
         val msgRef = chatMessagesRef(chatId).document()
         val batch = db.batch()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
 
         batch.set(
             msgRef,
@@ -533,7 +609,7 @@ class ChatRepository(
                 "senderId" to senderId,
                 "type" to "text",
                 "text" to trimmed,
-                "createdAt" to FieldValue.serverTimestamp(),
+                "createdAt" to now,
                 "replyToMessageId" to null
             )
         )
@@ -541,25 +617,21 @@ class ChatRepository(
         batch.update(
             chatRef(chatId),
             mapOf(
-                "lastMessageAt" to FieldValue.serverTimestamp(),
+                "lastMessageAt" to now,
                 "lastMessageText" to trimmed,
                 "lastMessageSenderId" to senderId
             )
         )
 
-        val memberIds = getChatInfo(chatId).memberIds
-        val title = getChatTitle(chatId)
-        val type = getChatInfo(chatId).type
-
-        memberIds.forEach { uid ->
+        chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
                 mapOf(
                     "chatId" to chatId,
-                    "title" to title,
-                    "type" to type,
+                    "title" to chat.title,
+                    "type" to chat.type,
                     "lastMessageText" to trimmed,
-                    "lastMessageAt" to FieldValue.serverTimestamp(),
+                    "lastMessageAt" to now,
                     "hidden" to false
                 ),
                 SetOptions.merge()
@@ -698,6 +770,7 @@ class ChatRepository(
             hasPendingWrites = metadata.hasPendingWrites()
         )
     }
+
     suspend fun findExistingDmChatId(uidA: String, uidB: String): String? {
         if (uidA == uidB) return null
 
