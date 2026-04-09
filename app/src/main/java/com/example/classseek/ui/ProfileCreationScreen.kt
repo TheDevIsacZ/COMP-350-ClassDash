@@ -255,12 +255,17 @@ fun ProfileCreationScreen(
                                     "Joined " + SimpleDateFormat("MMM yyyy", Locale.getDefault()).format(Date())
                                 }
 
+                                //edited name and email for easier lookup of profile and email for the database lookups
+
+                                val normalizedEmail = initialEmail.trim().lowercase()
+                                val trimmedName = name.trim()
+
                                 // Trigger the save callback with the gathered profile data
                             onSaveProfile(
                                 UserProfile(
                                     uid = initialProfile?.uid ?: "",
-                                    name = name,
-                                    email = initialEmail,
+                                    name = trimmedName,
+                                    email = normalizedEmail,
                                     major = major,
                                     bio = bio,
                                     location = location,

@@ -2,6 +2,7 @@ package com.example.classseek.ui
 
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -48,6 +49,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.messaging.FirebaseMessaging
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +64,19 @@ class ClassSeekActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         FirebaseApp.initializeApp(this)
+
+        // --- FCM Token Retrieval (fixed) ---
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val token = task.result
+                Log.d("FCM_TOKEN", "Device token: $token")
+                // Optional: show a toast (make sure to import Toast)
+                Toast.makeText(applicationContext, "Token: $token", Toast.LENGTH_SHORT).show()
+            } else {
+                Log.w("FCM_TOKEN", "Failed to get token", task.exception)
+            }
+        }
+
         setContent {
             ClassSeekTheme {
                 ClassSeekApp()
@@ -312,10 +327,39 @@ fun ClassSeekApp() {
             initialEmail = firebaseUser?.email ?: "",
             onSaveProfile = { newProfile ->
                 scope.launch {
-                    val profileWithId = newProfile.copy(uid = firebaseUser!!.uid)
                     try {
-                        // Persist user profile data to Firestore
-                        db.collection("users").document(firebaseUser!!.uid).set(profileWithId).await()
+                        val user = firebaseUser ?: throw Exception("No signed-in user")
+
+                        val profileWithId = newProfile.copy(uid = user.uid)
+
+                        val normalizedEmail = profileWithId.email.trim().lowercase()
+                        val trimmedDisplayName = profileWithId.name.trim()
+
+                        val userDoc = mapOf(
+                            "uid" to user.uid,
+                            "name" to trimmedDisplayName,
+                            "displayName" to trimmedDisplayName,
+                            "email" to normalizedEmail,
+                            "searchEmail" to normalizedEmail,
+                            "searchName" to trimmedDisplayName.lowercase(),
+                            "major" to profileWithId.major.trim(),
+                            "bio" to profileWithId.bio.trim(),
+                            "location" to profileWithId.location.trim(),
+                            "githubUrl" to profileWithId.githubUrl.trim(),
+                            "profilePictureUrl" to profileWithId.profilePictureUrl,
+                            "bannerUrl" to profileWithId.bannerUrl,
+                            "joinDate" to profileWithId.joinDate,
+                            "followersCount" to profileWithId.followersCount,
+                            "followingCount" to profileWithId.followingCount,
+                            "isProfileComplete" to true,
+                            "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                        )
+
+                        db.collection("users")
+                            .document(user.uid)
+                            .set(userDoc, com.google.firebase.firestore.SetOptions.merge())
+                            .await()
+
                         userProfile = profileWithId
                         isEditingProfile = false
                     } catch (e: Exception) {
