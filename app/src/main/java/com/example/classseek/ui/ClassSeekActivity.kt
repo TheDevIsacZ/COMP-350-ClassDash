@@ -181,6 +181,30 @@ class ClassSeekActivity : ComponentActivity() {
         }
     }
 
+    suspend fun deleteEventFromCalendar(account: GoogleSignInAccount, eventId: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val calendarScope = "https://www.googleapis.com/auth/calendar"
+                val credential = GoogleAccountCredential.usingOAuth2(
+                    this@ClassSeekActivity, listOf(calendarScope)
+                )
+                credential.selectedAccountName = account.email
+
+                val service = Calendar.Builder(
+                    NetHttpTransport(),
+                    GsonFactory.getDefaultInstance(),
+                    credential
+                ).setApplicationName("ClassSeek").build()
+
+                service.events().delete("primary", eventId).execute()
+                true
+            } catch (e: Exception) {
+                Log.e("CALENDAR_DEBUG", "deleteEventFromCalendar: ERROR", e)
+                false
+            }
+        }
+    }
+
     private fun getFirstOccurrence(schedule: ClassSchedule): java.util.Calendar {
         val cal = java.util.Calendar.getInstance()
         cal.timeInMillis = schedule.startDate
@@ -413,6 +437,17 @@ fun ClassSeekApp() {
                                     onAddEventClick = { dateMillis ->
                                         initialDateForNewEvent = dateMillis
                                         isAddingEvent = true
+                                    },
+                                    onDeleteEventClick = { eventId ->
+                                        scope.launch {
+                                            signedInAccount?.let { account ->
+                                                val success = activity?.deleteEventFromCalendar(account, eventId) ?: false
+                                                if (success) {
+                                                    val events = activity?.getCalendarEvents(account)
+                                                    if (events != null) calendarEvents = events
+                                                }
+                                            }
+                                        }
                                     }
                                 )
                         }
