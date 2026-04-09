@@ -94,7 +94,7 @@ class ClassSeekActivity : ComponentActivity() {
                     service.events().list(schoolCalendarID)
                         .setOrderBy("startTime")
                         .setSingleEvents(true)
-                        .setMaxResults(50)
+                        .setMaxResults(70)
                         .execute().items ?: emptyList()
                 } catch (e: Exception) {
                     Log.e("CALENDAR_DEBUG", "Failed to fetch school events", e)

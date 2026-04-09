@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 
 enum class MarkerCategory(val label: String, val icon: ImageVector, val color: Color) {
     ALL("All", Icons.Default.Place, Color.Gray),
-    BUILDING("Building", Icons.Default.Business, Color(0xFF2596BE)), // Tealish
+    BUILDING("Building", Icons.Default.OtherHouses, Color(0xFF2596BE)), // Tealish
     STUDENT_SERVICE("Student Service", Icons.Default.School, Color(0xFFE580FF)),
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)) // Orange
 }
@@ -74,12 +74,10 @@ fun MapScreen(modifier: Modifier = Modifier) {
     // List of places loaded from Firestore
     var places by remember { mutableStateOf<List<MapPlace>>(emptyList()) }
 
-    // Filtered list based on selected category and search query
-    val displayPlaces = remember(places, selectedCategory, searchQuery) {
+    // Filtered list based on selected category (Search bar no longer affects this list)
+    val displayPlaces = remember(places, selectedCategory) {
         places.filter { place ->
-            val matchesCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
-            val matchesSearch = searchQuery.isEmpty() || place.name.contains(searchQuery, ignoreCase = true)
-            matchesCategory && matchesSearch
+            selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
         }
     }
 
@@ -284,7 +282,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     value = searchQuery,
                     onValueChange = { newValue ->
                         searchQuery = newValue
-                        selectedCategory = MarkerCategory.ALL
                         
                         val match = if (newValue.isNotEmpty()) {
                             places.find { it.name.contains(newValue, ignoreCase = true) }
@@ -311,7 +308,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = {
                                 searchQuery = ""
-                                selectedCategory = MarkerCategory.ALL
                                 selectedPlace = null
                             }) {
                                 Icon(Icons.Default.Clear, contentDescription = "Clear")
