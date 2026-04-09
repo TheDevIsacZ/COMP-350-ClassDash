@@ -1,6 +1,8 @@
 package com.example.classseek.data
 
 import com.google.firebase.Timestamp
+import com.google.firebase.firestore.DocumentChange
+import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -9,11 +11,21 @@ import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
+import java.security.MessageDigest
 import java.util.UUID
 
+data class ChatListItem(
+    val id: String = "",
+    val title: String = "",
+    val type: String = "dm",
+    val lastMessageText: String? = null,
+    val lastMessageAt: Timestamp? = null,
+    val hidden: Boolean = false
+)
+
 data class Message(
-    val id: String,
-    val senderId: String,
+    val id: String = "",
+    val senderId: String = "",
     val type: String = "text",
     val text: String? = null,
     val createdAt: Timestamp? = null,
@@ -21,373 +33,602 @@ data class Message(
     val hasPendingWrites: Boolean = false
 )
 
-data class ChatListItem(
-    val id: String,
-    val title: String,
-    val lastMessageText: String? = null
-)
-
 data class ReadReceiptState(
-    val otherUserId: String? = null,
-    val otherUserLastReadAt: Timestamp? = null,
     val otherUserLastReadMessageId: String? = null
 )
 
-class ChatRepository(private val db: FirebaseFirestore) {
+data class GroupMember(
+    val uid: String,
+    val role: String,
+    val joinedAt: Timestamp? = null,
+    val lastReadAt: Timestamp? = null,
+    val lastReadMessageId: String? = null,
+    val hidden: Boolean = false,
+    val displayName: String = "",
+    val email: String = "",
+    val profilePictureUrl: String = ""
+)
 
-    private val chatsRef = db.collection("chats")
-    private val dmThreadsRef = db.collection("dmThreads")
-    private val groupThreadsRef = db.collection("groupThreads")
-    private val usersRef = db.collection("users")
+data class ChatInfo(
+    val id: String,
+    val type: String,
+    val title: String,
+    val createdBy: String,
+    val memberIds: List<String>
+)
 
-    /**
-     * Open an existing DM between uidA and uidB, or create it if absent.
-     * Returns the chatId.
-     *
-     * Uses a deterministic dmKey so you never create duplicate DM chats:
-     * dmKey = min(uidA, uidB) + "_" + max(uidA, uidB)
-     */
-    suspend fun openOrCreateDm(uidA: String, uidB: String, title: String?): String {
-        val (a, b) = listOf(uidA, uidB).sorted()
-        val dmKey = "${a}_${b}"
-        val dmDocRef = dmThreadsRef.document(dmKey)
+class ChatRepository(
+    private val db: FirebaseFirestore
+) {
+    private val chats = db.collection("chats")
+    private val users = db.collection("users")
+    private val dmThreads = db.collection("dmThreads")
+    private val groupThreads = db.collection("groupThreads")
 
-        val existing = dmDocRef.get().await()
-        if (existing.exists()) {
-            val chatId = existing.getString("chatId")
-            if (!chatId.isNullOrBlank()) {
-                inboxRef(uidA, chatId).update("hidden", false).await()
-                return chatId
-            }
-        }
+    private fun chatRef(chatId: String) = chats.document(chatId)
+    private fun chatMembersRef(chatId: String) = chatRef(chatId).collection("members")
+    private fun chatMessagesRef(chatId: String) = chatRef(chatId).collection("messages")
+    private fun userInboxRef(uid: String) = users.document(uid).collection("inbox")
 
-        val newChatRef = chatsRef.document()
-
-        db.runTransaction { tx ->
-            val now = Timestamp.now()
-            val finalTitle = if (title.isNullOrBlank()) "Chat" else title.trim()
-
-            tx.set(
-                newChatRef,
-                mapOf(
-                    "type" to "dm",
-                    "title" to finalTitle,
-                    "memberIds" to listOf(a, b),
-                    "createdAt" to now,
-                    "createdBy" to uidA,
-                    "memberCount" to 2,
-                    "lastMessageAt" to null,
-                    "lastMessageText" to null,
-                    "lastMessageSenderId" to null,
-                    "hidden" to false
-                )
-            )
-
-            val memberARef = newChatRef.collection("members").document(a)
-            val memberBRef = newChatRef.collection("members").document(b)
-
-            tx.set(
-                memberARef,
-                mapOf(
-                    "role" to "member",
-                    "joinedAt" to now,
-                    "lastReadAt" to null,
-                    "lastReadMessageId" to null
-                )
-            )
-
-            tx.set(
-                memberBRef,
-                mapOf(
-                    "role" to "member",
-                    "joinedAt" to now,
-                    "lastReadAt" to null,
-                    "lastReadMessageId" to null
-                )
-            )
-
-            tx.set(
-                inboxRef(a, newChatRef.id),
-                mapOf(
-                    "chatId" to newChatRef.id,
-                    "title" to finalTitle,
-                    "type" to "dm",
-                    "lastMessageText" to null,
-                    "lastMessageAt" to null,
-                    "hidden" to false
-                )
-            )
-
-            tx.set(
-                inboxRef(b, newChatRef.id),
-                mapOf(
-                    "chatId" to newChatRef.id,
-                    "title" to finalTitle,
-                    "type" to "dm",
-                    "lastMessageText" to null,
-                    "lastMessageAt" to null,
-                    "hidden" to false
-                )
-            )
-
-            tx.set(
-                dmDocRef,
-                mapOf(
-                    "chatId" to newChatRef.id,
-                    "userA" to a,
-                    "userB" to b,
-                    "createdAt" to now
-                )
-            )
-        }.await()
-
-        return newChatRef.id
+    private fun stableDmKey(uidA: String, uidB: String): String {
+        val sorted = listOf(uidA, uidB).sorted()
+        return "${sorted[0]}_${sorted[1]}"
     }
 
-    /**
-     * Possibly temporary until real user accounts are created.
-     */
-    private fun buildGroupKey(memberIds: List<String>): String {
-        return memberIds
-            .distinct()
-            .sorted()
-            .joinToString("_")
+    private fun stableGroupKey(memberIds: List<String>, title: String): String {
+        val canonical = memberIds.distinct().sorted().joinToString("|") + "|" + title.trim()
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(canonical.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        return digest
     }
 
-    suspend fun openOrCreateGroupChat(
-        createdBy: String,
-        memberIds: List<String>,
-        title: String,
-        photoURL: String? = null
-    ): String {
-        require(memberIds.isNotEmpty()) { "memberIds cannot be empty" }
+    suspend fun getChatInfo(chatId: String): ChatInfo {
+        val doc = chatRef(chatId).get().await()
+        if (!doc.exists()) throw Exception("Chat not found")
 
-        val uniqueMembers = memberIds.distinct()
-        require(uniqueMembers.contains(createdBy)) { "memberIds should include createdBy" }
-
-        val groupKey = buildGroupKey(uniqueMembers)
-        val groupThreadRef = groupThreadsRef.document(groupKey)
-
-        val existing = groupThreadRef.get().await()
-        if (existing.exists()) {
-            val chatId = existing.getString("chatId")
-            if (!chatId.isNullOrBlank()) {
-                inboxRef(createdBy, chatId).update("hidden", false).await()
-                return chatId
-            }
-        }
-
-        val chatRef = chatsRef.document()
-
-        db.runTransaction { tx ->
-            val now = Timestamp.now()
-
-            tx.set(
-                chatRef,
-                mapOf(
-                    "type" to "group",
-                    "title" to title,
-                    "memberIds" to uniqueMembers,
-                    "createdAt" to now,
-                    "createdBy" to createdBy,
-                    "memberCount" to uniqueMembers.size,
-                    "photoURL" to (photoURL ?: ""),
-                    "lastMessageAt" to null,
-                    "lastMessageText" to null,
-                    "lastMessageSenderId" to null
-                )
-            )
-
-            uniqueMembers.forEach { uid ->
-                val role = if (uid == createdBy) "owner" else "member"
-                val memberRef = chatRef.collection("members").document(uid)
-
-                tx.set(
-                    memberRef,
-                    mapOf(
-                        "role" to role,
-                        "joinedAt" to now,
-                        "lastReadAt" to null,
-                        "lastReadMessageId" to null,
-                        "hidden" to false
-                    )
-                )
-
-                tx.set(
-                    inboxRef(uid, chatRef.id),
-                    mapOf(
-                        "chatId" to chatRef.id,
-                        "title" to title,
-                        "type" to "group",
-                        "lastMessageText" to null,
-                        "lastMessageAt" to null,
-                        "hidden" to false
-                    )
-                )
-            }
-
-            tx.set(
-                groupThreadRef,
-                mapOf(
-                    "chatId" to chatRef.id,
-                    "groupKey" to groupKey,
-                    "memberIds" to uniqueMembers,
-                    "createdAt" to now
-                )
-            )
-        }.await()
-
-        return chatRef.id
+        return ChatInfo(
+            id = doc.id,
+            type = doc.getString("type") ?: "dm",
+            title = doc.getString("title") ?: "Chat",
+            createdBy = doc.getString("createdBy") ?: "",
+            memberIds = (doc.get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+        )
     }
 
-    /**
-     * Get a list of chat summaries for the current user.
-     * Checks hidden attribute to decide whether to display chat.
-     */
+    suspend fun getChatTitle(chatId: String): String {
+        val doc = chatRef(chatId).get().await()
+        return doc.getString("title") ?: "Chat"
+    }
+
     suspend fun getMyChats(myUid: String): List<ChatListItem> {
-        val snap = usersRef.document(myUid)
-            .collection("inbox")
+        val snap = userInboxRef(myUid)
             .whereEqualTo("hidden", false)
             .orderBy("lastMessageAt", Query.Direction.DESCENDING)
             .get()
             .await()
 
-        return snap.documents.map { doc ->
-            ChatListItem(
-                id = doc.id,
-                title = doc.getString("title") ?: "Untitled Chat",
-                lastMessageText = doc.getString("lastMessageText")
+        return snap.documents.map { it.toChatListItem() }
+    }
+
+    fun listenToMyChats(
+        myUid: String,
+        onSnapshot: (List<ChatListItem>) -> Unit,
+        onError: (Exception) -> Unit
+    ): ListenerRegistration {
+        return userInboxRef(myUid)
+            .whereEqualTo("hidden", false)
+            .orderBy("lastMessageAt", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(Exception(error.message ?: "Inbox listener error"))
+                    return@addSnapshotListener
+                }
+
+                val items = snapshot?.documents
+                    ?.map { it.toChatListItem() }
+                    .orEmpty()
+
+                onSnapshot(items)
+            }
+    }
+
+    suspend fun openOrCreateDm(
+        uidA: String,
+        uidB: String,
+        title: String
+    ): String {
+        if (uidA == uidB) throw Exception("Cannot create DM with yourself")
+
+        val sorted = listOf(uidA, uidB).sorted()
+        val userA = sorted[0]
+        val userB = sorted[1]
+        val dmKey = stableDmKey(userA, userB)
+
+        val existingThread = dmThreads.document(dmKey).get().await()
+        val existingChatId = existingThread.getString("chatId")
+        if (!existingChatId.isNullOrBlank()) {
+            return existingChatId
+        }
+
+        val chatId = chats.document().id
+        val now = FieldValue.serverTimestamp()
+
+        val batch = db.batch()
+
+        val chatDoc = mapOf(
+            "type" to "dm",
+            "title" to title.trim(),
+            "memberIds" to listOf(userA, userB),
+            "createdAt" to now,
+            "createdBy" to uidA,
+            "memberCount" to 2,
+            "lastMessageAt" to null,
+            "lastMessageText" to null,
+            "lastMessageSenderId" to null,
+            "hidden" to false
+        )
+
+        batch.set(chatRef(chatId), chatDoc)
+
+        batch.set(
+            chatMembersRef(chatId).document(userA),
+            mapOf(
+                "role" to "owner",
+                "joinedAt" to now,
+                "lastReadAt" to null,
+                "lastReadMessageId" to null,
+                "hidden" to false
             )
+        )
+
+        batch.set(
+            chatMembersRef(chatId).document(userB),
+            mapOf(
+                "role" to "member",
+                "joinedAt" to now,
+                "lastReadAt" to null,
+                "lastReadMessageId" to null,
+                "hidden" to false
+            )
+        )
+
+        val inboxDoc = mapOf(
+            "chatId" to chatId,
+            "title" to title.trim(),
+            "type" to "dm",
+            "lastMessageText" to null,
+            "lastMessageAt" to null,
+            "hidden" to false
+        )
+
+        batch.set(userInboxRef(userA).document(chatId), inboxDoc, SetOptions.merge())
+        batch.set(userInboxRef(userB).document(chatId), inboxDoc, SetOptions.merge())
+
+        batch.set(
+            dmThreads.document(dmKey),
+            mapOf(
+                "chatId" to chatId,
+                "userA" to userA,
+                "userB" to userB,
+                "createdAt" to now
+            )
+        )
+
+        batch.commit().await()
+        return chatId
+    }
+
+    suspend fun openOrCreateGroupChat(
+        createdBy: String,
+        memberIds: List<String>,
+        title: String
+    ): String {
+        val distinctMembers = memberIds.distinct()
+        if (distinctMembers.size < 2) throw Exception("Group must have at least 2 members")
+        if (!distinctMembers.contains(createdBy)) throw Exception("Creator must be a member")
+
+        val finalTitle = title.trim().ifBlank { "Group Chat" }
+        val groupKey = stableGroupKey(distinctMembers, finalTitle)
+
+        val existingThread = groupThreads.document(groupKey).get().await()
+        val existingChatId = existingThread.getString("chatId")
+        if (!existingChatId.isNullOrBlank()) {
+            return existingChatId
+        }
+
+        val chatId = chats.document().id
+        val now = FieldValue.serverTimestamp()
+
+        val batch = db.batch()
+
+        val chatDoc = mapOf(
+            "type" to "group",
+            "title" to finalTitle,
+            "memberIds" to distinctMembers,
+            "createdAt" to now,
+            "createdBy" to createdBy,
+            "memberCount" to distinctMembers.size,
+            "lastMessageAt" to null,
+            "lastMessageText" to null,
+            "lastMessageSenderId" to null,
+            "hidden" to false
+        )
+
+        batch.set(chatRef(chatId), chatDoc)
+
+        distinctMembers.forEach { uid ->
+            val role = if (uid == createdBy) "owner" else "member"
+
+            batch.set(
+                chatMembersRef(chatId).document(uid),
+                mapOf(
+                    "role" to role,
+                    "joinedAt" to now,
+                    "lastReadAt" to null,
+                    "lastReadMessageId" to null,
+                    "hidden" to false
+                )
+            )
+
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to finalTitle,
+                    "type" to "group",
+                    "lastMessageText" to null,
+                    "lastMessageAt" to null,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.set(
+            groupThreads.document(groupKey),
+            mapOf(
+                "chatId" to chatId,
+                "groupKey" to groupKey,
+                "memberIds" to distinctMembers,
+                "createdAt" to now
+            )
+        )
+
+        batch.commit().await()
+        return chatId
+    }
+
+    suspend fun getGroupMembers(chatId: String): List<GroupMember> {
+        val memberDocs = chatMembersRef(chatId).get().await().documents
+        val memberIds = memberDocs.map { it.id }
+
+        val profiles = memberIds.associateWith { uid ->
+            users.document(uid).get()
+        }.mapValues { (_, task) ->
+            try {
+                task.await()
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        return memberDocs.map { doc ->
+            val profile = profiles[doc.id]
+            GroupMember(
+                uid = doc.id,
+                role = doc.getString("role") ?: "member",
+                joinedAt = doc.getTimestamp("joinedAt"),
+                lastReadAt = doc.getTimestamp("lastReadAt"),
+                lastReadMessageId = doc.getString("lastReadMessageId"),
+                hidden = doc.getBoolean("hidden") ?: false,
+                displayName = profile?.getString("displayName")
+                    ?.takeIf { it.isNotBlank() }
+                    ?: profile?.getString("name").orEmpty(),
+                email = profile?.getString("email").orEmpty(),
+                profilePictureUrl = profile?.getString("profilePictureUrl").orEmpty()
+            )
+        }.sortedWith(compareBy<GroupMember> {
+            when (it.role) {
+                "owner" -> 0
+                "cohost" -> 1
+                else -> 2
+            }
+        }.thenBy { it.displayName.ifBlank { it.email }.lowercase() })
+    }
+
+    suspend fun getMyRole(chatId: String, myUid: String): String? {
+        val doc = chatMembersRef(chatId).document(myUid).get().await()
+        return doc.getString("role")
+    }
+
+    suspend fun addGroupMember(
+        chatId: String,
+        actingUid: String,
+        newMemberUid: String
+    ) {
+        val chat = getChatInfo(chatId)
+        if (chat.type != "group") throw Exception("Not a group chat")
+        if (chat.memberIds.contains(newMemberUid)) return
+
+        val role = getMyRole(chatId, actingUid)
+        if (role != "owner" && role != "cohost") {
+            throw Exception("Only owner or cohost can add members")
+        }
+
+        val updatedMemberIds = (chat.memberIds + newMemberUid).distinct()
+        val title = chat.title
+        val now = FieldValue.serverTimestamp()
+
+        val batch = db.batch()
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "memberIds" to updatedMemberIds,
+                "memberCount" to updatedMemberIds.size
+            )
+        )
+
+        batch.set(
+            chatMembersRef(chatId).document(newMemberUid),
+            mapOf(
+                "role" to "member",
+                "joinedAt" to now,
+                "lastReadAt" to null,
+                "lastReadMessageId" to null,
+                "hidden" to false
+            )
+        )
+
+        batch.set(
+            userInboxRef(newMemberUid).document(chatId),
+            mapOf(
+                "chatId" to chatId,
+                "title" to title,
+                "type" to "group",
+                "lastMessageText" to null,
+                "lastMessageAt" to null,
+                "hidden" to false
+            ),
+            SetOptions.merge()
+        )
+
+        batch.commit().await()
+    }
+
+    suspend fun removeGroupMember(
+        chatId: String,
+        actingUid: String,
+        targetUid: String
+    ) {
+        val chat = getChatInfo(chatId)
+        if (chat.type != "group") throw Exception("Not a group chat")
+
+        val actingRole = getMyRole(chatId, actingUid)
+        val targetMemberDoc = chatMembersRef(chatId).document(targetUid).get().await()
+        val targetRole = targetMemberDoc.getString("role") ?: "member"
+
+        val allowed = when (actingRole) {
+            "owner" -> targetUid != actingUid && (targetRole == "member" || targetRole == "cohost")
+            "cohost" -> targetUid != actingUid && targetRole == "member"
+            else -> false
+        }
+
+        if (!allowed) throw Exception("You do not have permission to remove this member")
+
+        val updatedMemberIds = chat.memberIds.filter { it != targetUid }
+        if (updatedMemberIds.size < 2) throw Exception("Group must keep at least 2 members")
+
+        val batch = db.batch()
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "memberIds" to updatedMemberIds,
+                "memberCount" to updatedMemberIds.size
+            )
+        )
+
+        batch.delete(chatMembersRef(chatId).document(targetUid))
+        batch.delete(userInboxRef(targetUid).document(chatId))
+
+        batch.commit().await()
+    }
+
+    suspend fun leaveGroupChat(chatId: String, myUid: String) {
+        val chat = getChatInfo(chatId)
+        if (chat.type != "group") throw Exception("Not a group chat")
+
+        val myRole = getMyRole(chatId, myUid)
+        if (myRole == "owner") {
+            throw Exception("Owner cannot leave without transferring or deleting the group")
+        }
+
+        val updatedMemberIds = chat.memberIds.filter { it != myUid }
+        if (updatedMemberIds.size < 2) throw Exception("Group must keep at least 2 members")
+
+        val batch = db.batch()
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "memberIds" to updatedMemberIds,
+                "memberCount" to updatedMemberIds.size
+            )
+        )
+
+        batch.delete(chatMembersRef(chatId).document(myUid))
+        batch.delete(userInboxRef(myUid).document(chatId))
+
+        batch.commit().await()
+    }
+
+    suspend fun updateGroupMemberRole(
+        chatId: String,
+        actingUid: String,
+        targetUid: String,
+        newRole: String
+    ) {
+        if (newRole !in listOf("cohost", "member")) {
+            throw Exception("Role must be cohost or member")
+        }
+
+        val actingRole = getMyRole(chatId, actingUid)
+        if (actingRole != "owner") {
+            throw Exception("Only owner can change roles")
+        }
+
+        if (actingUid == targetUid) {
+            throw Exception("Owner cannot change their own role here")
+        }
+
+        val targetRef = chatMembersRef(chatId).document(targetUid)
+        val targetDoc = targetRef.get().await()
+        val currentRole = targetDoc.getString("role") ?: "member"
+
+        if (currentRole == "owner") {
+            throw Exception("Cannot change owner role here")
+        }
+
+        targetRef.update("role", newRole).await()
+    }
+
+    suspend fun hideChatForUser(chatId: String, uid: String) {
+        userInboxRef(uid).document(chatId)
+            .set(mapOf("hidden" to true), SetOptions.merge())
+            .await()
+
+        val memberDoc = chatMembersRef(chatId).document(uid)
+        if (memberDoc.get().await().exists()) {
+            memberDoc.set(mapOf("hidden" to true), SetOptions.merge()).await()
         }
     }
 
-    /**
-     * Send a text message to a chat.
-     * Returns the exact messageId so the UI can scroll to the exact message sent.
-     *
-     * IMPORTANT: Updating each member's inbox/unread count is best done in Cloud Functions.
-     */
+    suspend fun unhideChatForUser(chatId: String, uid: String) {
+        userInboxRef(uid).document(chatId)
+            .set(mapOf("hidden" to false), SetOptions.merge())
+            .await()
+
+        val memberDoc = chatMembersRef(chatId).document(uid)
+        if (memberDoc.get().await().exists()) {
+            memberDoc.set(mapOf("hidden" to false), SetOptions.merge()).await()
+        }
+    }
+
     suspend fun sendTextMessage(
         chatId: String,
         senderId: String,
-        text: String,
-        replyToMessageId: String? = null
+        text: String
     ): String {
-        val messageId = UUID.randomUUID().toString()
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) throw Exception("Message cannot be empty")
 
-        val chatRef = chatsRef.document(chatId)
-        val messageRef = chatRef.collection("messages").document(messageId)
+        val msgRef = chatMessagesRef(chatId).document()
+        val batch = db.batch()
 
-        val chatSnap = chatRef.get().await()
-        val memberIds =
-            (chatSnap.get("memberIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
-
-        val messageData = mapOf(
-            "senderId" to senderId,
-            "type" to "text",
-            "text" to text,
-            "createdAt" to FieldValue.serverTimestamp(),
-            "replyToMessageId" to replyToMessageId
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "text",
+                "text" to trimmed,
+                "createdAt" to FieldValue.serverTimestamp(),
+                "replyToMessageId" to null
+            )
         )
 
-        val batch = db.batch()
-        batch.set(messageRef, messageData)
-
         batch.update(
-            chatRef,
+            chatRef(chatId),
             mapOf(
                 "lastMessageAt" to FieldValue.serverTimestamp(),
-                "lastMessageText" to text,
+                "lastMessageText" to trimmed,
                 "lastMessageSenderId" to senderId
             )
         )
 
+        val memberIds = getChatInfo(chatId).memberIds
+        val title = getChatTitle(chatId)
+        val type = getChatInfo(chatId).type
+
         memberIds.forEach { uid ->
             batch.set(
-                inboxRef(uid, chatId),
+                userInboxRef(uid).document(chatId),
                 mapOf(
                     "chatId" to chatId,
-                    "title" to (chatSnap.getString("title") ?: "Chat"),
-                    "type" to (chatSnap.getString("type") ?: "dm"),
-                    "lastMessageText" to text,
-                    "lastMessageAt" to FieldValue.serverTimestamp()
+                    "title" to title,
+                    "type" to type,
+                    "lastMessageText" to trimmed,
+                    "lastMessageAt" to FieldValue.serverTimestamp(),
+                    "hidden" to false
                 ),
                 SetOptions.merge()
             )
         }
 
         batch.commit().await()
-        return messageId
+        return msgRef.id
     }
 
-    /**
-     * Listen to recent messages in realtime for chat logs.
-     * Returns a ListenerRegistration; call remove() when the screen is disposed.
-     *
-     * Firestore already returns these ordered by createdAt DESC.
-     * We preserve snapshot order in the UI instead of re-sorting by hasPendingWrites,
-     * because re-sorting by metadata can make messages jump around.
-     */
+    suspend fun updateMyLastRead(
+        chatId: String,
+        myUid: String,
+        messageId: String
+    ) {
+        chatMembersRef(chatId).document(myUid)
+            .set(
+                mapOf(
+                    "lastReadAt" to FieldValue.serverTimestamp(),
+                    "lastReadMessageId" to messageId
+                ),
+                SetOptions.merge()
+            )
+            .await()
+    }
+
     fun listenMessagesRealtime(
         chatId: String,
-        pageSize: Int = 50,
-        onSnapshot: (List<Message>, List<DocumentSnapshot>) -> Unit,
-        onError: ((Exception) -> Unit)? = null
+        pageSize: Long = 50,
+        onSnapshot: (List<Message>, Boolean) -> Unit,
+        onError: (Exception) -> Unit
     ): ListenerRegistration {
-        val q = chatsRef.document(chatId)
-            .collection("messages")
+        return chatMessagesRef(chatId)
             .orderBy("createdAt", Query.Direction.DESCENDING)
-            .limit(pageSize.toLong())
+            .limit(pageSize)
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
+                if (error != null) {
+                    onError(Exception(error.message ?: "Messages listener error"))
+                    return@addSnapshotListener
+                }
 
-        return q.addSnapshotListener(MetadataChanges.INCLUDE) { snap, err ->
-            if (err != null) {
-                onError?.invoke(err)
-                return@addSnapshotListener
+                val messages = snapshot?.documents
+                    ?.map { it.toMessage() }
+                    .orEmpty()
+
+                val hasPendingWrites = snapshot?.metadata?.hasPendingWrites() == true
+                onSnapshot(messages, hasPendingWrites)
             }
-
-            if (snap == null) {
-                onSnapshot(emptyList(), emptyList())
-                return@addSnapshotListener
-            }
-
-            val docs = snap.documents
-            val messages = docs.mapNotNull { docToMessage(it) }
-            onSnapshot(messages, docs)
-        }
     }
 
-    /**
-     * This function specifically updates the most recent messages of each saved chat in the Friends screen.
-     */
-    fun listenToMyChats(
+    fun listenToDmReadReceipt(
+        chatId: String,
         myUid: String,
-        onSnapshot: (List<ChatListItem>) -> Unit,
-        onError: ((Exception) -> Unit)? = null
+        onSnapshot: (ReadReceiptState) -> Unit,
+        onError: (Exception) -> Unit
     ): ListenerRegistration {
-        return usersRef.document(myUid)
-            .collection("inbox")
-            .whereEqualTo("hidden", false)
-            .orderBy("lastMessageAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, err ->
-                if (err != null) {
-                    onError?.invoke(err)
+        return chatMembersRef(chatId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(Exception(error.message ?: "Read receipt listener error"))
                     return@addSnapshotListener
                 }
 
-                if (snap == null) {
-                    onSnapshot(emptyList())
-                    return@addSnapshotListener
-                }
-
-                val chats = snap.documents.map { doc ->
-                    ChatListItem(
-                        id = doc.id,
-                        title = doc.getString("title") ?: "Untitled Chat",
-                        lastMessageText = doc.getString("lastMessageText")
+                val otherDoc = snapshot?.documents?.firstOrNull { it.id != myUid }
+                onSnapshot(
+                    ReadReceiptState(
+                        otherUserLastReadMessageId = otherDoc?.getString("lastReadMessageId")
                     )
-                }
-
-                onSnapshot(chats)
+                )
             }
     }
 
@@ -395,117 +636,75 @@ class ChatRepository(private val db: FirebaseFirestore) {
         chatId: String,
         myUid: String,
         onSnapshot: (String?) -> Unit,
-        onError: ((Exception) -> Unit)? = null
+        onError: (Exception) -> Unit
     ): ListenerRegistration {
-        return chatsRef.document(chatId)
-            .collection("members")
+        return chatMembersRef(chatId)
             .document(myUid)
-            .addSnapshotListener { snap, err ->
-                if (err != null) {
-                    onError?.invoke(err)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(Exception(error.message ?: "My read-state listener error"))
                     return@addSnapshotListener
                 }
 
-                onSnapshot(snap?.getString("lastReadMessageId"))
+                onSnapshot(snapshot?.getString("lastReadMessageId"))
             }
     }
 
     /**
-     * Pagination: load older messages after the last seen DocumentSnapshot.
+     * IMPORTANT:
+     * With the current Firestore rules, a client cannot fully and safely
+     * recursively delete:
+     * - messages
+     * - owner member doc
+     * - chat doc
+     * - inbox docs
+     *
+     * So a true permanent delete should be implemented in a Cloud Function
+     * or with expanded admin rules.
      */
-    suspend fun loadMoreMessages(
+    suspend fun deleteGroupChatPermanently(
         chatId: String,
-        lastSeenDoc: DocumentSnapshot,
-        pageSize: Int = 50
-    ): Pair<List<Message>, List<DocumentSnapshot>> {
-        val q = chatsRef.document(chatId)
-            .collection("messages")
-            .orderBy("createdAt", Query.Direction.DESCENDING)
-            .startAfter(lastSeenDoc)
-            .limit(pageSize.toLong())
-
-        val snap = q.get().await()
-        val docs = snap.documents
-        val messages = docs.mapNotNull { docToMessage(it) }
-        return messages to docs
-    }
-
-    /**
-     * Update the user's read state in the membership doc.
-     * Call when user opens the chat or after a newly visible incoming message is shown.
-     */
-    suspend fun updateMyLastRead(
-        chatId: String,
-        myUid: String,
-        lastReadMessageId: String?
+        actingUid: String
     ) {
-        val memberRef = chatsRef.document(chatId).collection("members").document(myUid)
+        val role = getMyRole(chatId, actingUid)
+        if (role != "owner") {
+            throw Exception("Only owner can permanently delete the group")
+        }
 
-        memberRef.update(
-            mapOf(
-                "lastReadAt" to FieldValue.serverTimestamp(),
-                "lastReadMessageId" to lastReadMessageId
-            )
-        ).await()
-    }
-
-    private fun docToMessage(doc: DocumentSnapshot): Message? {
-        val senderId = doc.getString("senderId") ?: return null
-
-        return Message(
-            id = doc.id,
-            senderId = senderId,
-            type = doc.getString("type") ?: "text",
-            text = doc.getString("text"),
-            createdAt = doc.getTimestamp("createdAt"),
-            replyToMessageId = doc.getString("replyToMessageId"),
-            hasPendingWrites = doc.metadata.hasPendingWrites()
+        throw Exception(
+            "Permanent delete is not supported from the client with current Firestore rules. Use a Cloud Function or expand delete rules."
         )
     }
 
-    /**
-     * Hides chats from users without deleting them from database.
-     */
-    suspend fun hideChatForUser(chatId: String, myUid: String) {
-        inboxRef(myUid, chatId).update("hidden", true).await()
+    private fun DocumentSnapshot.toChatListItem(): ChatListItem {
+        return ChatListItem(
+            id = getString("chatId") ?: id,
+            title = getString("title") ?: "Chat",
+            type = getString("type") ?: "dm",
+            lastMessageText = getString("lastMessageText"),
+            lastMessageAt = getTimestamp("lastMessageAt"),
+            hidden = getBoolean("hidden") ?: false
+        )
     }
 
-    suspend fun getChatTitle(chatId: String): String {
-        val doc = chatsRef.document(chatId).get().await()
-        return doc.getString("title") ?: "Chat"
+    private fun DocumentSnapshot.toMessage(): Message {
+        return Message(
+            id = id,
+            senderId = getString("senderId") ?: "",
+            type = getString("type") ?: "text",
+            text = getString("text"),
+            createdAt = getTimestamp("createdAt"),
+            replyToMessageId = getString("replyToMessageId"),
+            hasPendingWrites = metadata.hasPendingWrites()
+        )
     }
+    suspend fun findExistingDmChatId(uidA: String, uidB: String): String? {
+        if (uidA == uidB) return null
 
-    fun listenToDmReadReceipt(
-        chatId: String,
-        myUid: String,
-        onSnapshot: (ReadReceiptState) -> Unit,
-        onError: ((Exception) -> Unit)? = null
-    ): ListenerRegistration {
-        val membersRef = chatsRef.document(chatId).collection("members")
+        val sorted = listOf(uidA, uidB).sorted()
+        val dmKey = "${sorted[0]}_${sorted[1]}"
 
-        return membersRef.addSnapshotListener { snap, err ->
-            if (err != null) {
-                onError?.invoke(err)
-                return@addSnapshotListener
-            }
-
-            if (snap == null) {
-                onSnapshot(ReadReceiptState())
-                return@addSnapshotListener
-            }
-
-            val otherDoc = snap.documents.firstOrNull { it.id != myUid }
-
-            onSnapshot(
-                ReadReceiptState(
-                    otherUserId = otherDoc?.id,
-                    otherUserLastReadAt = otherDoc?.getTimestamp("lastReadAt"),
-                    otherUserLastReadMessageId = otherDoc?.getString("lastReadMessageId")
-                )
-            )
-        }
+        val doc = dmThreads.document(dmKey).get().await()
+        return doc.getString("chatId")
     }
-
-    private fun inboxRef(uid: String, chatId: String) =
-        usersRef.document(uid).collection("inbox").document(chatId)
 }
