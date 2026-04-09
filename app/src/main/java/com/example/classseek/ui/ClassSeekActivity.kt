@@ -2,7 +2,6 @@ package com.example.classseek.ui
 
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -17,21 +16,32 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import com.example.classseek.Notification.MyFirebaseMessagingService
 import com.example.classseek.R
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.calendar.AddEventScreen
 import com.example.classseek.ui.calendar.CalendarScreen
-import com.example.classseek.ui.map.MapScreen
+import com.example.classseek.ui.chat.ChatScreen
 import com.example.classseek.ui.friends.FriendsScreen
+import com.example.classseek.ui.map.MapScreen
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -48,38 +58,39 @@ import com.google.api.services.calendar.model.EventDateTime
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessaging
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.core.content.ContextCompat
 
-private const val schoolCalendarID = "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com"
+private const val schoolCalendarID =
+    "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com"
 
 class ClassSeekActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        requestNotificationPermissionIfNeeded()
+
         enableEdgeToEdge()
         FirebaseApp.initializeApp(this)
-
-        // --- FCM Token Retrieval (fixed) ---
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val token = task.result
-                Log.d("FCM_TOKEN", "Device token: $token")
-                // Optional: show a toast (make sure to import Toast)
-                Toast.makeText(applicationContext, "Token: $token", Toast.LENGTH_SHORT).show()
-            } else {
-                Log.w("FCM_TOKEN", "Failed to get token", task.exception)
-            }
-        }
-
         setContent {
             ClassSeekTheme {
-                ClassSeekApp()
+                ClassSeekApp(
+                    initialChatId = intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_ID),
+                    initialChatTitle = intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_TITLE)
+                )
             }
         }
     }
@@ -89,7 +100,8 @@ class ClassSeekActivity : ComponentActivity() {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
                 val credential = GoogleAccountCredential.usingOAuth2(
-                    this@ClassSeekActivity, listOf(calendarScope)
+                    this@ClassSeekActivity,
+                    listOf(calendarScope)
                 )
                 credential.selectedAccountName = account.email
 
@@ -129,7 +141,8 @@ class ClassSeekActivity : ComponentActivity() {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
                 val credential = GoogleAccountCredential.usingOAuth2(
-                    this@ClassSeekActivity, listOf(calendarScope)
+                    this@ClassSeekActivity,
+                    listOf(calendarScope)
                 )
                 credential.selectedAccountName = account.email
 
@@ -149,10 +162,14 @@ class ClassSeekActivity : ComponentActivity() {
                 val durationMs = getDurationMs(schedule.startTime, schedule.endTime)
 
                 val startDateTime = DateTime(firstOccurrence.time)
-                event.start = EventDateTime().setDateTime(startDateTime).setTimeZone(TimeZone.getDefault().id)
+                event.start = EventDateTime()
+                    .setDateTime(startDateTime)
+                    .setTimeZone(TimeZone.getDefault().id)
 
                 val endDateTime = DateTime(firstOccurrence.timeInMillis + durationMs)
-                event.end = EventDateTime().setDateTime(endDateTime).setTimeZone(TimeZone.getDefault().id)
+                event.end = EventDateTime()
+                    .setDateTime(endDateTime)
+                    .setTimeZone(TimeZone.getDefault().id)
 
                 if (schedule.startDate != schedule.endDate || schedule.daysOfWeek.size > 1) {
                     val daysMap = mapOf(
@@ -206,14 +223,31 @@ class ClassSeekActivity : ComponentActivity() {
             val endTime = sdf.parse(end)
             (endTime?.time ?: 0) - (startTime?.time ?: 0)
         } catch (e: Exception) {
-            3600000L // 1 hour default
+            3600000L
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = Manifest.permission.POST_NOTIFICATIONS
+
+            if (ContextCompat.checkSelfPermission(this, permission)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestPermissions(arrayOf(permission), 1001)
+            }
         }
     }
 }
 
 @Composable
-fun ClassSeekApp() {
+fun ClassSeekApp(
+    initialChatId: String? = null,
+    initialChatTitle: String? = null
+) {
     val auth = FirebaseAuth.getInstance()
+    val db = FirebaseFirestore.getInstance()
+
     var firebaseUser by remember { mutableStateOf(auth.currentUser) }
     var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isLoadingProfile by remember { mutableStateOf(true) }
@@ -230,18 +264,63 @@ fun ClassSeekApp() {
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
-    val db = FirebaseFirestore.getInstance()
+    var pendingNotificationChatId by remember { mutableStateOf(initialChatId) }
+    var pendingNotificationChatTitle by remember { mutableStateOf(initialChatTitle) }
 
-    // Fetch profile whenever firebaseUser changes
+    fun consumePendingNotificationChat() {
+        pendingNotificationChatId = null
+        pendingNotificationChatTitle = null
+    }
+
+    fun saveCurrentFcmTokenForUser() {
+        val user = auth.currentUser ?: return
+
+        FirebaseMessaging.getInstance().token
+            .addOnSuccessListener { token ->
+                val deviceDoc = mapOf(
+                    "token" to token,
+                    "platform" to "android",
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+
+                db.collection("users")
+                    .document(user.uid)
+                    .collection("devices")
+                    .document(token)
+                    .set(deviceDoc)
+                    .addOnSuccessListener {
+                        Log.d("FCM_DEBUG", "Saved FCM token from activity")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("FCM_DEBUG", "Failed to save FCM token from activity", e)
+                    }
+            }
+            .addOnFailureListener { e ->
+                Log.e("FCM_DEBUG", "Failed to get current FCM token", e)
+            }
+    }
+
+    LaunchedEffect(firebaseUser?.uid) {
+        if (firebaseUser != null) {
+            saveCurrentFcmTokenForUser()
+        }
+    }
+
+    LaunchedEffect(firebaseUser?.uid, pendingNotificationChatId) {
+        if (firebaseUser != null && pendingNotificationChatId != null) {
+            currentDestination = AppDestinations.FRIENDS
+        }
+    }
+
     LaunchedEffect(firebaseUser) {
         if (firebaseUser != null) {
             isLoadingProfile = true
             try {
                 val doc = db.collection("users").document(firebaseUser!!.uid).get().await()
-                if (doc.exists()) {
-                    userProfile = doc.toObject(UserProfile::class.java)
+                userProfile = if (doc.exists()) {
+                    doc.toObject(UserProfile::class.java)
                 } else {
-                    userProfile = null
+                    null
                 }
             } catch (e: Exception) {
                 Log.e("AUTH_DEBUG", "Error fetching profile", e)
@@ -298,8 +377,8 @@ fun ClassSeekApp() {
                     try {
                         val authResult = auth.signInWithCredential(credential).await()
                         firebaseUser = authResult.user
+                        saveCurrentFcmTokenForUser()
 
-                        // After signing in, try to fetch calendar events
                         val events = activity?.getCalendarEvents(account)
                         if (events != null) calendarEvents = events
                     } catch (e: Exception) {
@@ -312,12 +391,29 @@ fun ClassSeekApp() {
         }
     }
 
+    if (pendingNotificationChatId != null && firebaseUser != null && userProfile != null) {
+        ChatScreen(
+            chatId = pendingNotificationChatId!!,
+            title = pendingNotificationChatTitle ?: "Chat",
+            onBack = {
+                consumePendingNotificationChat()
+                currentDestination = AppDestinations.FRIENDS
+            }
+        )
+        return
+    }
+
     if (firebaseUser == null) {
-        LoginScreen(onSignInClick = {
-            signInLauncher.launch(googleSignInClient.signInIntent)
-        })
+        LoginScreen(
+            onSignInClick = {
+                signInLauncher.launch(googleSignInClient.signInIntent)
+            }
+        )
     } else if (isLoadingProfile) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
             CircularProgressIndicator()
         }
     } else if (userProfile == null || isEditingProfile) {
@@ -352,7 +448,7 @@ fun ClassSeekApp() {
                             "followersCount" to profileWithId.followersCount,
                             "followingCount" to profileWithId.followingCount,
                             "isProfileComplete" to true,
-                            "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            "updatedAt" to FieldValue.serverTimestamp()
                         )
 
                         db.collection("users")
@@ -362,12 +458,12 @@ fun ClassSeekApp() {
 
                         userProfile = profileWithId
                         isEditingProfile = false
+                        saveCurrentFcmTokenForUser()
                     } catch (e: Exception) {
                         Log.e("AUTH_DEBUG", "Error saving profile", e)
                     }
                 }
             },
-            // Show back button only when editing an existing profile
             onBack = if (isEditingProfile) {
                 { isEditingProfile = false }
             } else null
@@ -406,16 +502,17 @@ fun ClassSeekApp() {
                 Box(modifier = Modifier.padding(innerPadding)) {
                     when (currentDestination) {
                         AppDestinations.CALENDAR -> {
-                                CalendarScreen(
-                                    signedInAccount = signedInAccount,
-                                    calendarEvents = calendarEvents,
-                                    onSignInClick = { intent -> signInLauncher.launch(intent) },
-                                    onAddEventClick = { dateMillis ->
-                                        initialDateForNewEvent = dateMillis
-                                        isAddingEvent = true
-                                    }
-                                )
+                            CalendarScreen(
+                                signedInAccount = signedInAccount,
+                                calendarEvents = calendarEvents,
+                                onSignInClick = { intent -> signInLauncher.launch(intent) },
+                                onAddEventClick = { dateMillis ->
+                                    initialDateForNewEvent = dateMillis
+                                    isAddingEvent = true
+                                }
+                            )
                         }
+
                         AppDestinations.PROFILE -> {
                             ProfileScreen(
                                 userProfile = userProfile!!,
@@ -425,6 +522,7 @@ fun ClassSeekApp() {
                                     firebaseUser = null
                                     signedInAccount = null
                                     calendarEvents = emptyList()
+                                    consumePendingNotificationChat()
                                 },
                                 onEditProfile = {
                                     isEditingProfile = true
@@ -432,18 +530,15 @@ fun ClassSeekApp() {
                                 onDeleteAccount = {
                                     scope.launch {
                                         try {
-                                            // WARNING: This only deletes the Firestore profile data.
-                                            // To fully delete the account, re-authentication is required to delete from Firebase Auth.
-                                            // 1. Delete user document from Firestore
                                             db.collection("users").document(firebaseUser!!.uid).delete().await()
 
-                                            // 2. Sign out and reset local app state
                                             auth.signOut()
                                             googleSignInClient.signOut()
                                             firebaseUser = null
                                             signedInAccount = null
                                             calendarEvents = emptyList()
                                             userProfile = null
+                                            consumePendingNotificationChat()
                                         } catch (e: Exception) {
                                             Log.e("AUTH_DEBUG", "Error deleting account", e)
                                         }
@@ -451,9 +546,25 @@ fun ClassSeekApp() {
                                 }
                             )
                         }
-                        AppDestinations.FRIENDS -> FriendsScreen()
-                        AppDestinations.MAP -> MapScreen()
-                        AppDestinations.SETTINGS -> Greeting("Settings")
+
+                        AppDestinations.FRIENDS -> {
+                            FriendsScreen(
+                                auth = auth,
+                                initialChatId = pendingNotificationChatId,
+                                initialChatTitle = pendingNotificationChatTitle,
+                                onInitialChatConsumed = {
+                                    consumePendingNotificationChat()
+                                }
+                            )
+                        }
+
+                        AppDestinations.MAP -> {
+                            MapScreen()
+                        }
+
+                        AppDestinations.SETTINGS -> {
+                            Greeting("Settings")
+                        }
                     }
                 }
             }
