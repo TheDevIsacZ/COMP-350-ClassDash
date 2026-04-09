@@ -1,11 +1,11 @@
 package com.example.classseek.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -20,23 +20,33 @@ import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import com.example.classseek.Notification.MyFirebaseMessagingService
 import com.example.classseek.R
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.calendar.AddEventScreen
 import com.example.classseek.ui.calendar.CalendarScreen
 import com.example.classseek.ui.chat.ChatScreen
-import com.example.classseek.ui.map.MapScreen
 import com.example.classseek.ui.friends.FriendsScreen
+import com.example.classseek.ui.map.MapScreen
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -57,37 +67,63 @@ import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessaging
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-private const val schoolCalendarID = "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com"
+private const val schoolCalendarID =
+    "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com"
 
 class ClassSeekActivity : ComponentActivity() {
+
+    private var launchChatIdState = mutableStateOf<String?>(null)
+    private var launchChatTitleState = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         FirebaseApp.initializeApp(this)
 
-        // --- FCM Token Retrieval (fixed) ---
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (task.isSuccessful) {
-                val token = task.result
+        requestNotificationPermissionIfNeeded()
+        updateNotificationRouteFromIntent(intent)
+
+        FirebaseMessaging.getInstance().token
+            .addOnSuccessListener { token ->
                 Log.d("FCM_TOKEN", "Device token: $token")
-                // Optional: show a toast (make sure to import Toast)
-                Toast.makeText(applicationContext, "Token: $token", Toast.LENGTH_SHORT).show()
-            } else {
-                Log.w("FCM_TOKEN", "Failed to get token", task.exception)
             }
-        }
+            .addOnFailureListener { e ->
+                Log.w("FCM_TOKEN", "Failed to get token", e)
+            }
 
         setContent {
             ClassSeekTheme {
-                ClassSeekApp()
+                ClassSeekApp(
+                    initialChatId = launchChatIdState.value,
+                    initialChatTitle = launchChatTitleState.value,
+                    onNotificationChatConsumed = {
+                        launchChatIdState.value = null
+                        launchChatTitleState.value = null
+                    }
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        updateNotificationRouteFromIntent(intent)
+    }
+
+    private fun updateNotificationRouteFromIntent(intent: Intent?) {
+        launchChatIdState.value =
+            intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_ID)
+        launchChatTitleState.value =
+            intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_TITLE)
     }
 
     suspend fun getCalendarEvents(account: GoogleSignInAccount): List<Event>? {
@@ -95,7 +131,8 @@ class ClassSeekActivity : ComponentActivity() {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
                 val credential = GoogleAccountCredential.usingOAuth2(
-                    this@ClassSeekActivity, listOf(calendarScope)
+                    this@ClassSeekActivity,
+                    listOf(calendarScope)
                 )
                 credential.selectedAccountName = account.email
 
@@ -116,7 +153,8 @@ class ClassSeekActivity : ComponentActivity() {
                         .setOrderBy("startTime")
                         .setSingleEvents(true)
                         .setMaxResults(50)
-                        .execute().items ?: emptyList()
+                        .execute()
+                        .items ?: emptyList()
                 } catch (e: Exception) {
                     Log.e("CALENDAR_DEBUG", "Failed to fetch school events", e)
                     emptyList()
@@ -130,12 +168,16 @@ class ClassSeekActivity : ComponentActivity() {
         }
     }
 
-    suspend fun addEventToCalendar(account: GoogleSignInAccount, schedule: ClassSchedule): Boolean {
+    suspend fun addEventToCalendar(
+        account: GoogleSignInAccount,
+        schedule: ClassSchedule
+    ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
                 val credential = GoogleAccountCredential.usingOAuth2(
-                    this@ClassSeekActivity, listOf(calendarScope)
+                    this@ClassSeekActivity,
+                    listOf(calendarScope)
                 )
                 credential.selectedAccountName = account.email
 
@@ -155,10 +197,14 @@ class ClassSeekActivity : ComponentActivity() {
                 val durationMs = getDurationMs(schedule.startTime, schedule.endTime)
 
                 val startDateTime = DateTime(firstOccurrence.time)
-                event.start = EventDateTime().setDateTime(startDateTime).setTimeZone(TimeZone.getDefault().id)
+                event.start = EventDateTime()
+                    .setDateTime(startDateTime)
+                    .setTimeZone(TimeZone.getDefault().id)
 
                 val endDateTime = DateTime(firstOccurrence.timeInMillis + durationMs)
-                event.end = EventDateTime().setDateTime(endDateTime).setTimeZone(TimeZone.getDefault().id)
+                event.end = EventDateTime()
+                    .setDateTime(endDateTime)
+                    .setTimeZone(TimeZone.getDefault().id)
 
                 if (schedule.startDate != schedule.endDate || schedule.daysOfWeek.size > 1) {
                     val daysMap = mapOf(
@@ -171,11 +217,15 @@ class ClassSeekActivity : ComponentActivity() {
                         java.util.Calendar.SUNDAY to "SU"
                     )
                     val byDay = schedule.daysOfWeek.joinToString(",") { daysMap[it] ?: "" }
-                    val untilDate = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.getDefault()).apply {
+                    val untilDate = SimpleDateFormat(
+                        "yyyyMMdd'T'HHmmss'Z'",
+                        Locale.getDefault()
+                    ).apply {
                         timeZone = TimeZone.getTimeZone("UTC")
                     }.format(Date(schedule.endDate))
 
-                    event.recurrence = listOf("RRULE:FREQ=WEEKLY;BYDAY=$byDay;UNTIL=$untilDate")
+                    event.recurrence =
+                        listOf("RRULE:FREQ=WEEKLY;BYDAY=$byDay;UNTIL=$untilDate")
                 }
 
                 service.events().insert("primary", event).execute()
@@ -187,12 +237,16 @@ class ClassSeekActivity : ComponentActivity() {
         }
     }
 
-    suspend fun deleteEventFromCalendar(account: GoogleSignInAccount, eventId: String): Boolean {
+    suspend fun deleteEventFromCalendar(
+        account: GoogleSignInAccount,
+        eventId: String
+    ): Boolean {
         return withContext(Dispatchers.IO) {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
                 val credential = GoogleAccountCredential.usingOAuth2(
-                    this@ClassSeekActivity, listOf(calendarScope)
+                    this@ClassSeekActivity,
+                    listOf(calendarScope)
                 )
                 credential.selectedAccountName = account.email
 
@@ -216,13 +270,22 @@ class ClassSeekActivity : ComponentActivity() {
         cal.timeInMillis = schedule.startDate
 
         val timeParts = schedule.startTime.split(":")
-        cal.set(java.util.Calendar.HOUR_OF_DAY, if (timeParts.isNotEmpty()) timeParts[0].toInt() else 9)
-        cal.set(java.util.Calendar.MINUTE, if (timeParts.size > 1) timeParts[1].toInt() else 0)
+        cal.set(
+            java.util.Calendar.HOUR_OF_DAY,
+            if (timeParts.isNotEmpty()) timeParts[0].toInt() else 9
+        )
+        cal.set(
+            java.util.Calendar.MINUTE,
+            if (timeParts.size > 1) timeParts[1].toInt() else 0
+        )
         cal.set(java.util.Calendar.SECOND, 0)
         cal.set(java.util.Calendar.MILLISECOND, 0)
 
         var safetyCounter = 0
-        while (!schedule.daysOfWeek.contains(cal.get(java.util.Calendar.DAY_OF_WEEK)) && safetyCounter < 8) {
+        while (
+            !schedule.daysOfWeek.contains(cal.get(java.util.Calendar.DAY_OF_WEEK)) &&
+            safetyCounter < 8
+        ) {
             cal.add(java.util.Calendar.DAY_OF_MONTH, 1)
             safetyCounter++
         }
@@ -243,9 +306,8 @@ class ClassSeekActivity : ComponentActivity() {
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val permission = Manifest.permission.POST_NOTIFICATIONS
-
-            if (ContextCompat.checkSelfPermission(this, permission)
-                != PackageManager.PERMISSION_GRANTED
+            if (ContextCompat.checkSelfPermission(this, permission) !=
+                PackageManager.PERMISSION_GRANTED
             ) {
                 requestPermissions(arrayOf(permission), 1001)
             }
@@ -256,7 +318,8 @@ class ClassSeekActivity : ComponentActivity() {
 @Composable
 fun ClassSeekApp(
     initialChatId: String? = null,
-    initialChatTitle: String? = null
+    initialChatTitle: String? = null,
+    onNotificationChatConsumed: () -> Unit = {}
 ) {
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
@@ -277,12 +340,18 @@ fun ClassSeekApp(
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
-    var pendingNotificationChatId by remember { mutableStateOf(initialChatId) }
-    var pendingNotificationChatTitle by remember { mutableStateOf(initialChatTitle) }
+    var pendingNotificationChatId by remember { mutableStateOf<String?>(null) }
+    var pendingNotificationChatTitle by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(initialChatId, initialChatTitle) {
+        pendingNotificationChatId = initialChatId
+        pendingNotificationChatTitle = initialChatTitle
+    }
 
     fun consumePendingNotificationChat() {
         pendingNotificationChatId = null
         pendingNotificationChatTitle = null
+        onNotificationChatConsumed()
     }
 
     fun saveCurrentFcmTokenForUser() {
@@ -466,7 +535,10 @@ fun ClassSeekApp(
 
                         db.collection("users")
                             .document(user.uid)
-                            .set(userDoc, com.google.firebase.firestore.SetOptions.merge())
+                            .set(
+                                userDoc,
+                                com.google.firebase.firestore.SetOptions.merge()
+                            )
                             .await()
 
                         userProfile = profileWithId
@@ -477,10 +549,11 @@ fun ClassSeekApp(
                     }
                 }
             },
-            // Show back button only when editing an existing profile
             onBack = if (isEditingProfile) {
                 { isEditingProfile = false }
-            } else null
+            } else {
+                null
+            }
         )
     } else if (isAddingEvent) {
         AddEventScreen(
@@ -516,26 +589,27 @@ fun ClassSeekApp(
                 Box(modifier = Modifier.padding(innerPadding)) {
                     when (currentDestination) {
                         AppDestinations.CALENDAR -> {
-                                CalendarScreen(
-                                    signedInAccount = signedInAccount,
-                                    calendarEvents = calendarEvents,
-                                    onSignInClick = { intent -> signInLauncher.launch(intent) },
-                                    onAddEventClick = { dateMillis ->
-                                        initialDateForNewEvent = dateMillis
-                                        isAddingEvent = true
-                                    },
-                                    onDeleteEventClick = { eventId ->
-                                        scope.launch {
-                                            signedInAccount?.let { account ->
-                                                val success = activity?.deleteEventFromCalendar(account, eventId) ?: false
-                                                if (success) {
-                                                    val events = activity?.getCalendarEvents(account)
-                                                    if (events != null) calendarEvents = events
-                                                }
+                            CalendarScreen(
+                                signedInAccount = signedInAccount,
+                                calendarEvents = calendarEvents,
+                                onSignInClick = { intent -> signInLauncher.launch(intent) },
+                                onAddEventClick = { dateMillis ->
+                                    initialDateForNewEvent = dateMillis
+                                    isAddingEvent = true
+                                },
+                                onDeleteEventClick = { eventId ->
+                                    scope.launch {
+                                        signedInAccount?.let { account ->
+                                            val success = activity
+                                                ?.deleteEventFromCalendar(account, eventId) ?: false
+                                            if (success) {
+                                                val events = activity?.getCalendarEvents(account)
+                                                if (events != null) calendarEvents = events
                                             }
                                         }
                                     }
-                                )
+                                }
+                            )
                         }
 
                         AppDestinations.PROFILE -> {
@@ -555,12 +629,11 @@ fun ClassSeekApp(
                                 onDeleteAccount = {
                                     scope.launch {
                                         try {
-                                            // WARNING: This only deletes the Firestore profile data.
-                                            // To fully delete the account, re-authentication is required to delete from Firebase Auth.
-                                            // 1. Delete user document from Firestore
-                                            db.collection("users").document(firebaseUser!!.uid).delete().await()
+                                            db.collection("users")
+                                                .document(firebaseUser!!.uid)
+                                                .delete()
+                                                .await()
 
-                                            // 2. Sign out and reset local app state
                                             auth.signOut()
                                             googleSignInClient.signOut()
                                             firebaseUser = null

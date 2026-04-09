@@ -32,6 +32,7 @@
         <activity
             android:name=".ui.ClassSeekActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.ClassSeek">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
