@@ -117,8 +117,11 @@ private fun UserAvatar(
 fun FriendsScreen(
     modifier: Modifier = Modifier,
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
-    auth: FirebaseAuth = remember { FirebaseAuth.getInstance() }
-) {
+    auth: FirebaseAuth = remember { FirebaseAuth.getInstance() },
+    initialChatId: String? = null,
+    initialChatTitle: String? = null,
+    onInitialChatConsumed: (() -> Unit)? = null
+){
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
 
@@ -143,6 +146,8 @@ fun FriendsScreen(
     var showDmNameDialog by remember { mutableStateOf(false) }
     var pendingDmUser by remember { mutableStateOf<UserSearchItem?>(null) }
     var pendingDmTitle by remember { mutableStateOf("") }
+
+
 
     suspend fun refreshChats() {
         val uid = auth.currentUser?.uid ?: return
@@ -270,6 +275,14 @@ fun FriendsScreen(
 
         onDispose {
             auth.removeAuthStateListener(listener)
+        }
+    }
+
+    LaunchedEffect(initialChatId, initialChatTitle) {
+        if (!initialChatId.isNullOrBlank()) {
+            selectedChatId = initialChatId
+            selectedChatTitle = initialChatTitle ?: "Chat"
+            onInitialChatConsumed?.invoke()
         }
     }
 
