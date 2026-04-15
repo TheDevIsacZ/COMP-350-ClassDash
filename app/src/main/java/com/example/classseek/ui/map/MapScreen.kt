@@ -2,7 +2,12 @@ package com.example.classseek.ui.map
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.os.Looper
 import android.util.Log
@@ -21,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -64,6 +70,9 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var mapType by remember { mutableStateOf(MapType.SATELLITE) }
     var isFilterMenuExpanded by remember { mutableStateOf(false) }
 
+    // State for compass heading
+    var heading by remember { mutableStateOf(0f) }
+
     val bounds = remember {
         LatLngBounds(
             LatLng(34.14521297909, -119.0623117489),
@@ -74,7 +83,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
     // List of places loaded from Firestore
     var places by remember { mutableStateOf<List<MapPlace>>(emptyList()) }
 
-    // Filtered list based on selected category (Search bar no longer affects this list)
+    // Filtered list based on selected category
     val displayPlaces = remember(places, selectedCategory) {
         places.filter { place ->
             selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
@@ -108,10 +117,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     }
                 }
                 places = fetchedPlaces
-                Log.d("MapScreen", "Loaded ${places.size} places from Firestore")
-            }
-            .addOnFailureListener { e ->
-                Log.e("MapScreen", "Error fetching places from Firestore", e)
             }
     }
 
@@ -138,6 +143,32 @@ fun MapScreen(modifier: Modifier = Modifier) {
         onResult = { isGranted -> hasPermission = isGranted }
     )
 
+    // Sensor logic for directional marker
+    DisposableEffect(Unit) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                if (event?.sensor?.type == Sensor.TYPE_ROTATION_VECTOR) {
+                    val rotationMatrix = FloatArray(9)
+                    SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+                    val orientation = FloatArray(3)
+                    SensorManager.getOrientation(rotationMatrix, orientation)
+                    // orientation[0] is azimuth (heading around the z-axis) in radians
+                    heading = Math.toDegrees(orientation[0].toDouble()).toFloat()
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_UI)
+        
+        onDispose {
+            sensorManager.unregisterListener(listener)
+        }
+    }
+
     DisposableEffect(hasPermission) {
         if (hasPermission) {
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
@@ -150,7 +181,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
             }
             fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
             onDispose {
-                // Stops location updates when off map screen
                 fusedLocationClient.removeLocationUpdates(locationCallback)
             }
         } else {
@@ -174,24 +204,9 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     mapStyleOptions = MapStyleOptions(
                         """
                         [
-                          {
-                            "elementType": "labels",
-                            "stylers": [
-                              { "visibility": "off" }
-                            ]
-                          },
-                          {
-                            "featureType": "poi",
-                            "stylers": [
-                              { "visibility": "off" }
-                            ]
-                          },
-                          {
-                            "featureType": "transit",
-                            "stylers": [
-                              { "visibility": "off" }
-                            ]
-                          }
+                          { "elementType": "labels", "stylers": [ { "visibility": "off" } ] },
+                          { "featureType": "poi", "stylers": [ { "visibility": "off" } ] },
+                          { "featureType": "transit", "stylers": [ { "visibility": "off" } ] }
                         ]
                         """.trimIndent()
                     )
@@ -199,26 +214,29 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 uiSettings = MapUiSettings(mapToolbarEnabled = false),
                 onMapClick = { selectedPlace = null }
             ) {
-                // User location marker
+                // Directional User Location Marker
                 MarkerComposable(
                     state = rememberMarkerState(position = currentLatLng),
                     anchor = Offset(0.5f, 0.5f),
                     onClick = { true }
                 ) {
+                    // Using Navigation icon (arrow) and rotating it based on heading
+                    // Navigation icon naturally points top-right, so we add an offset if needed, 
+                    // but usually, an upward arrow like 'Navigation' works best.
                     Icon(
-                        imageVector = Icons.Default.PersonPinCircle,
-                        contentDescription = null,
-                        tint = Color(0xffff6347),
-                        modifier = Modifier.size(24.dp)
+                        imageVector = Icons.Default.Navigation,
+                        contentDescription = "User Location",
+                        tint = Color(0xFF4285F4), // Google Blue
+                        modifier = Modifier
+                            .size(32.dp)
+                            .rotate(heading)
                     )
                 }
 
-                // Render markers (all of them are rendered, but some may be transparent)
                 places.forEach { place ->
                     val isSelected = selectedPlace?.name == place.name
                     val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
                     
-                    // Determine selection based on selection and category filter
                     val markerAlpha = if (selectedPlace != null) {
                         if (isSelected) 1.0f else 0.35f
                     } else if (selectedCategory != MarkerCategory.ALL) {
@@ -282,7 +300,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     value = searchQuery,
                     onValueChange = { newValue ->
                         searchQuery = newValue
-                        
                         val match = if (newValue.isNotEmpty()) {
                             places.find { it.name.contains(newValue, ignoreCase = true) }
                         } else null
@@ -319,7 +336,6 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.White.copy(alpha = 0.9f),
                         unfocusedContainerColor = Color.White.copy(alpha = 0.9f),
-                        disabledContainerColor = Color.White.copy(alpha = 0.9f),
                         focusedIndicatorColor = Color.Transparent,
                         unfocusedIndicatorColor = Color.Transparent,
                     )
@@ -435,13 +451,11 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    // Button to pull out building list
                     FloatingActionButton(
                         onClick = { isListVisible = !isListVisible },
                         containerColor = Color.White,
                         contentColor = Color.Black,
-                        shape = RoundedCornerShape(16.dp),
-                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Icon(
                             imageVector = if (isListVisible) Icons.Default.Close else Icons.AutoMirrored.Filled.List,
@@ -449,15 +463,11 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         )
                     }
 
-                    // Map Toggle Button
                     FloatingActionButton(
-                        onClick = {
-                            mapType = if (mapType == MapType.SATELLITE) MapType.NORMAL else MapType.SATELLITE
-                        },
+                        onClick = { mapType = if (mapType == MapType.SATELLITE) MapType.NORMAL else MapType.SATELLITE },
                         containerColor = Color.White,
                         contentColor = Color.Black,
-                        shape = RoundedCornerShape(16.dp),
-                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 8.dp)
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Visibility,
