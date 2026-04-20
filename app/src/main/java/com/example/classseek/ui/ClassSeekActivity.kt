@@ -45,8 +45,10 @@ import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.calendar.AddEventScreen
 import com.example.classseek.ui.calendar.CalendarScreen
 import com.example.classseek.ui.chat.ChatScreen
+import com.example.classseek.ui.friends.FriendsChatsScreen
 import com.example.classseek.ui.friends.FriendsScreen
 import com.example.classseek.ui.map.MapScreen
+import com.example.classseek.ui.settings.SettingsPage
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -665,7 +667,7 @@ fun ClassSeekApp(
                         }
 
                         AppDestinations.SETTINGS -> {
-                            Greeting("Settings")
+                            SettingsPage()
                         }
                     }
                 }

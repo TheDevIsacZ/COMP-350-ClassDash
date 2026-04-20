@@ -66,6 +66,7 @@ class ChatRepository(
     private fun chatMembersRef(chatId: String) = chatRef(chatId).collection("members")
     private fun chatMessagesRef(chatId: String) = chatRef(chatId).collection("messages")
     private fun userInboxRef(uid: String) = users.document(uid).collection("inbox")
+    private fun userFriendsRef(uid: String) = users.document(uid).collection("friends")
 
     private fun stableDmKey(uidA: String, uidB: String): String {
         val sorted = listOf(uidA, uidB).sorted()
@@ -130,6 +131,68 @@ class ChatRepository(
             }
     }
 
+    suspend fun findExistingDmChatId(uidA: String, uidB: String): String? {
+        if (uidA == uidB) return null
+
+        val sorted = listOf(uidA, uidB).sorted()
+        val dmKey = "${sorted[0]}_${sorted[1]}"
+
+        val doc = dmThreads.document(dmKey).get().await()
+        return doc.getString("chatId")
+    }
+
+    private suspend fun allowsMessagesByFriendsOnly(uid: String): Boolean {
+        val doc = users.document(uid).get().await()
+        return doc.getBoolean("allowMessagesByFriendsOnly") == true
+    }
+
+    private suspend fun areAcceptedFriends(userA: String, userB: String): Boolean {
+        val aToB = userFriendsRef(userA).document(userB).get().await()
+        if (!aToB.exists() || aToB.getString("status") != "accepted") {
+            return false
+        }
+
+        val bToA = userFriendsRef(userB).document(userA).get().await()
+        return bToA.exists() && bToA.getString("status") == "accepted"
+    }
+
+    suspend fun canStartDirectMessage(senderUid: String, recipientUid: String): Boolean {
+        if (senderUid == recipientUid) return false
+
+        val recipientFriendsOnly = allowsMessagesByFriendsOnly(recipientUid)
+        if (!recipientFriendsOnly) {
+            return true
+        }
+
+        return areAcceptedFriends(senderUid, recipientUid)
+    }
+
+    suspend fun openOrCreateDmIfAllowed(
+        uidA: String,
+        uidB: String,
+        title: String
+    ): String {
+        if (uidA == uidB) throw Exception("Cannot create DM with yourself")
+
+        val existingChatId = findExistingDmChatId(uidA, uidB)
+        if (!existingChatId.isNullOrBlank()) {
+            unhideChatForUser(existingChatId, uidA)
+            unhideChatForUser(existingChatId, uidB)
+            return existingChatId
+        }
+
+        val allowed = canStartDirectMessage(
+            senderUid = uidA,
+            recipientUid = uidB
+        )
+
+        if (!allowed) {
+            throw Exception("This user only allows messages from friends")
+        }
+
+        return openOrCreateDm(uidA, uidB, title)
+    }
+
     suspend fun openOrCreateDm(
         uidA: String,
         uidB: String,
@@ -145,17 +208,20 @@ class ChatRepository(
         val existingThread = dmThreads.document(dmKey).get().await()
         val existingChatId = existingThread.getString("chatId")
         if (!existingChatId.isNullOrBlank()) {
+            unhideChatForUser(existingChatId, uidA)
+            unhideChatForUser(existingChatId, uidB)
             return existingChatId
         }
 
         val chatId = chats.document().id
         val now = FieldValue.serverTimestamp()
+        val finalTitle = title.trim().ifBlank { "Chat" }
 
         val batch = db.batch()
 
         val chatDoc = mapOf(
             "type" to "dm",
-            "title" to title.trim(),
+            "title" to finalTitle,
             "memberIds" to listOf(userA, userB),
             "createdAt" to now,
             "createdBy" to uidA,
@@ -192,7 +258,7 @@ class ChatRepository(
 
         val inboxDoc = mapOf(
             "chatId" to chatId,
-            "title" to title.trim(),
+            "title" to finalTitle,
             "type" to "dm",
             "lastMessageText" to null,
             "lastMessageAt" to null,
@@ -325,13 +391,15 @@ class ChatRepository(
                 email = profile?.getString("email").orEmpty(),
                 profilePictureUrl = profile?.getString("profilePictureUrl").orEmpty()
             )
-        }.sortedWith(compareBy<GroupMember> {
-            when (it.role) {
-                "owner" -> 0
-                "cohost" -> 1
-                else -> 2
-            }
-        }.thenBy { it.displayName.ifBlank { it.email }.lowercase() })
+        }.sortedWith(
+            compareBy<GroupMember> {
+                when (it.role) {
+                    "owner" -> 0
+                    "cohost" -> 1
+                    else -> 2
+                }
+            }.thenBy { it.displayName.ifBlank { it.email }.lowercase() }
+        )
     }
 
     suspend fun getMyRole(chatId: String, myUid: String): String? {
@@ -769,15 +837,5 @@ class ChatRepository(
             replyToMessageId = getString("replyToMessageId"),
             hasPendingWrites = metadata.hasPendingWrites()
         )
-    }
-
-    suspend fun findExistingDmChatId(uidA: String, uidB: String): String? {
-        if (uidA == uidB) return null
-
-        val sorted = listOf(uidA, uidB).sorted()
-        val dmKey = "${sorted[0]}_${sorted[1]}"
-
-        val doc = dmThreads.document(dmKey).get().await()
-        return doc.getString("chatId")
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -47,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
+import com.example.classseek.data.FriendRelationshipState
+import com.example.classseek.data.FriendRepository
 import com.example.classseek.ui.chat.ChatScreen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
@@ -55,6 +58,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import kotlin.OptIn
 
 data class UserSearchItem(
     val uid: String,
@@ -81,6 +87,7 @@ private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
         profilePictureUrl = getString("profilePictureUrl")?.trim().orEmpty()
     )
 }
+
 
 @Composable
 private fun UserAvatar(
@@ -112,16 +119,17 @@ private fun UserAvatar(
         }
     }
 }
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun FriendsScreen(
     modifier: Modifier = Modifier,
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
+    friendRepo: FriendRepository = remember { FriendRepository(FirebaseFirestore.getInstance()) },
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() },
     initialChatId: String? = null,
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null
-){
+) {
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
 
@@ -132,7 +140,6 @@ fun FriendsScreen(
     var working by remember { mutableStateOf(false) }
 
     var myUid by remember { mutableStateOf<String?>(null) }
-    var myEmail by remember { mutableStateOf<String?>(null) }
     var isSignedIn by remember { mutableStateOf(false) }
 
     var groupTitle by remember { mutableStateOf("") }
@@ -143,11 +150,19 @@ fun FriendsScreen(
     val selectedGroupMembers = remember { mutableStateListOf<UserSearchItem>() }
     val myChats = remember { mutableStateListOf<ChatListItem>() }
 
+    val relationshipStates = remember { mutableStateMapOf<String, FriendRelationshipState>() }
+
     var showDmNameDialog by remember { mutableStateOf(false) }
     var pendingDmUser by remember { mutableStateOf<UserSearchItem?>(null) }
     var pendingDmTitle by remember { mutableStateOf("") }
 
-
+    fun userLabel(user: UserSearchItem): String {
+        return when {
+            user.displayName.isNotBlank() -> user.displayName
+            user.name.isNotBlank() -> user.name
+            else -> user.email
+        }
+    }
 
     suspend fun refreshChats() {
         val uid = auth.currentUser?.uid ?: return
@@ -203,12 +218,13 @@ fun FriendsScreen(
             )
     }
 
-    fun userLabel(user: UserSearchItem): String {
-        return when {
-            user.displayName.isNotBlank() -> user.displayName
-            user.name.isNotBlank() -> user.name
-            else -> user.email
-        }
+    suspend fun refreshRelationshipStates(currentUid: String, users: List<UserSearchItem>) {
+        val states = friendRepo.getRelationshipStates(
+            currentUid = currentUid,
+            targetUids = users.map { it.uid }
+        )
+        relationshipStates.clear()
+        relationshipStates.putAll(states)
     }
 
     suspend fun openExistingOrCreateDm(target: UserSearchItem) {
@@ -220,13 +236,21 @@ fun FriendsScreen(
         }
 
         val existingChatId = repo.findExistingDmChatId(currentUid, target.uid)
-
         if (existingChatId != null) {
             val existingTitle = repo.getChatTitle(existingChatId)
             refreshChats()
             selectedChatId = existingChatId
             selectedChatTitle = existingTitle
             return
+        }
+
+        val relationship = relationshipStates[target.uid]
+            ?: friendRepo.getRelationshipState(currentUid, target.uid)
+
+        relationshipStates[target.uid] = relationship
+
+        if (!relationship.canMessageNow) {
+            throw Exception("${userLabel(target)} only allows messages from friends")
         }
 
         pendingDmUser = target
@@ -245,7 +269,7 @@ fun FriendsScreen(
         val defaultTitle = userLabel(target)
         val finalRequestedTitle = pendingDmTitle.trim().ifBlank { defaultTitle }
 
-        val createdChatId = repo.openOrCreateDm(
+        val createdChatId = repo.openOrCreateDmIfAllowed(
             uidA = currentUid,
             uidB = target.uid,
             title = finalRequestedTitle
@@ -266,7 +290,6 @@ fun FriendsScreen(
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val user = firebaseAuth.currentUser
             myUid = user?.uid
-            myEmail = user?.email
             isSignedIn = user != null
         }
 
@@ -297,6 +320,7 @@ fun FriendsScreen(
                 myChats.clear()
                 searchResults.clear()
                 selectedGroupMembers.clear()
+                relationshipStates.clear()
                 status = "Please sign in first."
             }
         } catch (e: CancellationException) {
@@ -312,6 +336,7 @@ fun FriendsScreen(
 
         if (query.isBlank()) {
             searchResults.clear()
+            relationshipStates.clear()
             if (status?.startsWith("Search failed:") == true) {
                 status = null
             }
@@ -323,6 +348,7 @@ fun FriendsScreen(
             val results = searchUsers(query, uid)
             searchResults.clear()
             searchResults.addAll(results)
+            refreshRelationshipStates(uid, results)
 
             if (status?.startsWith("Search failed:") == true) {
                 status = null
@@ -437,9 +463,7 @@ fun FriendsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-
         item("find_users_header") {
-
             Text(
                 text = "Find Users",
                 style = MaterialTheme.typography.headlineSmall
@@ -465,6 +489,7 @@ fun FriendsScreen(
             } else {
                 items(searchResults, key = { "search_${it.uid}" }) { user ->
                     val alreadySelected = selectedGroupMembers.any { it.uid == user.uid }
+                    val relationship = relationshipStates[user.uid] ?: FriendRelationshipState()
 
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Row(
@@ -501,37 +526,60 @@ fun FriendsScreen(
                                     )
                                 }
 
-                                Spacer(Modifier.height(8.dp))
+                                Spacer(Modifier.height(4.dp))
 
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                when {
+                                    relationship.isFriend -> {
+                                        Text(
+                                            text = "You are friends",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    relationship.hasOutgoingPendingRequest -> {
+                                        Text(
+                                            text = "Friend request sent",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+
+                                    relationship.hasIncomingPendingRequest -> {
+                                        Text(
+                                            text = "This user sent you a friend request",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+
+                                if (relationship.allowMessagesByFriendsOnly && !relationship.isFriend) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = "Messages limited to friends",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
                                     Button(
-                                        onClick = {
-                                            scope.launch {
-                                                try {
-                                                    working = true
-                                                    status = null
-                                                    openExistingOrCreateDm(user)
-                                                } catch (e: CancellationException) {
-                                                    throw e
-                                                } catch (e: Exception) {
-                                                    status = e.message ?: "Failed to open chat"
-                                                } finally {
-                                                    working = false
-                                                }
-                                            }
-                                        },
-                                        enabled = !working
+                                        modifier = Modifier.fillMaxWidth(),
+                                        onClick = { /* ... */ },
+                                        enabled = !working && relationship.canMessageNow
                                     ) {
-                                        Text("Message")
+                                        Text(relationship.messageButtonLabel)
                                     }
 
                                     Button(
-                                        onClick = {
-                                            if (!alreadySelected) {
-                                                selectedGroupMembers.add(user)
-                                                status = "Added ${user.email} to group"
-                                            }
-                                        },
+                                        onClick = { /* ... */ },
+                                        enabled = !working && relationship.friendButtonEnabled
+                                    ) {
+                                        Text(relationship.friendButtonLabel)
+                                    }
+
+                                    Button(
+                                        onClick = { /* ... */ },
                                         enabled = !working && !alreadySelected
                                     ) {
                                         Text(if (alreadySelected) "Added" else "Add to Group")
@@ -649,6 +697,7 @@ fun FriendsScreen(
                             selectedGroupMembers.clear()
                             searchQuery = ""
                             searchResults.clear()
+                            relationshipStates.clear()
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Exception) {
