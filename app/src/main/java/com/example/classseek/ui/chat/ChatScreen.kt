@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -60,6 +61,7 @@ import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import androidx.compose.foundation.layout.FlowRow
 
 data class ChatUserProfile(
     val uid: String,
@@ -150,10 +152,31 @@ fun ChatScreen(
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
     val latestMyMessageId = myLatestMessage?.id
 
+    fun normalizedRole(role: String?): String = when (role?.trim()?.lowercase()) {
+        "host", "owner" -> "owner"
+        "cohost" -> "cohost"
+        else -> "member"
+    }
+
     fun isGroupChat(): Boolean = chatInfo?.type == "group"
-    fun canManageMembers(): Boolean = myRole == "owner" || myRole == "cohost"
-    fun canEditRoles(): Boolean = myRole == "owner"
-    fun canDeleteGroup(): Boolean = myRole == "owner"
+    fun canManageMembers(): Boolean {
+        val role = normalizedRole(myRole)
+        return role == "owner" || role == "cohost"
+    }
+    fun canEditRoles(): Boolean = normalizedRole(myRole) == "owner"
+    fun canDeleteGroup(): Boolean = normalizedRole(myRole) == "owner"
+    fun canRemoveMember(member: GroupMember): Boolean {
+        val myRoleNorm = normalizedRole(myRole)
+        val memberRoleNorm = normalizedRole(member.role)
+
+        if (member.uid == myUid) return false
+
+        return when (myRoleNorm) {
+            "owner" -> memberRoleNorm == "member" || memberRoleNorm == "cohost"
+            "cohost" -> memberRoleNorm == "member"
+            else -> false
+        }
+    }
 
     fun userLabel(uid: String): String {
         val profile = userProfiles[uid]
@@ -459,7 +482,33 @@ fun ChatScreen(
         onDispose { messagesReg.remove() }
     }
 
-    DisposableEffect(chatId, myUid) {
+    DisposableEffect(chatId) {
+        val reg = db.collection("chats")
+            .document(chatId)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    error = e.message ?: "Chat listener error"
+                    return@addSnapshotListener
+                }
+
+                val doc = snapshot ?: return@addSnapshotListener
+                if (!doc.exists()) return@addSnapshotListener
+
+                chatInfo = ChatInfo(
+                    id = doc.id,
+                    type = doc.getString("type") ?: "dm",
+                    title = doc.getString("title") ?: title,
+                    createdBy = doc.getString("createdBy") ?: "",
+                    memberIds = (doc.get("memberIds") as? List<*>)
+                        ?.filterIsInstance<String>()
+                        .orEmpty()
+                )
+            }
+
+        onDispose { reg.remove() }
+    }
+
+    DisposableEffect(chatId, myUid, showManageDialog) {
         if (myUid == null) {
             onDispose { }
         } else {
@@ -481,6 +530,22 @@ fun ChatScreen(
 
                     myLastReadMessageId = memberLastReadByUid[myUid]
                     myReadStateLoaded = true
+                    myRole = docs.firstOrNull { it.id == myUid }?.getString("role")
+
+                    if (showManageDialog && (chatInfo?.type == "group" || docs.isNotEmpty())) {
+                        scope.launch {
+                            try {
+                                groupMembers = repo.getGroupMembers(chatId)
+                                val liveMemberIds = docs.map { it.id }
+                                chatInfo = chatInfo?.copy(memberIds = liveMemberIds)
+                                    ?: repo.getChatInfo(chatId)
+                            } catch (ce: CancellationException) {
+                                throw ce
+                            } catch (ex: Exception) {
+                                error = ex.message ?: "Failed to refresh group members"
+                            }
+                        }
+                    }
                 }
 
             onDispose { reg.remove() }
@@ -633,12 +698,13 @@ fun ChatScreen(
 
                             Spacer(Modifier.height(6.dp))
 
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                if (canEditRoles() && member.uid != myUid && member.role != "owner") {
+                                if (canEditRoles() && member.uid != myUid && normalizedRole(member.role) != "owner") {
                                     Button(
-                                        enabled = !managingGroup && member.role != "cohost",
+                                        enabled = !managingGroup && normalizedRole(member.role) != "cohost",
                                         onClick = {
                                             scope.launch {
                                                 try {
@@ -664,7 +730,7 @@ fun ChatScreen(
                                     }
 
                                     Button(
-                                        enabled = !managingGroup && member.role == "cohost",
+                                        enabled = !managingGroup && normalizedRole(member.role) == "cohost",
                                         onClick = {
                                             scope.launch {
                                                 try {
@@ -690,14 +756,9 @@ fun ChatScreen(
                                     }
                                 }
 
-                                if (
-                                    !managingGroup &&
-                                    (
-                                            (myRole == "owner" && member.uid != myUid && member.role != "owner") ||
-                                                    (myRole == "cohost" && member.uid != myUid && member.role == "member")
-                                            )
-                                ) {
+                                if (canRemoveMember(member)) {
                                     Button(
+                                        enabled = !managingGroup,
                                         onClick = {
                                             scope.launch {
                                                 try {
@@ -734,17 +795,17 @@ fun ChatScreen(
                      * Currently this feature is not implemented
                      *
                     if (canDeleteGroup()) {
-                        item("delete_group_section") {
-                            Spacer(Modifier.height(12.dp))
-                            Button(
-                                enabled = !managingGroup,
-                                onClick = { confirmDeleteGroup = true }
-                            ) {
-                                Text("Delete Group Permanently")
-                            }
-                        }
+                    item("delete_group_section") {
+                    Spacer(Modifier.height(12.dp))
+                    Button(
+                    enabled = !managingGroup,
+                    onClick = { confirmDeleteGroup = true }
+                    ) {
+                    Text("Delete Group Permanently")
                     }
-                    */
+                    }
+                    }
+                     */
                 }
             },
             confirmButton = {
@@ -762,57 +823,57 @@ fun ChatScreen(
             dismissButton = {}
         )
     }
-/**
- * Currently this feature is not implemented
- *
+    /**
+     * Currently this feature is not implemented
+     *
     if (confirmDeleteGroup) {
-        AlertDialog(
-            onDismissRequest = {
-                if (!managingGroup) confirmDeleteGroup = false
-            },
-            title = { Text("Delete group permanently?") },
-            text = {
-                Text("This will delete the group for everyone and cannot be undone.")
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !managingGroup,
-                    onClick = {
-                        scope.launch {
-                            try {
-                                managingGroup = true
-                                repo.deleteGroupChatPermanently(
-                                    chatId = chatId,
-                                    actingUid = myUid ?: throw Exception("Not signed in")
-                                )
-                                confirmDeleteGroup = false
-                                showManageDialog = false
-                                onBack()
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                error = e.message ?: "Failed to delete group"
-                            } finally {
-                                managingGroup = false
-                            }
-                        }
-                    }
-                ) {
-                    Text("Delete")
-                }
-
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !managingGroup,
-                    onClick = { confirmDeleteGroup = false }
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
+    AlertDialog(
+    onDismissRequest = {
+    if (!managingGroup) confirmDeleteGroup = false
+    },
+    title = { Text("Delete group permanently?") },
+    text = {
+    Text("This will delete the group for everyone and cannot be undone.")
+    },
+    confirmButton = {
+    TextButton(
+    enabled = !managingGroup,
+    onClick = {
+    scope.launch {
+    try {
+    managingGroup = true
+    repo.deleteGroupChatPermanently(
+    chatId = chatId,
+    actingUid = myUid ?: throw Exception("Not signed in")
+    )
+    confirmDeleteGroup = false
+    showManageDialog = false
+    onBack()
+    } catch (e: CancellationException) {
+    throw e
+    } catch (e: Exception) {
+    error = e.message ?: "Failed to delete group"
+    } finally {
+    managingGroup = false
     }
-    */
+    }
+    }
+    ) {
+    Text("Delete")
+    }
+
+    },
+    dismissButton = {
+    TextButton(
+    enabled = !managingGroup,
+    onClick = { confirmDeleteGroup = false }
+    ) {
+    Text("Cancel")
+    }
+    }
+    )
+    }
+     */
 
     Scaffold(
         modifier = modifier.fillMaxSize()
@@ -966,6 +1027,27 @@ private fun MessageRow(
     receiptText: String? = null,
     seenByProfiles: List<ChatUserProfile> = emptyList()
 ) {
+    if (msg.type == "system") {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                tonalElevation = 0.dp,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(999.dp)
+            ) {
+                Text(
+                    text = msg.text.orEmpty(),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        return
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isMine) Alignment.End else Alignment.Start

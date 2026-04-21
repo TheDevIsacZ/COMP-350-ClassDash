@@ -10,9 +10,16 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.classseek.R
+import com.example.classseek.Notification.FcmManager
 import com.example.classseek.ui.ClassSeekActivity
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -20,66 +27,149 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         private const val TAG = "MyFirebaseMsgService"
         private const val CHANNEL_ID = "classseek_notifications"
         private const val CHANNEL_NAME = "ClassSeek Notifications"
+
+        const val EXTRA_CHAT_ID = "chat_id"
+        const val EXTRA_CHAT_TITLE = "chat_title"
     }
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         Log.d(TAG, "From: ${remoteMessage.from}")
+        Log.d(TAG, "Data payload: ${remoteMessage.data}")
 
-        // Handle data payload (if any)
-        remoteMessage.data.let { data ->
-            Log.d(TAG, "Data payload: $data")
-            // You can extract custom fields, e.g.:
-            // val title = data["title"] ?: "New message"
-            // val body = data["body"] ?: ""
-        }
+        val data = remoteMessage.data
 
-        // Handle notification payload (if any)
-        remoteMessage.notification?.let { notification ->
-            Log.d(TAG, "Notification body: ${notification.body}")
-            sendNotification(notification.title ?: "ClassSeek", notification.body ?: "")
+        val chatId = data["chatId"]
+        val title = data["title"]
+            ?: remoteMessage.notification?.title
+            ?: "ClassSeek"
+        val body = data["body"]
+            ?: remoteMessage.notification?.body
+            ?: ""
+        val chatTitle = data["chatTitle"] ?: title
+
+        if (!chatId.isNullOrBlank()) {
+            sendChatNotification(
+                chatId = chatId,
+                chatTitle = chatTitle,
+                title = title,
+                messageBody = body
+            )
+        } else if (body.isNotBlank()) {
+            sendNotification(
+                title = title,
+                messageBody = body
+            )
         }
     }
 
     override fun onNewToken(token: String) {
         Log.d(TAG, "Refreshed token: $token")
-        // Send token to your server or Firestore if needed
-        sendRegistrationToServer(token)
+        val user = FirebaseAuth.getInstance().currentUser
+        if (user != null) {
+            serviceScope.launch {
+                try {
+                    FcmManager.saveTokenToFirestore(user.uid, token)
+                    Log.d(TAG, "Token saved successfully via FcmManager")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to save token via FcmManager", e)
+                }
+            }
+        } else {
+            Log.d(TAG, "No signed-in user, token not saved yet")
+        }
     }
 
-    private fun sendRegistrationToServer(token: String) {
-        // TODO: Store token in Firestore under the user's document
-        Log.d(TAG, "sendRegistrationToServer: $token")
+    override fun onDestroy() {
+        super.onDestroy()
+        serviceScope.coroutineContext.cancel()
     }
 
-    private fun sendNotification(title: String, messageBody: String) {
+    private fun sendChatNotification(
+        chatId: String,
+        chatTitle: String,
+        title: String,
+        messageBody: String
+    ) {
         val intent = Intent(this, ClassSeekActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_CHAT_ID, chatId)
+            putExtra(EXTRA_CHAT_TITLE, chatTitle)
         }
 
         val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         } else {
-            PendingIntent.FLAG_ONE_SHOT
+            PendingIntent.FLAG_UPDATE_CURRENT
         }
 
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, pendingIntentFlags
+            this,
+            chatId.hashCode(),
+            intent,
+            pendingIntentFlags
         )
 
         val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
         val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)  // your vector icon
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(messageBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(messageBody))
             .setAutoCancel(true)
             .setSound(defaultSoundUri)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
 
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // Create notification channel for Android O+
+        createNotificationChannelIfNeeded(notificationManager)
+
+        notificationManager.notify(chatId.hashCode(), notificationBuilder.build())
+    }
+
+    private fun sendNotification(title: String, messageBody: String) {
+        val intent = Intent(this, ClassSeekActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            pendingIntentFlags
+        )
+
+        val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(messageBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(messageBody))
+            .setAutoCancel(true)
+            .setSound(defaultSoundUri)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        createNotificationChannelIfNeeded(notificationManager)
+
+        notificationManager.notify(System.currentTimeMillis().toInt(), notificationBuilder.build())
+    }
+
+    private fun createNotificationChannelIfNeeded(notificationManager: NotificationManager) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
@@ -92,7 +182,5 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             }
             notificationManager.createNotificationChannel(channel)
         }
-
-        notificationManager.notify(0, notificationBuilder.build())
     }
 }
