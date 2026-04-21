@@ -3,6 +3,7 @@ package com.example.classseek.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -16,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.classseek.models.ClassInfo
@@ -37,6 +39,7 @@ fun ScheduleEditScreen(
     val scrollState = rememberScrollState()
 
     Scaffold(
+        containerColor = Color(0xFFF3F4F6),
         topBar = {
             TopAppBar(
                 title = { Text("Edit Schedule") },
@@ -83,8 +86,9 @@ fun ScheduleEditScreen(
             classes.forEachIndexed { index, classInfo ->
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -99,7 +103,7 @@ fun ScheduleEditScreen(
                         OutlinedTextField(
                             value = classInfo.className,
                             onValueChange = { classes[index] = classInfo.copy(className = it) },
-                            label = { Text("Class Name (e.g. MATH 343)") },
+                            label = { Text("Class Name") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )
@@ -145,7 +149,7 @@ fun ScheduleEditScreen(
                         Spacer(modifier = Modifier.height(16.dp))
 
                         Text("Start Time", style = MaterialTheme.typography.labelMedium)
-                        TimePickerRow(
+                        TimeNumericInput(
                             time = classInfo.startTime,
                             onTimeChange = { classes[index] = classInfo.copy(startTime = it) }
                         )
@@ -153,7 +157,7 @@ fun ScheduleEditScreen(
                         Spacer(modifier = Modifier.height(8.dp))
 
                         Text("End Time", style = MaterialTheme.typography.labelMedium)
-                        TimePickerRow(
+                        TimeNumericInput(
                             time = classInfo.endTime,
                             onTimeChange = { classes[index] = classInfo.copy(endTime = it) }
                         )
@@ -166,33 +170,69 @@ fun ScheduleEditScreen(
 }
 
 @Composable
-private fun TimePickerRow(time: String, onTimeChange: (String) -> Unit) {
-    var hour by remember { mutableStateOf(time.substringBefore(":").ifBlank { "09" }) }
-    var minute by remember { mutableStateOf(time.substringAfter(":").substringBefore(" ").ifBlank { "00" }) }
+private fun TimeNumericInput(time: String, onTimeChange: (String) -> Unit) {
+    // Current state derived from the time string "HH:mm AM/PM"
+    var numericText by remember { 
+        val h = time.substringBefore(":").filter { it.isDigit() }
+        val m = time.substringAfter(":").substringBefore(" ").filter { it.isDigit() }
+        mutableStateOf(if (h.isNotEmpty() || m.isNotEmpty()) "$h$m" else "") 
+    }
     var isAm by remember { mutableStateOf(!time.contains("PM")) }
+
+    fun updateOutput() {
+        val hStr: String
+        val mStr: String
+        
+        when (numericText.length) {
+            1 -> {
+                hStr = numericText
+                mStr = "00"
+            }
+            2 -> {
+                hStr = numericText
+                mStr = "00"
+            }
+            3 -> {
+                hStr = numericText.substring(0, 1)
+                mStr = numericText.substring(1)
+            }
+            4 -> {
+                hStr = numericText.substring(0, 2)
+                mStr = numericText.substring(2)
+            }
+            else -> {
+                hStr = "09"
+                mStr = "00"
+            }
+        }
+        
+        // Pad for display if needed but the logic handles 1 vs 2 digits for hours
+        onTimeChange("${hStr.padStart(1, '0')}:${mStr.padStart(2, '0')} ${if(isAm) "AM" else "PM"}")
+    }
 
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
-            value = hour,
-            onValueChange = { if (it.length <= 2) { hour = it; onTimeChange("$hour:$minute ${if(isAm) "AM" else "PM"}") } },
-            label = { Text("Hr") },
-            modifier = Modifier.width(60.dp),
-            singleLine = true
+            value = numericText,
+            onValueChange = { input ->
+                if (input.all { it.isDigit() } && input.length <= 4) {
+                    numericText = input
+                    updateOutput()
+                }
+            },
+            label = { Text("Time") },
+            placeholder = { Text("00:00") },
+            modifier = Modifier.width(120.dp),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
         )
-        Text(" : ", modifier = Modifier.padding(horizontal = 4.dp))
-        OutlinedTextField(
-            value = minute,
-            onValueChange = { if (it.length <= 2) { minute = it; onTimeChange("$hour:$minute ${if(isAm) "AM" else "PM"}") } },
-            label = { Text("Min") },
-            modifier = Modifier.width(60.dp),
-            singleLine = true
-        )
+        
         Spacer(Modifier.width(16.dp))
+        
         Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(selected = isAm, onClick = { isAm = true; onTimeChange("$hour:$minute AM") })
+            RadioButton(selected = isAm, onClick = { isAm = true; updateOutput() })
             Text("AM")
             Spacer(Modifier.width(8.dp))
-            RadioButton(selected = !isAm, onClick = { isAm = false; onTimeChange("$hour:$minute PM") })
+            RadioButton(selected = !isAm, onClick = { isAm = false; updateOutput() })
             Text("PM")
         }
     }

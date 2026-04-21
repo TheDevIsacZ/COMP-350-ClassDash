@@ -345,6 +345,7 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.05f), CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Default.Edit,
@@ -364,15 +365,15 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                     color = ProfileTheme.Primary
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
                 if (userProfile.semester.isNotEmpty()) {
                     Text(
                         text = userProfile.semester,
                         style = MaterialTheme.typography.bodySmall,
                         color = ProfileTheme.MutedForeground,
-                        modifier = Modifier.padding(bottom = 8.dp)
+                        modifier = Modifier.padding(bottom = 6.dp)
                     )
+                } else {
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
 
                 if (userProfile.classes.isEmpty()) {

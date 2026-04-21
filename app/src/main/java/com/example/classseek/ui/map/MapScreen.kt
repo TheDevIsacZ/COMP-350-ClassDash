@@ -58,7 +58,7 @@ enum class MarkerCategory(val label: String, val icon: ImageVector, val color: C
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)), // Orange
     BOOKMARK("Bookmark", Icons.Default.Star, Color(0xFFFFD700)),
     SHARED("Shared", Icons.Default.ShareLocation, Color(0xFF4CAF50)),
-    SCHEDULE("Schedule", Icons.Default.Circle, Color(0xFF4CAF50))
+    CLASS("Class", Icons.Default.Circle, Color(0xFF4CAF50))
 }
 
 data class MapPlace(
@@ -173,7 +173,7 @@ fun MapScreen(
                 MapPlace(
                     name = classInfo.className,
                     location = match.location,
-                    category = MarkerCategory.SCHEDULE,
+                    category = MarkerCategory.CLASS,
                     description = "${classInfo.building} ${classInfo.roomNumber}"
                 )
             } else null
@@ -329,9 +329,6 @@ fun MapScreen(
                         true
                     }
                 ) {
-                    // Using Navigation icon (arrow) and rotating it based on heading
-                    // Navigation icon naturally points top-right, so we add an offset if needed,
-                    // but usually, an upward arrow like 'Navigation' works best.
                     Icon(
                         imageVector = Icons.Default.Navigation,
                         contentDescription = "User Location",
@@ -345,6 +342,20 @@ fun MapScreen(
                 allMarkers.forEach { place ->
                     val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
                     val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
+                    
+                    // Logic to hide building labels if overlapped by specific categories
+                    val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers, incomingSharedMarker) {
+                        if (place.category == MarkerCategory.BUILDING) {
+                            bookmarkMarkers.any { it.location == place.location } ||
+                            scheduleMarkers.any { it.location == place.location } ||
+                            incomingSharedMarker.any { it.location == place.location }
+                        } else false
+                    }
+                    
+                    // Hide building name if overlapped, unless filter active or search in progress
+                    val shouldShowName = if (place.category == MarkerCategory.BUILDING && hasOverlappingMarker) {
+                        selectedCategory != MarkerCategory.ALL || searchQuery.isNotEmpty() || isSelected
+                    } else true
 
                     val markerAlpha = if (selectedPlace != null) {
                         if (isSelected) 1.0f else 0.35f
@@ -354,7 +365,7 @@ fun MapScreen(
                         1.0f
                     }
 
-                    key("${place.name}_${place.location.latitude}_${place.location.longitude}") {
+                    key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
                         MarkerComposable(
                             state = rememberMarkerState(position = place.location),
                             alpha = markerAlpha,
@@ -365,23 +376,25 @@ fun MapScreen(
                             }
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Surface(
-                                    shape = RoundedCornerShape(3.3.dp),
-                                    color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                    modifier = Modifier.padding(bottom = 1.4.dp)
-                                ) {
-                                    Text(
-                                        text = place.name,
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                        modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
-                                        color = Color.Black
-                                    )
+                                if (shouldShowName) {
+                                    Surface(
+                                        shape = RoundedCornerShape(3.3.dp),
+                                        color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                                        modifier = Modifier.padding(bottom = 1.4.dp)
+                                    ) {
+                                        Text(
+                                            text = place.name,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                            modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
+                                            color = Color.Black
+                                        )
+                                    }
                                 }
                                 Icon(
                                     imageVector = place.category.icon,
                                     contentDescription = null,
                                     tint = place.category.color,
-                                    modifier = Modifier.size(if (place.category == MarkerCategory.SCHEDULE) 14.dp else 19.8.dp)
+                                    modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
                                 )
                             }
                         }
@@ -420,7 +433,7 @@ fun MapScreen(
                 title = { Text("Share Location") },
                 text = {
                     Column {
-                        Text("Select a friend or group to send this location to:")
+                        Text("Select a chat to send this location to:")
                         Spacer(Modifier.height(8.dp))
                         LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
                             items(myChats) { chat ->
@@ -477,10 +490,10 @@ fun MapScreen(
                 Box {
                     FloatingActionButton(
                         onClick = { isFilterMenuExpanded = true },
-                        modifier = Modifier.size(48.dp),
+                        modifier = Modifier.size(55.dp),
                         containerColor = Color.White.copy(alpha = 0.9f),
                         contentColor = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(24.dp),
+                        shape = RoundedCornerShape(18.dp),
                         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
                     ) {
                         Icon(
@@ -492,9 +505,9 @@ fun MapScreen(
                     DropdownMenu(
                         expanded = isFilterMenuExpanded,
                         onDismissRequest = { isFilterMenuExpanded = false },
-                        modifier = Modifier.background(Color.White.copy(alpha = 0.95f))
+                        modifier = Modifier.background(Color.White.copy(alpha = 0.85f))
                     ) {
-                        MarkerCategory.entries.forEach { category ->
+                        MarkerCategory.entries.filter { it != MarkerCategory.SHARED }.forEach { category ->
                             DropdownMenuItem(
                                 text = { Text(category.label) },
                                 onClick = {

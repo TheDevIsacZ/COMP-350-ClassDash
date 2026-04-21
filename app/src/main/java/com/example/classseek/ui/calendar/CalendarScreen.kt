@@ -42,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -89,6 +90,7 @@ fun CalendarScreen(
     var selectedDateMillis by remember { mutableStateOf<Long?>(null) }
     var showBottomSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
+    var showStarredOnly by remember { mutableStateOf(false) }
 
     var hasCalendarPermission by remember {
         mutableStateOf(
@@ -159,7 +161,9 @@ fun CalendarScreen(
 
             val filteredEvents = calendarEvents.filter { event ->
                 val eventTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
-                eventTime >= todayStart
+                val isUpcoming = eventTime >= todayStart
+                val isStarredMatch = !showStarredOnly || userProfile?.bookmarkedEventIds?.contains(event.id) == true
+                isUpcoming && isStarredMatch
             }
 
             val groupedEvents = filteredEvents.groupBy { event ->
@@ -227,13 +231,26 @@ fun CalendarScreen(
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
-                        Text(
-                            text = "Upcoming Events",
-                            style = MaterialTheme.typography.titleLarge,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                            Text(
+                                text = if (showStarredOnly) "Bookmarked Events" else "Upcoming Events",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                            IconToggleButton(
+                                checked = showStarredOnly,
+                                onCheckedChange = { showStarredOnly = it },
+                                modifier = Modifier.align(Alignment.CenterEnd).size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (showStarredOnly) Icons.Default.Star else Icons.Default.StarBorder,
+                                    contentDescription = "Show Starred Only",
+                                    tint = if (showStarredOnly) Color(0xFFFFD700) else Color.Gray,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(12.dp))
                     }
@@ -309,6 +326,7 @@ fun CalendarScreen(
             onDismissRequest = { showBottomSheet = false },
             sheetState = sheetState
         ) {
+            @Suppress("DEPRECATION")
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
