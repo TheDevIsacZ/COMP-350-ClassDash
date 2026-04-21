@@ -20,10 +20,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -54,6 +57,7 @@ import com.example.classseek.data.ChatInfo
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.data.GroupMember
 import com.example.classseek.data.Message
+import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CancellationException
@@ -108,6 +112,7 @@ fun ChatScreen(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onLocationClick: (LatLng, String) -> Unit = { _, _ -> },
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() }
 ) {
@@ -946,7 +951,8 @@ fun ChatScreen(
                         } else {
                             null
                         },
-                        seenByProfiles = if (isMine) seenByProfiles else emptyList()
+                        seenByProfiles = if (isMine) seenByProfiles else emptyList(),
+                        onLocationClick = onLocationClick
                     )
                 }
             }
@@ -1025,7 +1031,8 @@ private fun MessageRow(
     senderAvatarUrl: String,
     showReceipt: Boolean = false,
     receiptText: String? = null,
-    seenByProfiles: List<ChatUserProfile> = emptyList()
+    seenByProfiles: List<ChatUserProfile> = emptyList(),
+    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
 ) {
     if (msg.type == "system") {
         Box(
@@ -1069,10 +1076,32 @@ private fun MessageRow(
             ) {
                 Surface(
                     tonalElevation = 1.dp,
-                    shape = MaterialTheme.shapes.medium
+                    shape = MaterialTheme.shapes.medium,
+                    color = if (msg.type == "location") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
                 ) {
                     Column(Modifier.padding(10.dp)) {
-                        Text(msg.text ?: "[${msg.type}]")
+                        if (msg.type == "location" && msg.latitude != null && msg.longitude != null) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Map, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = msg.locationName ?: "Shared Location",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "Tap to view on map",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.clickable {
+                                            onLocationClick(LatLng(msg.latitude, msg.longitude), msg.locationName ?: "Shared Location")
+                                        }
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(msg.text ?: "[${msg.type}]")
+                        }
                     }
                 }
 

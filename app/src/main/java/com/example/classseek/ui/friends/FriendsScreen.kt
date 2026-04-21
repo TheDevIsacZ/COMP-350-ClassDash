@@ -48,6 +48,7 @@ import coil.compose.AsyncImage
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.ui.chat.ChatScreen
+import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -120,7 +121,8 @@ fun FriendsScreen(
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() },
     initialChatId: String? = null,
     initialChatTitle: String? = null,
-    onInitialChatConsumed: (() -> Unit)? = null
+    onInitialChatConsumed: (() -> Unit)? = null,
+    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
 ){
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
@@ -404,7 +406,8 @@ fun FriendsScreen(
             onBack = {
                 selectedChatId = null
                 selectedChatTitle = null
-            }
+            },
+            onLocationClick = onLocationClick
         )
         return
     }

@@ -27,7 +27,10 @@ data class Message(
     val text: String? = null,
     val createdAt: Timestamp? = null,
     val replyToMessageId: String? = null,
-    val hasPendingWrites: Boolean = false
+    val hasPendingWrites: Boolean = false,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationName: String? = null
 )
 
 data class ReadReceiptState(
@@ -642,6 +645,61 @@ class ChatRepository(
         return msgRef.id
     }
 
+    suspend fun sendLocationMessage(
+        chatId: String,
+        senderId: String,
+        latitude: Double,
+        longitude: Double,
+        locationName: String
+    ): String {
+        val msgRef = chatMessagesRef(chatId).document()
+        val batch = db.batch()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
+        val text = "Shared Location: $locationName"
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "location",
+                "text" to text,
+                "latitude" to latitude,
+                "longitude" to longitude,
+                "locationName" to locationName,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to text,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to text,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
+    }
+
     suspend fun updateMyLastRead(
         chatId: String,
         myUid: String,
@@ -767,7 +825,10 @@ class ChatRepository(
             text = getString("text"),
             createdAt = getTimestamp("createdAt"),
             replyToMessageId = getString("replyToMessageId"),
-            hasPendingWrites = metadata.hasPendingWrites()
+            hasPendingWrites = metadata.hasPendingWrites(),
+            latitude = getDouble("latitude"),
+            longitude = getDouble("longitude"),
+            locationName = getString("locationName")
         )
     }
 

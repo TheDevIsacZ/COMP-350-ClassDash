@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
@@ -55,6 +56,7 @@ fun ProfileScreen(
     userProfile: UserProfile,
     onSignOut: () -> Unit,
     onEditProfile: () -> Unit,
+    onEditSchedule: () -> Unit,
     onDeleteAccount: () -> Unit
 ) {
     val scrollState = rememberScrollState()
@@ -76,6 +78,11 @@ fun ProfileScreen(
 
             // Profile Info Card
             ProfileInfoCard(userProfile)
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Schedule Section
+            ScheduleSection(userProfile, onEditSchedule)
 
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -323,6 +330,80 @@ fun ProfileInfoCard(userProfile: UserProfile) {
 }
 
 @Composable
+fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            IconButton(
+                onClick = onEditClick,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit Schedule",
+                    tint = ProfileTheme.MutedForeground
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Current Schedule",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = ProfileTheme.Primary
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (userProfile.semester.isNotEmpty()) {
+                    Text(
+                        text = userProfile.semester,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ProfileTheme.MutedForeground,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+
+                if (userProfile.classes.isEmpty()) {
+                    Text(
+                        text = "Empty",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = ProfileTheme.MutedForeground
+                    )
+                } else {
+                    userProfile.classes.forEach { classInfo ->
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Text(
+                                text = classInfo.className,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ProfileTheme.Primary
+                            )
+                            Text(
+                                text = "${classInfo.building} ${classInfo.roomNumber}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ProfileTheme.MutedForeground
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun InfoRow(icon: ImageVector, text: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -402,20 +483,9 @@ fun WelcomeCard(onSignOut: () -> Unit) {
                 onClick = onSignOut,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, ProfileTheme.Border)
-            ) {
-                Text("Sign Out", color = ProfileTheme.Primary, fontWeight = FontWeight.Medium)
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Text(
-                text = "Version 2.0.1 (Social Redesign)",
-                style = MaterialTheme.typography.labelSmall,
-                color = ProfileTheme.MutedForeground.copy(alpha = 0.6f)
-            )
+                ) {
+                    Text("Sign Out")
+                }
         }
     }
 }
