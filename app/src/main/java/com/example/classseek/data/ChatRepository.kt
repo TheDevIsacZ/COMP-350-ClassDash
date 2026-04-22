@@ -916,6 +916,126 @@ class ChatRepository(
         )
     }
 
+    suspend fun sendFriendRequest(
+        myUid: String,
+        targetUid: String
+    ) {
+        if (myUid == targetUid) return
+
+        val myProfileDoc = users.document(myUid).get().await()
+        val targetProfileDoc = users.document(targetUid).get().await()
+
+        val myName = myProfileDoc.getString("displayName") ?: myProfileDoc.getString("name") ?: "User"
+        val myEmail = myProfileDoc.getString("email") ?: ""
+        val myPhoto = myProfileDoc.getString("profilePictureUrl") ?: ""
+
+        val targetName = targetProfileDoc.getString("displayName") ?: targetProfileDoc.getString("name") ?: "User"
+        val targetEmail = targetProfileDoc.getString("email") ?: ""
+        val targetPhoto = targetProfileDoc.getString("profilePictureUrl") ?: ""
+
+        val now = FieldValue.serverTimestamp()
+        val batch = db.batch()
+
+        // 1. Add to recipient's friendRequests
+        batch.set(
+            users.document(targetUid).collection("friendRequests").document(myUid),
+            mapOf(
+                "uid" to myUid,
+                "fromUid" to myUid,
+                "toUid" to targetUid,
+                "displayName" to myName,
+                "email" to myEmail,
+                "profilePictureUrl" to myPhoto,
+                "status" to "pending",
+                "createdAt" to now
+            )
+        )
+
+        // 2. Add to sender's sentFriendRequests
+        batch.set(
+            users.document(myUid).collection("sentFriendRequests").document(targetUid),
+            mapOf(
+                "uid" to targetUid,
+                "fromUid" to myUid,
+                "toUid" to targetUid,
+                "displayName" to targetName,
+                "email" to targetEmail,
+                "profilePictureUrl" to targetPhoto,
+                "status" to "pending",
+                "createdAt" to now
+            )
+        )
+
+        batch.commit().await()
+    }
+
+    suspend fun acceptFriendRequest(
+        myUid: String,
+        requesterUid: String
+    ) {
+        val myProfileDoc = users.document(myUid).get().await()
+        val requesterProfileDoc = users.document(requesterUid).get().await()
+
+        val myName = myProfileDoc.getString("displayName") ?: myProfileDoc.getString("name") ?: "User"
+        val myPhoto = myProfileDoc.getString("profilePictureUrl") ?: ""
+        
+        val requesterName = requesterProfileDoc.getString("displayName") ?: requesterProfileDoc.getString("name") ?: "User"
+        val requesterPhoto = requesterProfileDoc.getString("profilePictureUrl") ?: ""
+
+        val now = FieldValue.serverTimestamp()
+        val batch = db.batch()
+
+        // 1. Add to my friends
+        batch.set(
+            users.document(myUid).collection("friends").document(requesterUid),
+            mapOf(
+                "uid" to requesterUid,
+                "name" to requesterName,
+                "profilePictureUrl" to requesterPhoto,
+                "status" to "accepted",
+                "addedAt" to now
+            )
+        )
+
+        // 2. Add to their friends
+        batch.set(
+            users.document(requesterUid).collection("friends").document(myUid),
+            mapOf(
+                "uid" to myUid,
+                "name" to myName,
+                "profilePictureUrl" to myPhoto,
+                "status" to "accepted",
+                "addedAt" to now
+            )
+        )
+
+        // 3. Remove the request docs
+        batch.delete(users.document(myUid).collection("friendRequests").document(requesterUid))
+        batch.delete(users.document(requesterUid).collection("sentFriendRequests").document(myUid))
+
+        batch.commit().await()
+    }
+
+    suspend fun declineFriendRequest(
+        myUid: String,
+        requesterUid: String
+    ) {
+        val batch = db.batch()
+        batch.delete(users.document(myUid).collection("friendRequests").document(requesterUid))
+        batch.delete(users.document(requesterUid).collection("sentFriendRequests").document(myUid))
+        batch.commit().await()
+    }
+
+    suspend fun cancelFriendRequest(
+        myUid: String,
+        targetUid: String
+    ) {
+        val batch = db.batch()
+        batch.delete(users.document(myUid).collection("sentFriendRequests").document(targetUid))
+        batch.delete(users.document(targetUid).collection("friendRequests").document(myUid))
+        batch.commit().await()
+    }
+
     suspend fun findExistingDmChatId(uidA: String, uidB: String): String? {
         if (uidA == uidB) return null
 

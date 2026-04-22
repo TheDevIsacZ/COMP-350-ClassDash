@@ -123,6 +123,8 @@ fun FriendsScreen(
     
     var selectedUserForAction by remember { mutableStateOf<UserSearchItem?>(null) }
     var friendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pendingRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var sentRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
 
     // Handle initial chat for deep linking or returning from other screens
@@ -135,12 +137,35 @@ fun FriendsScreen(
         }
     }
 
-    // Listen for friend UIDs
+    // Listen for friends and requests
+    val pendingRequests = remember { mutableStateListOf<UserSearchItem>() }
     LaunchedEffect(myUid) {
         if (myUid.isBlank()) return@LaunchedEffect
+        
         db.collection("users").document(myUid).collection("friends")
             .addSnapshotListener { snapshot, _ ->
                 friendUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
+            }
+            
+        db.collection("users").document(myUid).collection("friendRequests")
+            .addSnapshotListener { snapshot, _ ->
+                pendingRequestUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
+                pendingRequests.clear()
+                snapshot?.documents?.forEach { doc ->
+                    val uid = doc.getString("uid") ?: doc.id
+                    pendingRequests.add(UserSearchItem(
+                        uid = uid,
+                        name = doc.getString("displayName") ?: "User",
+                        displayName = doc.getString("displayName") ?: "User",
+                        email = doc.getString("email") ?: "",
+                        profilePictureUrl = doc.getString("profilePictureUrl") ?: ""
+                    ))
+                }
+            }
+            
+        db.collection("users").document(myUid).collection("sentFriendRequests")
+            .addSnapshotListener { snapshot, _ ->
+                sentRequestUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
             }
     }
 
@@ -188,6 +213,7 @@ fun FriendsScreen(
             FriendsNavigation.MAIN -> {
                 MessagesMainScreen(
                     onlineFriends = onlineFriends,
+                    pendingRequests = pendingRequests,
                     chats = chats,
                     onChatClick = { chat ->
                         activeChatId = chat.id
@@ -202,6 +228,16 @@ fun FriendsScreen(
                     },
                     onUserClick = { user ->
                         selectedUserForAction = user
+                    },
+                    onAcceptFriend = { user ->
+                        scope.launch {
+                            try { repo.acceptFriendRequest(myUid, user.uid) } catch (e: Exception) {}
+                        }
+                    },
+                    onDeclineFriend = { user ->
+                        scope.launch {
+                            try { repo.declineFriendRequest(myUid, user.uid) } catch (e: Exception) {}
+                        }
                     }
                 )
             }
@@ -242,6 +278,11 @@ fun FriendsScreen(
             UserActionDialog(
                 user = user,
                 isFriend = friendUids.contains(user.uid),
+                requestStatus = when {
+                    pendingRequestUids.contains(user.uid) -> "pending"
+                    sentRequestUids.contains(user.uid) -> "sent"
+                    else -> null
+                },
                 onDismiss = { selectedUserForAction = null },
                 onMessage = {
                     val targetUser = selectedUserForAction!!
@@ -262,14 +303,40 @@ fun FriendsScreen(
                     selectedUserForAction = null
                     scope.launch {
                         try {
-                            db.collection("users").document(myUid).collection("friends").document(targetUser.uid).set(
-                                mapOf(
-                                    "uid" to targetUser.uid,
-                                    "name" to targetUser.displayName,
-                                    "profilePictureUrl" to targetUser.profilePictureUrl,
-                                    "addedAt" to FieldValue.serverTimestamp()
-                                )
-                            ).await()
+                            repo.sendFriendRequest(myUid, targetUser.uid)
+                        } catch (e: Exception) {
+                            // Error
+                        }
+                    }
+                },
+                onAcceptFriend = {
+                    val targetUser = selectedUserForAction!!
+                    selectedUserForAction = null
+                    scope.launch {
+                        try {
+                            repo.acceptFriendRequest(myUid, targetUser.uid)
+                        } catch (e: Exception) {
+                            // Error
+                        }
+                    }
+                },
+                onDeclineFriend = {
+                    val targetUser = selectedUserForAction!!
+                    selectedUserForAction = null
+                    scope.launch {
+                        try {
+                            repo.declineFriendRequest(myUid, targetUser.uid)
+                        } catch (e: Exception) {
+                            // Error
+                        }
+                    }
+                },
+                onCancelFriend = {
+                    val targetUser = selectedUserForAction!!
+                    selectedUserForAction = null
+                    scope.launch {
+                        try {
+                            repo.cancelFriendRequest(myUid, targetUser.uid)
                         } catch (e: Exception) {
                             // Error
                         }
@@ -319,9 +386,13 @@ fun FriendsScreen(
 fun UserActionDialog(
     user: UserSearchItem,
     isFriend: Boolean = false,
+    requestStatus: String? = null, // null, "pending", "sent"
     onDismiss: () -> Unit,
     onMessage: () -> Unit,
     onAddFriend: () -> Unit,
+    onAcceptFriend: () -> Unit = {},
+    onDeclineFriend: () -> Unit = {},
+    onCancelFriend: () -> Unit = {},
     onViewProfile: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -358,17 +429,7 @@ fun UserActionDialog(
                 
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                if (!isFriend) {
-                    OutlinedButton(
-                        onClick = onAddFriend,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Add Friend")
-                    }
-                } else {
+                if (isFriend) {
                     OutlinedButton(
                         onClick = {}, // Already friends
                         enabled = false,
@@ -378,6 +439,48 @@ fun UserActionDialog(
                         Icon(Icons.Default.Check, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Friends")
+                    }
+                } else {
+                    when (requestStatus) {
+                        "sent" -> {
+                            OutlinedButton(
+                                onClick = onCancelFriend,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Cancel Request")
+                            }
+                        }
+                        "pending" -> {
+                            Row(modifier = Modifier.fillMaxWidth()) {
+                                Button(
+                                    onClick = onAcceptFriend,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Accept")
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                OutlinedButton(
+                                    onClick = onDeclineFriend,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text("Decline")
+                                }
+                            }
+                        }
+                        else -> {
+                            OutlinedButton(
+                                onClick = onAddFriend,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Add Friend")
+                            }
+                        }
                     }
                 }
                 
@@ -397,11 +500,14 @@ fun UserActionDialog(
 @Composable
 fun MessagesMainScreen(
     onlineFriends: List<UserSearchItem>,
+    pendingRequests: List<UserSearchItem>,
     chats: List<ChatListItem>,
     onChatClick: (ChatListItem) -> Unit,
     onDeleteChat: (ChatListItem) -> Unit,
     onNewMessageClick: () -> Unit,
-    onUserClick: (UserSearchItem) -> Unit
+    onUserClick: (UserSearchItem) -> Unit,
+    onAcceptFriend: (UserSearchItem) -> Unit,
+    onDeclineFriend: (UserSearchItem) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
@@ -458,6 +564,49 @@ fun MessagesMainScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp)
         ) {
+            // Friend Requests Section
+            if (pendingRequests.isNotEmpty() && searchQuery.isBlank()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Friend Requests (${pendingRequests.size})",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                            pendingRequests.forEach { request ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    UserAvatar(request.profilePictureUrl, request.displayName, Modifier.size(40.dp).clickable { onUserClick(request) })
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        request.displayName,
+                                        modifier = Modifier.weight(1f).clickable { onUserClick(request) },
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                                    )
+                                    IconButton(onClick = { onAcceptFriend(request) }) {
+                                        Icon(Icons.Default.Check, contentDescription = "Accept", tint = Color(0xFF4CAF50))
+                                    }
+                                    IconButton(onClick = { onDeclineFriend(request) }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Decline", tint = Color.Red)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Online Friends Section
             item {
                 Card(
@@ -867,27 +1016,6 @@ fun NewMessageScreen(
                         }
                     }
 
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
-
-                    // All Friends
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            shape = RoundedCornerShape(24.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    "Suggested Users",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    modifier = Modifier.padding(bottom = 12.dp)
-                                )
-                                allFriends.forEach { user ->
-                                    UserSearchRow(user = user, onClick = { onUserSelected(user) })
-                                }
-                            }
-                        }
-                    }
                 } else {
                     // Selection for group
                     item {

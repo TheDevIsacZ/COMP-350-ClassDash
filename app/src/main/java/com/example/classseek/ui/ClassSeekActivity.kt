@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import com.example.classseek.Notification.MyFirebaseMessagingService
 import com.example.classseek.R
+import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.calendar.AddEventScreen
@@ -334,6 +335,8 @@ fun ClassSeekApp(
     var isEditingProfile by remember { mutableStateOf(false) }
     var viewOtherUserId by remember { mutableStateOf<String?>(null) }
     var otherUserProfile by remember { mutableStateOf<UserProfile?>(null) }
+    var isFriendWithOther by remember { mutableStateOf(false) }
+    var friendRequestStatus by remember { mutableStateOf<String?>(null) } // null, "pending", "sent"
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
 
     val scope = rememberCoroutineScope()
@@ -476,16 +479,62 @@ fun ClassSeekApp(
         }
     }
 
-    LaunchedEffect(viewOtherUserId) {
+    LaunchedEffect(viewOtherUserId, firebaseUser?.uid) {
         if (viewOtherUserId != null) {
             try {
-                val doc = db.collection("users").document(viewOtherUserId!!).get().await()
+                val currentUid = firebaseUser?.uid
+                val targetUid = viewOtherUserId!!
+                
+                val doc = db.collection("users").document(targetUid).get().await()
                 otherUserProfile = doc.toObject(UserProfile::class.java)
+
+                if (currentUid != null) {
+                    // Check if they are friends
+                    val friendDoc = db.collection("users")
+                        .document(currentUid)
+                        .collection("friends")
+                        .document(targetUid)
+                        .get()
+                        .await()
+                    isFriendWithOther = friendDoc.exists()
+                    
+                    if (!isFriendWithOther) {
+                        // Check for incoming request
+                        val incomingReq = db.collection("users")
+                            .document(currentUid)
+                            .collection("friendRequests")
+                            .document(targetUid)
+                            .get()
+                            .await()
+                        
+                        if (incomingReq.exists()) {
+                            friendRequestStatus = "pending"
+                        } else {
+                            // Check for outgoing request
+                            val outgoingReq = db.collection("users")
+                                .document(currentUid)
+                                .collection("sentFriendRequests")
+                                .document(targetUid)
+                                .get()
+                                .await()
+                            
+                            if (outgoingReq.exists()) {
+                                friendRequestStatus = "sent"
+                            } else {
+                                friendRequestStatus = null
+                            }
+                        }
+                    } else {
+                        friendRequestStatus = null
+                    }
+                }
             } catch (e: Exception) {
                 Log.e("PROFILE_DEBUG", "Error fetching other profile", e)
             }
         } else {
             otherUserProfile = null
+            isFriendWithOther = false
+            friendRequestStatus = null
         }
     }
 
@@ -504,6 +553,9 @@ fun ClassSeekApp(
     if (otherUserProfile != null) {
         ProfileScreen(
             userProfile = otherUserProfile!!,
+            isMyProfile = false,
+            isFriend = isFriendWithOther,
+            friendRequestStatus = friendRequestStatus,
             onSignOut = {
                 auth.signOut()
                 googleSignInClient.signOut()
@@ -515,6 +567,59 @@ fun ClassSeekApp(
             },
             onEditProfile = {}, // Can't edit others
             onDeleteAccount = {}, // Can't delete others
+            onAddFriend = {
+                scope.launch {
+                    try {
+                        val currentUid = firebaseUser?.uid ?: return@launch
+                        val targetUid = viewOtherUserId ?: return@launch
+                        val repo = ChatRepository(db)
+                        repo.sendFriendRequest(currentUid, targetUid)
+                        friendRequestStatus = "sent"
+                    } catch (e: Exception) {
+                        Log.e("FRIEND_DEBUG", "Error sending friend request", e)
+                    }
+                }
+            },
+            onAcceptFriend = {
+                scope.launch {
+                    try {
+                        val currentUid = firebaseUser?.uid ?: return@launch
+                        val targetUid = viewOtherUserId ?: return@launch
+                        val repo = ChatRepository(db)
+                        repo.acceptFriendRequest(currentUid, targetUid)
+                        isFriendWithOther = true
+                        friendRequestStatus = null
+                    } catch (e: Exception) {
+                        Log.e("FRIEND_DEBUG", "Error accepting friend request", e)
+                    }
+                }
+            },
+            onDeclineFriend = {
+                scope.launch {
+                    try {
+                        val currentUid = firebaseUser?.uid ?: return@launch
+                        val targetUid = viewOtherUserId ?: return@launch
+                        val repo = ChatRepository(db)
+                        repo.declineFriendRequest(currentUid, targetUid)
+                        friendRequestStatus = null
+                    } catch (e: Exception) {
+                        Log.e("FRIEND_DEBUG", "Error declining friend request", e)
+                    }
+                }
+            },
+            onCancelFriend = {
+                scope.launch {
+                    try {
+                        val currentUid = firebaseUser?.uid ?: return@launch
+                        val targetUid = viewOtherUserId ?: return@launch
+                        val repo = ChatRepository(db)
+                        repo.cancelFriendRequest(currentUid, targetUid)
+                        friendRequestStatus = null
+                    } catch (e: Exception) {
+                        Log.e("FRIEND_DEBUG", "Error cancelling friend request", e)
+                    }
+                }
+            },
             onBack = {
                 viewOtherUserId = null
             }
@@ -652,6 +757,7 @@ fun ClassSeekApp(
                         AppDestinations.PROFILE -> {
                             ProfileScreen(
                                 userProfile = userProfile!!,
+                                isMyProfile = true,
                                 onSignOut = {
                                     auth.signOut()
                                     googleSignInClient.signOut()
@@ -688,7 +794,6 @@ fun ClassSeekApp(
 
                         AppDestinations.FRIENDS -> {
                             FriendsScreen(
-                                auth = auth,
                                 initialChatId = pendingNotificationChatId,
                                 initialChatTitle = pendingNotificationChatTitle,
                                 onInitialChatConsumed = {

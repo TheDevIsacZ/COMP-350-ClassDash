@@ -12,10 +12,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -55,9 +57,16 @@ object ProfileTheme {
 @Composable
 fun ProfileScreen(
     userProfile: UserProfile,
+    isMyProfile: Boolean,
+    isFriend: Boolean = false,
+    friendRequestStatus: String? = null, // null, "pending", "sent"
     onSignOut: () -> Unit,
     onEditProfile: () -> Unit,
     onDeleteAccount: () -> Unit,
+    onAddFriend: (() -> Unit)? = null,
+    onAcceptFriend: (() -> Unit)? = null,
+    onDeclineFriend: (() -> Unit)? = null,
+    onCancelFriend: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
@@ -73,19 +82,34 @@ fun ProfileScreen(
                 .verticalScroll(scrollState)
         ) {
             // Header with Gradient and Settings Icon
-            HeaderSection(userProfile, onEditProfile, onSignOut, onDeleteAccount, onBack)
+            HeaderSection(
+                userProfile,
+                isMyProfile,
+                isFriend,
+                friendRequestStatus,
+                onEditProfile,
+                onSignOut,
+                onDeleteAccount,
+                onAddFriend,
+                onAcceptFriend,
+                onDeclineFriend,
+                onCancelFriend,
+                onBack
+            )
 
             Spacer(modifier = Modifier.height(60.dp)) // Space for the overlapping profile image
 
             // Profile Info Card
             ProfileInfoCard(userProfile)
 
-            Spacer(modifier = Modifier.height(16.dp))
+            if (isMyProfile) {
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // Messages Card
-            RecentMessagesListCard(
-                chats = emptyList() // We could fetch real recent messages here if needed, but let's just make it a link to the Messages screen
-            )
+                // Messages Card
+                RecentMessagesListCard(
+                    chats = emptyList()
+                )
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -98,9 +122,16 @@ fun ProfileScreen(
 @Composable
 fun HeaderSection(
     userProfile: UserProfile,
+    isMyProfile: Boolean,
+    isFriend: Boolean,
+    friendRequestStatus: String? = null,
     onEditProfile: () -> Unit,
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit,
+    onAddFriend: (() -> Unit)? = null,
+    onAcceptFriend: (() -> Unit)? = null,
+    onDeclineFriend: (() -> Unit)? = null,
+    onCancelFriend: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
@@ -160,60 +191,124 @@ fun HeaderSection(
                 .align(Alignment.TopEnd)
                 .padding(16.dp)
         ) {
-            IconButton(
-                onClick = { showMenu = true },
-                modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.2f), CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    tint = Color.White
-                )
-            }
+            if (isMyProfile) {
+                IconButton(
+                    onClick = { showMenu = true },
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.2f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = Color.White
+                    )
+                }
 
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false }
-            ) {
-                // Standard dropdown menu for profile actions
-                DropdownMenuItem(
-                    text = { Text("Edit Profile") },
-                    onClick = {
-                        showMenu = false
-                        onEditProfile()
-                    },
-                    leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) }
-                )
-                DropdownMenuItem(
-                    text = { Text("Sign Out", color = Color.Red) },
-                    onClick = {
-                        showMenu = false
-                        onSignOut()
-                    },
-                    leadingIcon = { 
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Edit Profile") },
+                        onClick = {
+                            showMenu = false
+                            onEditProfile()
+                        },
+                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Sign Out", color = Color.Red) },
+                        onClick = {
+                            showMenu = false
+                            onSignOut()
+                        },
+                        leadingIcon = { 
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Logout,
+                                contentDescription = null,
+                                tint = Color.Red
+                            ) 
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete Account", color = Color.Red) },
+                        onClick = {
+                            showMenu = false
+                            showDeleteConfirmDialog = true
+                        },
+                        leadingIcon = { 
+                            Icon(
+                                imageVector = Icons.Default.DeleteForever,
+                                contentDescription = null,
+                                tint = Color.Red
+                            ) 
+                        }
+                    )
+                }
+            } else {
+                // Not my profile, show "Add Friend" or "Friends" (checkmark)
+                if (isFriend) {
+                    IconButton(
+                        onClick = { /* Maybe show option to unfriend */ },
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.2f), CircleShape)
+                    ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Logout,
-                            contentDescription = null,
-                            tint = Color.Red
-                        ) 
+                            imageVector = Icons.Default.Check,
+                            contentDescription = "Friends",
+                            tint = Color.White
+                        )
                     }
-                )
-                // New action to trigger account deletion flow
-                DropdownMenuItem(
-                    text = { Text("Delete Account", color = Color.Red) },
-                    onClick = {
-                        showMenu = false
-                        showDeleteConfirmDialog = true
-                    },
-                    leadingIcon = { 
-                        Icon(
-                            imageVector = Icons.Default.DeleteForever,
-                            contentDescription = null,
-                            tint = Color.Red
-                        ) 
+                } else {
+                    when (friendRequestStatus) {
+                        "sent" -> {
+                            Button(
+                                onClick = { onCancelFriend?.invoke() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.3f)),
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp)
+                            ) {
+                                Text("Requested", color = Color.White, fontSize = 12.sp)
+                            }
+                        }
+                        "pending" -> {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Button(
+                                    onClick = { onAcceptFriend?.invoke() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                    shape = RoundedCornerShape(20.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Text("Accept", color = Color.Black, fontSize = 12.sp)
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = { onDeclineFriend?.invoke() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+                                    shape = RoundedCornerShape(20.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Text("Decline", color = Color.White, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        else -> {
+                            IconButton(
+                                onClick = { onAddFriend?.invoke() },
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.2f), CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PersonAdd,
+                                    contentDescription = "Add Friend",
+                                    tint = Color.White
+                                )
+                            }
+                        }
                     }
-                )
+                }
             }
         }
     }
