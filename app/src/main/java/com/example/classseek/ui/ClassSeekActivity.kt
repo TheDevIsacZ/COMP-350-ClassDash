@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
@@ -331,6 +332,8 @@ fun ClassSeekApp(
     var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.CALENDAR) }
     var isAddingEvent by remember { mutableStateOf(false) }
     var isEditingProfile by remember { mutableStateOf(false) }
+    var viewOtherUserId by remember { mutableStateOf<String?>(null) }
+    var otherUserProfile by remember { mutableStateOf<UserProfile?>(null) }
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
 
     val scope = rememberCoroutineScope()
@@ -473,6 +476,19 @@ fun ClassSeekApp(
         }
     }
 
+    LaunchedEffect(viewOtherUserId) {
+        if (viewOtherUserId != null) {
+            try {
+                val doc = db.collection("users").document(viewOtherUserId!!).get().await()
+                otherUserProfile = doc.toObject(UserProfile::class.java)
+            } catch (e: Exception) {
+                Log.e("PROFILE_DEBUG", "Error fetching other profile", e)
+            }
+        } else {
+            otherUserProfile = null
+        }
+    }
+
     if (pendingNotificationChatId != null && firebaseUser != null && userProfile != null) {
         ChatScreen(
             chatId = pendingNotificationChatId!!,
@@ -480,6 +496,27 @@ fun ClassSeekApp(
             onBack = {
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.FRIENDS
+            }
+        )
+        return
+    }
+
+    if (otherUserProfile != null) {
+        ProfileScreen(
+            userProfile = otherUserProfile!!,
+            onSignOut = {
+                auth.signOut()
+                googleSignInClient.signOut()
+                firebaseUser = null
+                signedInAccount = null
+                calendarEvents = emptyList()
+                consumePendingNotificationChat()
+                viewOtherUserId = null
+            },
+            onEditProfile = {}, // Can't edit others
+            onDeleteAccount = {}, // Can't delete others
+            onBack = {
+                viewOtherUserId = null
             }
         )
         return
@@ -656,6 +693,9 @@ fun ClassSeekApp(
                                 initialChatTitle = pendingNotificationChatTitle,
                                 onInitialChatConsumed = {
                                     consumePendingNotificationChat()
+                                },
+                                onNavigateToProfile = { uid ->
+                                    viewOtherUserId = uid
                                 }
                             )
                         }
@@ -679,7 +719,7 @@ enum class AppDestinations(
     val icon: ImageVector,
 ) {
     PROFILE("Profile", Icons.Default.Person),
-    FRIENDS("Friends", Icons.Default.People),
+    FRIENDS("Messages", Icons.Default.ChatBubbleOutline),
     CALENDAR("Calendar", Icons.Default.DateRange),
     MAP("Map", Icons.Default.Place),
     SETTINGS("Settings", Icons.Default.Settings),

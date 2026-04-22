@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -56,7 +57,8 @@ fun ProfileScreen(
     userProfile: UserProfile,
     onSignOut: () -> Unit,
     onEditProfile: () -> Unit,
-    onDeleteAccount: () -> Unit
+    onDeleteAccount: () -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
 
@@ -71,7 +73,7 @@ fun ProfileScreen(
                 .verticalScroll(scrollState)
         ) {
             // Header with Gradient and Settings Icon
-            HeaderSection(userProfile, onEditProfile, onSignOut, onDeleteAccount)
+            HeaderSection(userProfile, onEditProfile, onSignOut, onDeleteAccount, onBack)
 
             Spacer(modifier = Modifier.height(60.dp)) // Space for the overlapping profile image
 
@@ -80,13 +82,9 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Friends List Card
-            FriendsListCard(
-                friends = listOf(
-                    Friend("1", "Alex Johnson", "https://i.pravatar.cc/150?u=1", "Online"),
-                    Friend("2", "Sarah Williams", "https://i.pravatar.cc/150?u=2", "Away"),
-                    Friend("3", "Michael Chen", "https://i.pravatar.cc/150?u=3", "Offline")
-                )
+            // Messages Card
+            RecentMessagesListCard(
+                chats = emptyList() // We could fetch real recent messages here if needed, but let's just make it a link to the Messages screen
             )
 
             Spacer(modifier = Modifier.height(32.dp))
@@ -102,7 +100,8 @@ fun HeaderSection(
     userProfile: UserProfile,
     onEditProfile: () -> Unit,
     onSignOut: () -> Unit,
-    onDeleteAccount: () -> Unit
+    onDeleteAccount: () -> Unit,
+    onBack: (() -> Unit)? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
@@ -134,6 +133,26 @@ fun HeaderSection(
                         )
                     )
             )
+        }
+        
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(16.dp)
+        ) {
+            if (onBack != null) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.2f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = Color.White
+                    )
+                }
+            }
         }
         
         Box(
@@ -335,7 +354,7 @@ fun ProfileInfoCard(userProfile: UserProfile) {
 }
 
 @Composable
-fun FriendsListCard(friends: List<Friend>) {
+fun RecentMessagesListCard(chats: List<com.example.classseek.data.ChatListItem>) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -355,12 +374,12 @@ fun FriendsListCard(friends: List<Friend>) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Friends",
+                    text = "Recent Messages",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = ProfileTheme.Primary
                 )
-                TextButton(onClick = { /* View all friends */ }) {
+                TextButton(onClick = { /* Could navigate to Messages tab */ }) {
                     Text(
                         text = "See all",
                         style = MaterialTheme.typography.labelLarge,
@@ -371,23 +390,15 @@ fun FriendsListCard(friends: List<Friend>) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (friends.isEmpty()) {
+            if (chats.isEmpty()) {
                 Text(
-                    text = "No friends added yet.",
+                    text = "No recent messages.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = ProfileTheme.MutedForeground,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else {
-                friends.forEach { friend ->
-                    FriendItem(friend)
-                    if (friend != friends.last()) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = ProfileTheme.Border.copy(alpha = 0.05f)
-                        )
-                    }
-                }
+                // ... logic to show some chats
             }
         }
     }

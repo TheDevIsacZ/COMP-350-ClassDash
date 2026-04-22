@@ -734,18 +734,41 @@ class ChatRepository(
      * So a true permanent delete should be implemented in a Cloud Function
      * or with expanded admin rules.
      */
-    suspend fun deleteGroupChatPermanently(
+    suspend fun transferOwnership(
         chatId: String,
-        actingUid: String
+        actingUid: String,
+        newOwnerUid: String
     ) {
-        val role = getMyRole(chatId, actingUid)
-        if (role != "owner") {
-            throw Exception("Only owner can permanently delete the group")
-        }
+        val actingRole = getMyRole(chatId, actingUid)
+        if (actingRole != "owner") throw Exception("Only owner can transfer ownership")
 
-        throw Exception(
-            "Permanent delete is not supported from the client with current Firestore rules. Use a Cloud Function or expand delete rules."
+        val targetRef = chatMembersRef(chatId).document(newOwnerUid)
+        val targetDoc = targetRef.get().await()
+        if (!targetDoc.exists()) throw Exception("Target user is not a member of this chat")
+
+        val batch = db.batch()
+
+        // Update old owner to cohost or member
+        batch.update(chatMembersRef(chatId).document(actingUid), "role", "cohost")
+
+        // Update new owner
+        batch.update(chatMembersRef(chatId).document(newOwnerUid), "role", "owner")
+
+        // Update chat doc
+        batch.update(chatRef(chatId), "createdBy", newOwnerUid)
+
+        batch.commit().await()
+
+        val newOwnerName = getUserDisplayName(newOwnerUid)
+        sendSystemMembershipMessage(
+            chatId = chatId,
+            senderId = actingUid,
+            text = "Ownership transferred to $newOwnerName"
         )
+    }
+
+    suspend fun deleteChatListItem(myUid: String, chatId: String) {
+        userInboxRef(myUid).document(chatId).delete().await()
     }
 
     private fun DocumentSnapshot.toChatListItem(): ChatListItem {

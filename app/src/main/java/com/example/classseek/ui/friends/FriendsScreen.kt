@@ -1,60 +1,42 @@
 package com.example.classseek.ui.friends
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.ui.chat.ChatScreen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 data class UserSearchItem(
     val uid: String,
@@ -62,7 +44,9 @@ data class UserSearchItem(
     val displayName: String,
     val email: String,
     val major: String = "",
-    val profilePictureUrl: String = ""
+    val profilePictureUrl: String = "",
+    val isVerified: Boolean = false,
+    val isOnline: Boolean = false
 )
 
 private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
@@ -78,7 +62,9 @@ private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
         displayName = displayName,
         email = email,
         major = getString("major")?.trim().orEmpty(),
-        profilePictureUrl = getString("profilePictureUrl")?.trim().orEmpty()
+        profilePictureUrl = getString("profilePictureUrl")?.trim().orEmpty(),
+        isVerified = false, // Default for now
+        isOnline = false // Default for now
     )
 }
 
@@ -113,6 +99,10 @@ private fun UserAvatar(
     }
 }
 
+enum class FriendsNavigation {
+    MAIN, NEW_MESSAGE, CHAT
+}
+
 @Composable
 fun FriendsScreen(
     modifier: Modifier = Modifier,
@@ -120,633 +110,758 @@ fun FriendsScreen(
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() },
     initialChatId: String? = null,
     initialChatTitle: String? = null,
-    onInitialChatConsumed: (() -> Unit)? = null
-){
+    onInitialChatConsumed: (() -> Unit)? = null,
+    onNavigateToProfile: ((String) -> Unit)? = null
+) {
+    var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
+    var activeChatId by remember { mutableStateOf<String?>(null) }
+    var activeChatTitle by remember { mutableStateOf<String?>(null) }
+    val chats = remember { mutableStateListOf<ChatListItem>() }
+    val myUid = auth.currentUser?.uid ?: ""
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
+    
+    var selectedUserForAction by remember { mutableStateOf<UserSearchItem?>(null) }
+    var friendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
 
-    var selectedChatId by remember { mutableStateOf<String?>(null) }
-    var selectedChatTitle by remember { mutableStateOf<String?>(null) }
-
-    var status by remember { mutableStateOf<String?>(null) }
-    var working by remember { mutableStateOf(false) }
-
-    var myUid by remember { mutableStateOf<String?>(null) }
-    var myEmail by remember { mutableStateOf<String?>(null) }
-    var isSignedIn by remember { mutableStateOf(false) }
-
-    var groupTitle by remember { mutableStateOf("") }
-
-    var searchQuery by remember { mutableStateOf("") }
-    val searchResults = remember { mutableStateListOf<UserSearchItem>() }
-
-    val selectedGroupMembers = remember { mutableStateListOf<UserSearchItem>() }
-    val myChats = remember { mutableStateListOf<ChatListItem>() }
-
-    var showDmNameDialog by remember { mutableStateOf(false) }
-    var pendingDmUser by remember { mutableStateOf<UserSearchItem?>(null) }
-    var pendingDmTitle by remember { mutableStateOf("") }
-
-
-
-    suspend fun refreshChats() {
-        val uid = auth.currentUser?.uid ?: return
-        val chats = repo.getMyChats(uid)
-        myChats.clear()
-        myChats.addAll(chats)
-    }
-
-    suspend fun searchUsers(query: String, currentUid: String): List<UserSearchItem> {
-        val normalized = query.trim().lowercase()
-        if (normalized.isBlank()) return emptyList()
-
-        val emailDocs = db.collection("users")
-            .whereEqualTo("isProfileComplete", true)
-            .orderBy("searchEmail")
-            .startAt(normalized)
-            .endAt(normalized + "\uf8ff")
-            .limit(10)
-            .get()
-            .await()
-            .documents
-
-        val nameDocs = db.collection("users")
-            .whereEqualTo("isProfileComplete", true)
-            .orderBy("searchName")
-            .startAt(normalized)
-            .endAt(normalized + "\uf8ff")
-            .limit(10)
-            .get()
-            .await()
-            .documents
-
-        return (emailDocs + nameDocs)
-            .mapNotNull { it.toUserSearchItem() }
-            .filter { it.uid != currentUid }
-            .distinctBy { it.uid }
-            .sortedWith(
-                compareBy<UserSearchItem> {
-                    when {
-                        it.email.lowercase() == normalized -> 0
-                        it.email.lowercase().startsWith(normalized) -> 1
-                        it.displayName.lowercase().startsWith(normalized) -> 2
-                        it.name.lowercase().startsWith(normalized) -> 3
-                        else -> 4
-                    }
-                }.thenBy {
-                    when {
-                        it.displayName.isNotBlank() -> it.displayName.lowercase()
-                        it.name.isNotBlank() -> it.name.lowercase()
-                        else -> it.email.lowercase()
-                    }
-                }
-            )
-    }
-
-    fun userLabel(user: UserSearchItem): String {
-        return when {
-            user.displayName.isNotBlank() -> user.displayName
-            user.name.isNotBlank() -> user.name
-            else -> user.email
-        }
-    }
-
-    suspend fun openExistingOrCreateDm(target: UserSearchItem) {
-        val currentUid = auth.currentUser?.uid
-            ?: throw Exception("User not signed in")
-
-        if (target.uid == currentUid) {
-            throw Exception("You cannot message yourself")
-        }
-
-        val existingChatId = repo.findExistingDmChatId(currentUid, target.uid)
-
-        if (existingChatId != null) {
-            val existingTitle = repo.getChatTitle(existingChatId)
-            refreshChats()
-            selectedChatId = existingChatId
-            selectedChatTitle = existingTitle
-            return
-        }
-
-        pendingDmUser = target
-        pendingDmTitle = ""
-        showDmNameDialog = true
-    }
-
-    suspend fun createNewDmWithUser(target: UserSearchItem) {
-        val currentUid = auth.currentUser?.uid
-            ?: throw Exception("User not signed in")
-
-        if (target.uid == currentUid) {
-            throw Exception("You cannot message yourself")
-        }
-
-        val defaultTitle = userLabel(target)
-        val finalRequestedTitle = pendingDmTitle.trim().ifBlank { defaultTitle }
-
-        val createdChatId = repo.openOrCreateDm(
-            uidA = currentUid,
-            uidB = target.uid,
-            title = finalRequestedTitle
-        )
-
-        val finalTitle = repo.getChatTitle(createdChatId)
-
-        refreshChats()
-        selectedChatId = createdChatId
-        selectedChatTitle = finalTitle
-
-        pendingDmUser = null
-        pendingDmTitle = ""
-        showDmNameDialog = false
-    }
-
-    DisposableEffect(auth) {
-        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
-            val user = firebaseAuth.currentUser
-            myUid = user?.uid
-            myEmail = user?.email
-            isSignedIn = user != null
-        }
-
-        auth.addAuthStateListener(listener)
-        listener.onAuthStateChanged(auth)
-
-        onDispose {
-            auth.removeAuthStateListener(listener)
-        }
-    }
-
-    LaunchedEffect(initialChatId, initialChatTitle) {
-        if (!initialChatId.isNullOrBlank()) {
-            selectedChatId = initialChatId
-            selectedChatTitle = initialChatTitle ?: "Chat"
+    // Handle initial chat for deep linking or returning from other screens
+    LaunchedEffect(initialChatId) {
+        if (initialChatId != null) {
+            activeChatId = initialChatId
+            activeChatTitle = initialChatTitle ?: "Chat"
+            currentScreen = FriendsNavigation.CHAT
             onInitialChatConsumed?.invoke()
         }
     }
 
+    // Listen for friend UIDs
     LaunchedEffect(myUid) {
-        try {
-            if (myUid != null) {
-                refreshChats()
-                if (status == "Please sign in first.") {
-                    status = null
-                }
-            } else {
-                myChats.clear()
-                searchResults.clear()
-                selectedGroupMembers.clear()
-                status = "Please sign in first."
+        if (myUid.isBlank()) return@LaunchedEffect
+        db.collection("users").document(myUid).collection("friends")
+            .addSnapshotListener { snapshot, _ ->
+                friendUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            status = "Failed to load chats: ${e.message}"
-        }
     }
 
-    LaunchedEffect(searchQuery, myUid) {
-        val uid = myUid ?: return@LaunchedEffect
-        val query = searchQuery.trim()
+    // Listen for chats
+    DisposableEffect(myUid) {
+        if (myUid.isBlank()) return@DisposableEffect onDispose {}
+        val reg = repo.listenToMyChats(
+            myUid = myUid,
+            onSnapshot = { updatedChats ->
+                chats.clear()
+                chats.addAll(updatedChats)
+            },
+            onError = { /* Log error */ }
+        )
+        onDispose { reg.remove() }
+    }
 
-        if (query.isBlank()) {
-            searchResults.clear()
-            if (status?.startsWith("Search failed:") == true) {
-                status = null
-            }
+    // Listen for Online Friends (Real friends from Firestore)
+    val onlineFriends = remember { mutableStateListOf<UserSearchItem>() }
+    LaunchedEffect(friendUids) {
+        if (myUid.isBlank()) return@LaunchedEffect
+        
+        if (friendUids.isEmpty()) {
+            onlineFriends.clear()
             return@LaunchedEffect
         }
 
-        try {
-            delay(250)
-            val results = searchUsers(query, uid)
-            searchResults.clear()
-            searchResults.addAll(results)
-
-            if (status?.startsWith("Search failed:") == true) {
-                status = null
+        // Fetch the actual user data for these friends
+        // Note: Firestore 'in' query is limited to 10 items. For a real app, you'd handle more.
+        db.collection("users")
+            .whereIn("uid", friendUids.toList().take(10))
+            .get()
+            .addOnSuccessListener { usersSnapshot ->
+                val users = usersSnapshot.documents.mapNotNull { it.toUserSearchItem() }
+                onlineFriends.clear()
+                onlineFriends.addAll(users.map { user ->
+                    // Mocking online status for now as we don't have real presence
+                    user.copy(isOnline = true)
+                })
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            status = "Search failed: ${e.message}"
-        }
     }
 
-    if (showDmNameDialog && pendingDmUser != null) {
-        val user = pendingDmUser!!
-
-        AlertDialog(
-            onDismissRequest = {
-                if (!working) {
-                    showDmNameDialog = false
-                    pendingDmUser = null
-                    pendingDmTitle = ""
-                }
-            },
-            title = { Text("Start chat with ${userLabel(user)}") },
-            text = {
-                Column {
-                    Text("Enter a chat name, or leave it blank to use the default name.")
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = pendingDmTitle,
-                        onValueChange = { pendingDmTitle = it },
-                        label = { Text("Chat name") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        enabled = !working
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !working,
-                    onClick = {
-                        scope.launch {
-                            try {
-                                working = true
-                                status = null
-                                createNewDmWithUser(user)
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                status = e.message ?: "Failed to create chat"
-                            } finally {
-                                working = false
-                            }
-                        }
+    Box(modifier = modifier.fillMaxSize()) {
+        when (currentScreen) {
+            FriendsNavigation.MAIN -> {
+                MessagesMainScreen(
+                    onlineFriends = onlineFriends,
+                    chats = chats,
+                    onChatClick = { chat ->
+                        activeChatId = chat.id
+                        activeChatTitle = chat.title
+                        currentScreen = FriendsNavigation.CHAT
+                    },
+                    onNewMessageClick = {
+                        currentScreen = FriendsNavigation.NEW_MESSAGE
+                    },
+                    onUserClick = { user ->
+                        selectedUserForAction = user
                     }
-                ) {
-                    Text(if (working) "Opening..." else "Open")
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !working,
-                    onClick = {
-                        showDmNameDialog = false
-                        pendingDmUser = null
-                        pendingDmTitle = ""
-                    }
-                ) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    if (selectedChatId != null) {
-        ChatScreen(
-            chatId = selectedChatId!!,
-            title = selectedChatTitle ?: "Chat",
-            onBack = {
-                selectedChatId = null
-                selectedChatTitle = null
-            }
-        )
-        return
-    }
-
-    DisposableEffect(myUid) {
-        val uid = myUid
-        if (uid == null) {
-            onDispose { }
-        } else {
-            val registration = repo.listenToMyChats(
-                myUid = uid,
-                onSnapshot = { chats ->
-                    myChats.clear()
-                    myChats.addAll(chats)
-                },
-                onError = { e ->
-                    status = e.message ?: "Failed to listen to chats"
-                }
-            )
-
-            onDispose {
-                registration.remove()
-            }
-        }
-    }
-
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-
-        item("find_users_header") {
-
-            Text(
-                text = "Find Users",
-                style = MaterialTheme.typography.headlineSmall
-            )
-        }
-
-        item("search_box") {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search by name or Gmail") },
-                singleLine = true,
-                enabled = !working && isSignedIn
-            )
-        }
-
-        if (searchQuery.isNotBlank()) {
-            if (searchResults.isEmpty()) {
-                item("no_search_results") {
-                    Text("No users found.")
-                }
-            } else {
-                items(searchResults, key = { "search_${it.uid}" }) { user ->
-                    val alreadySelected = selectedGroupMembers.any { it.uid == user.uid }
-
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            UserAvatar(
-                                imageUrl = user.profilePictureUrl,
-                                label = userLabel(user),
-                                modifier = Modifier.size(56.dp)
-                            )
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = userLabel(user),
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-
-                                Spacer(Modifier.height(4.dp))
-
-                                Text(
-                                    text = user.email,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-
-                                if (user.major.isNotBlank()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        text = user.major,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-
-                                Spacer(Modifier.height(8.dp))
-
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button(
-                                        onClick = {
-                                            scope.launch {
-                                                try {
-                                                    working = true
-                                                    status = null
-                                                    openExistingOrCreateDm(user)
-                                                } catch (e: CancellationException) {
-                                                    throw e
-                                                } catch (e: Exception) {
-                                                    status = e.message ?: "Failed to open chat"
-                                                } finally {
-                                                    working = false
-                                                }
-                                            }
-                                        },
-                                        enabled = !working
-                                    ) {
-                                        Text("Message")
-                                    }
-
-                                    Button(
-                                        onClick = {
-                                            if (!alreadySelected) {
-                                                selectedGroupMembers.add(user)
-                                                status = "Added ${user.email} to group"
-                                            }
-                                        },
-                                        enabled = !working && !alreadySelected
-                                    ) {
-                                        Text(if (alreadySelected) "Added" else "Add to Group")
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item("group_header") {
-            Spacer(Modifier.height(24.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(16.dp))
-
-            Text(
-                text = "Create Group Chat",
-                style = MaterialTheme.typography.headlineSmall
-            )
-        }
-
-        item("group_title_input") {
-            OutlinedTextField(
-                value = groupTitle,
-                onValueChange = { groupTitle = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Group name") },
-                singleLine = true,
-                enabled = !working
-            )
-        }
-
-        if (selectedGroupMembers.isNotEmpty()) {
-            item("selected_group_members_header") {
-                Text(
-                    text = "Selected group members",
-                    style = MaterialTheme.typography.titleMedium
                 )
             }
-
-            items(selectedGroupMembers, key = { "group_${it.uid}" }) { member ->
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        UserAvatar(
-                            imageUrl = member.profilePictureUrl,
-                            label = userLabel(member),
-                            modifier = Modifier.size(44.dp)
-                        )
-
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = userLabel(member),
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Text(member.email)
-                        }
-
-                        Text(
-                            text = "Remove",
-                            modifier = Modifier.clickable {
-                                selectedGroupMembers.removeAll { it.uid == member.uid }
-                                if (status?.startsWith("Added ") == true) {
-                                    status = null
-                                }
-                            }
-                        )
-                    }
+            FriendsNavigation.NEW_MESSAGE -> {
+                NewMessageScreen(
+                    onBack = { currentScreen = FriendsNavigation.MAIN },
+                    onUserSelected = { user ->
+                        selectedUserForAction = user
+                    },
+                    onGroupCreated = { groupTitle, chatId ->
+                        activeChatId = chatId
+                        activeChatTitle = groupTitle
+                        currentScreen = FriendsNavigation.CHAT
+                    },
+                    repo = repo,
+                    auth = auth,
+                    db = db
+                )
+            }
+            FriendsNavigation.CHAT -> {
+                if (activeChatId != null) {
+                    ChatScreen(
+                        chatId = activeChatId!!,
+                        title = activeChatTitle ?: "Chat",
+                        onBack = { 
+                            currentScreen = FriendsNavigation.MAIN
+                            activeChatId = null
+                            activeChatTitle = null
+                        },
+                        repo = repo,
+                        auth = auth
+                    )
                 }
             }
         }
-
-        item("group_create_button") {
-            Button(
-                enabled = groupTitle.trim().isNotEmpty() &&
-                        selectedGroupMembers.isNotEmpty() &&
-                        !working &&
-                        isSignedIn,
-                onClick = {
+        
+        selectedUserForAction?.let { user ->
+            UserActionDialog(
+                user = user,
+                isFriend = friendUids.contains(user.uid),
+                onDismiss = { selectedUserForAction = null },
+                onMessage = {
+                    val targetUser = selectedUserForAction!!
+                    selectedUserForAction = null
                     scope.launch {
                         try {
-                            working = true
-                            status = null
-
-                            val currentUid = auth.currentUser?.uid
-                                ?: throw Exception("User not signed in")
-
-                            val allMembers = (listOf(currentUid) + selectedGroupMembers.map { it.uid })
-                                .distinct()
-
-                            if (allMembers.size < 2) {
-                                throw Exception("Add at least one other member")
-                            }
-
-                            val newChatId = repo.openOrCreateGroupChat(
-                                createdBy = currentUid,
-                                memberIds = allMembers,
-                                title = groupTitle.trim()
-                            )
-
-                            val actualTitle = repo.getChatTitle(newChatId)
-
-                            refreshChats()
-                            selectedChatId = newChatId
-                            selectedChatTitle = actualTitle
-
-                            groupTitle = ""
-                            selectedGroupMembers.clear()
-                            searchQuery = ""
-                            searchResults.clear()
-                        } catch (e: CancellationException) {
-                            throw e
+                            val chatId = repo.openOrCreateDm(myUid, targetUser.uid, targetUser.displayName)
+                            activeChatId = chatId
+                            activeChatTitle = targetUser.displayName
+                            currentScreen = FriendsNavigation.CHAT
                         } catch (e: Exception) {
-                            status = e.message ?: "Failed to create group"
-                        } finally {
-                            working = false
+                            // Handle error
                         }
                     }
+                },
+                onAddFriend = {
+                    val targetUser = selectedUserForAction!!
+                    selectedUserForAction = null
+                    scope.launch {
+                        try {
+                            db.collection("users").document(myUid).collection("friends").document(targetUser.uid).set(
+                                mapOf(
+                                    "uid" to targetUser.uid,
+                                    "name" to targetUser.displayName,
+                                    "profilePictureUrl" to targetUser.profilePictureUrl,
+                                    "addedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                        } catch (e: Exception) {
+                            // Error
+                        }
+                    }
+                },
+                onViewProfile = {
+                    val uid = selectedUserForAction!!.uid
+                    selectedUserForAction = null
+                    onNavigateToProfile?.invoke(uid)
                 }
-            ) {
-                Text(if (working) "Working..." else "Create Group")
-            }
-
-            if (status != null) {
-                Spacer(Modifier.height(12.dp))
-                Text("Status: $status")
-            }
-        }
-
-        item("saved_chats_header") {
-            Spacer(Modifier.height(20.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(12.dp))
-
-            Text(
-                text = "Saved Chats",
-                style = MaterialTheme.typography.headlineSmall
             )
         }
+    }
+}
 
-        if (myChats.isEmpty()) {
-            item("no_chats") {
-                Text("No chats yet.")
+@Composable
+fun UserActionDialog(
+    user: UserSearchItem,
+    isFriend: Boolean = false,
+    onDismiss: () -> Unit,
+    onMessage: () -> Unit,
+    onAddFriend: () -> Unit,
+    onViewProfile: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White)
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                UserAvatar(user.profilePictureUrl, user.displayName, Modifier.size(80.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    user.displayName,
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
+                )
+                Text(user.email, style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                
+                Spacer(modifier = Modifier.height(24.dp))
+                
+                Button(
+                    onClick = onMessage,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Chat, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Message")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                if (!isFriend) {
+                    OutlinedButton(
+                        onClick = onAddFriend,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Add Friend")
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = {}, // Already friends
+                        enabled = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Friends")
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                TextButton(
+                    onClick = onViewProfile,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("View Profile")
+                }
             }
-        } else {
-            items(myChats, key = { "chat_${it.id}" }) { chat ->
+        }
+    }
+}
+
+@Composable
+fun MessagesMainScreen(
+    onlineFriends: List<UserSearchItem>,
+    chats: List<ChatListItem>,
+    onChatClick: (ChatListItem) -> Unit,
+    onNewMessageClick: () -> Unit,
+    onUserClick: (UserSearchItem) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredChats = if (searchQuery.isBlank()) chats else {
+        chats.filter { it.title.contains(searchQuery, ignoreCase = true) }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Messages",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 28.sp
+                )
+            )
+            IconButton(
+                onClick = onNewMessageClick,
+                modifier = Modifier
+                    .size(40.dp)
+                    .border(1.dp, Color.LightGray, CircleShape)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Outlined.ChatBubbleOutline,
+                        contentDescription = "New Message",
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(10.dp).padding(start = 14.dp, top = 14.dp)
+                    )
+                }
+            }
+        }
+
+        // Search Bar
+        SearchBar(
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            placeholder = "Search name or username",
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp)
+        ) {
+            // Online Friends Section
+            item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 4.dp)
+                        .padding(horizontal = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(24.dp)
                 ) {
-                    var menuExpanded by remember { mutableStateOf(false) }
-
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                    Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                        Text(
+                            text = "Online friends",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
-                                        selectedChatId = chat.id
-                                        selectedChatTitle = chat.title
-                                    }
-                            ) {
-                                Text(
-                                    text = chat.title,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-
-                                Spacer(Modifier.height(4.dp))
-
-                                Text(
-                                    text = chat.lastMessageText ?: "No messages yet",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
+                            items(onlineFriends) { friend ->
+                                OnlineFriendItem(friend, onClick = { onUserClick(friend) })
                             }
+                        }
+                    }
+                }
+            }
 
-                            Box {
-                                IconButton(
-                                    onClick = { menuExpanded = true }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.MoreVert,
-                                        contentDescription = "Chat options"
+            item { Spacer(modifier = Modifier.height(16.dp)) }
+
+            // Recent Messages Section
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Recent Messages",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        if (filteredChats.isEmpty()) {
+                            Text(
+                                if (searchQuery.isBlank()) "No messages yet" else "No results found",
+                                modifier = Modifier.padding(vertical = 20.dp).align(Alignment.CenterHorizontally),
+                                color = Color.Gray
+                            )
+                        } else {
+                            filteredChats.forEachIndexed { index, chat ->
+                                ChatListItemRow(chat = chat, onClick = { onChatClick(chat) })
+                                if (index < filteredChats.size - 1) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 8.dp),
+                                        color = Color.LightGray.copy(alpha = 0.3f)
                                     )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
-                                DropdownMenu(
-                                    expanded = menuExpanded,
-                                    onDismissRequest = { menuExpanded = false }
+@Composable
+fun OnlineFriendItem(user: UserSearchItem, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(70.dp).clickable(onClick = onClick)
+    ) {
+        Box {
+            UserAvatar(
+                imageUrl = user.profilePictureUrl,
+                label = user.displayName,
+                modifier = Modifier.size(60.dp)
+            )
+            if (user.isOnline) {
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(Color(0xFF4CAF50), CircleShape)
+                        .border(2.dp, Color.White, CircleShape)
+                        .align(Alignment.BottomEnd)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = user.name.split(" ").first(),
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+fun ChatListItemRow(chat: ChatListItem, onClick: () -> Unit) {
+    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        UserAvatar(
+            imageUrl = "", // For now, no chat images
+            label = chat.title,
+            modifier = Modifier.size(56.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = chat.title,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                chat.lastMessageAt?.let {
+                    Text(
+                        text = timeFormatter.format(it.toDate()),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                }
+            }
+            Text(
+                text = chat.lastMessageText ?: "No messages yet",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (chat.lastMessageText == null) Color.Gray else Color.DarkGray,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+fun SearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier
+) {
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = { Text(placeholder, color = Color.Gray) },
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp),
+        shape = RoundedCornerShape(26.dp),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color(0xFFF1F3F4),
+            unfocusedContainerColor = Color(0xFFF1F3F4),
+            disabledContainerColor = Color(0xFFF1F3F4),
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+        leadingIcon = {
+            Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray)
+        },
+        singleLine = true
+    )
+}
+
+@Composable
+fun NewMessageScreen(
+    onBack: () -> Unit,
+    onUserSelected: (UserSearchItem) -> Unit,
+    onGroupCreated: (String, String) -> Unit, // title, chatId
+    repo: ChatRepository,
+    auth: FirebaseAuth,
+    db: FirebaseFirestore
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    val searchResults = remember { mutableStateListOf<UserSearchItem>() }
+    
+    // Group creation state
+    var isCreatingGroup by remember { mutableStateOf(false) }
+    var groupTitle by remember { mutableStateOf("") }
+    val selectedMembers = remember { mutableStateListOf<UserSearchItem>() }
+
+    // Frequently contacted and all friends (Mocked/Limited for now)
+    val frequentlyContacted = remember { mutableStateListOf<UserSearchItem>() }
+    val allFriends = remember { mutableStateListOf<UserSearchItem>() }
+    
+    val myUid = auth.currentUser?.uid ?: ""
+
+    LaunchedEffect(myUid) {
+        if (myUid.isBlank()) return@LaunchedEffect
+        try {
+            val snapshot = db.collection("users")
+                .whereEqualTo("isProfileComplete", true)
+                .limit(20)
+                .get()
+                .await()
+            val users = snapshot.documents.mapNotNull { it.toUserSearchItem() }
+                .filter { it.uid != myUid }
+            
+            frequentlyContacted.clear()
+            frequentlyContacted.addAll(users.take(3))
+            
+            allFriends.clear()
+            allFriends.addAll(users)
+        } catch (e: Exception) {
+            // Log error
+        }
+    }
+
+    LaunchedEffect(searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isBlank()) {
+            searchResults.clear()
+            return@LaunchedEffect
+        }
+        delay(300)
+        // Search logic
+        val normalized = query.lowercase()
+        try {
+            val docs = db.collection("users")
+                .whereEqualTo("isProfileComplete", true)
+                .get().await().documents
+            
+            searchResults.clear()
+            searchResults.addAll(docs.mapNotNull { it.toUserSearchItem() }
+                .filter { it.uid != myUid && (it.email.lowercase().contains(normalized) || it.name.lowercase().contains(normalized) || it.displayName.lowercase().contains(normalized)) })
+        } catch (e: Exception) {
+            // Log error
+        }
+    }
+
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = {
+                    if (isCreatingGroup) isCreatingGroup = false
+                    else onBack()
+                },
+                modifier = Modifier
+                    .size(40.dp)
+                    .border(1.dp, Color.LightGray, CircleShape)
+            ) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+            }
+            Spacer(modifier = Modifier.weight(1f))
+            Text(
+                text = if (isCreatingGroup) "Create Group" else "New message",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (isCreatingGroup) {
+                TextButton(
+                    onClick = {
+                        if (groupTitle.isNotBlank() && selectedMembers.isNotEmpty()) {
+                            scope.launch {
+                                try {
+                                    val memberIds = selectedMembers.map { it.uid } + myUid
+                                    val chatId = repo.openOrCreateGroupChat(myUid, memberIds, groupTitle)
+                                    onGroupCreated(groupTitle, chatId)
+                                } catch (e: Exception) {
+                                    // Handle error
+                                }
+                            }
+                        }
+                    },
+                    enabled = groupTitle.isNotBlank() && selectedMembers.isNotEmpty()
+                ) {
+                    Text("Create")
+                }
+            } else {
+                Spacer(modifier = Modifier.width(40.dp))
+            }
+        }
+
+        if (isCreatingGroup) {
+            OutlinedTextField(
+                value = groupTitle,
+                onValueChange = { groupTitle = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                placeholder = { Text("Group Title") },
+                shape = RoundedCornerShape(28.dp),
+                singleLine = true
+            )
+            
+            if (selectedMembers.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(selectedMembers) { user ->
+                        Box {
+                            UserAvatar(user.profilePictureUrl, user.displayName, Modifier.size(40.dp))
+                            IconButton(
+                                onClick = { selectedMembers.remove(user) },
+                                modifier = Modifier.size(16.dp).align(Alignment.TopEnd).background(Color.Gray, CircleShape)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        SearchBar(
+            query = searchQuery,
+            onQueryChange = { searchQuery = it },
+            placeholder = "Search name or username",
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+        )
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 20.dp)
+        ) {
+            if (searchQuery.isEmpty()) {
+                if (!isCreatingGroup) {
+                    // Create Group Section
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    "Create group",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { isCreatingGroup = true }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("Delete") },
+                                    Box(
+                                        modifier = Modifier.size(48.dp).background(Color(0xFFF5F5F5), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Groups, contentDescription = null, tint = Color.Gray)
+                                    }
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("New group", style = MaterialTheme.typography.bodyLarge)
+                                }
+                            }
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+
+                    // Frequently Contacted
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    "Frequently contacted",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+                                frequentlyContacted.forEach { user ->
+                                    UserSearchRow(user = user, onClick = { onUserSelected(user) })
+                                }
+                            }
+                        }
+                    }
+
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+
+                    // All Friends
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Text(
+                                    "Suggested Users",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+                                allFriends.forEach { user ->
+                                    UserSearchRow(user = user, onClick = { onUserSelected(user) })
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Selection for group
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                allFriends.forEach { user ->
+                                    val isSelected = selectedMembers.any { it.uid == user.uid }
+                                    UserSearchRow(
+                                        user = user,
                                         onClick = {
-                                            menuExpanded = false
-                                            scope.launch {
-                                                try {
-                                                    val uid = auth.currentUser?.uid ?: return@launch
-                                                    repo.hideChatForUser(chat.id, uid)
-                                                    refreshChats()
-                                                } catch (e: CancellationException) {
-                                                    throw e
-                                                } catch (e: Exception) {
-                                                    status = e.message ?: "Failed to delete chat"
+                                            if (isSelected) selectedMembers.removeIf { it.uid == user.uid }
+                                            else selectedMembers.add(user)
+                                        },
+                                        trailing = {
+                                            Checkbox(
+                                                checked = isSelected,
+                                                onCheckedChange = {
+                                                    if (it) selectedMembers.add(user)
+                                                    else selectedMembers.removeIf { m -> m.uid == user.uid }
                                                 }
-                                            }
+                                            )
                                         }
                                     )
                                 }
@@ -754,7 +869,109 @@ fun FriendsScreen(
                         }
                     }
                 }
+            } else {
+                // Search Results
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "Results",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+                            if (searchResults.isEmpty()) {
+                                Text("No results found", modifier = Modifier.padding(vertical = 8.dp))
+                            } else {
+                                searchResults.forEach { user ->
+                                    if (isCreatingGroup) {
+                                        val isSelected = selectedMembers.any { it.uid == user.uid }
+                                        UserSearchRow(
+                                            user = user,
+                                            onClick = {
+                                                if (isSelected) selectedMembers.removeIf { it.uid == user.uid }
+                                                else selectedMembers.add(user)
+                                            },
+                                            trailing = {
+                                                Checkbox(
+                                                    checked = isSelected,
+                                                    onCheckedChange = {
+                                                        if (it) selectedMembers.add(user)
+                                                        else selectedMembers.removeIf { m -> m.uid == user.uid }
+                                                    }
+                                                )
+                                            }
+                                        )
+                                    } else {
+                                        UserSearchRow(user = user, onClick = { onUserSelected(user) })
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+fun UserSearchRow(
+    user: UserSearchItem,
+    onClick: () -> Unit,
+    trailing: @Composable (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box {
+            UserAvatar(
+                imageUrl = user.profilePictureUrl,
+                label = user.displayName,
+                modifier = Modifier.size(48.dp)
+            )
+            if (user.isOnline) {
+                Box(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .background(Color(0xFF4CAF50), CircleShape)
+                        .border(2.dp, Color.White, CircleShape)
+                        .align(Alignment.BottomEnd)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = user.displayName,
+                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
+                )
+                if (user.isVerified) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Verified",
+                        tint = Color(0xFF2196F3),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Text(
+                text = user.email,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Gray
+            )
+        }
+        if (trailing != null) {
+            trailing()
         }
     }
 }
