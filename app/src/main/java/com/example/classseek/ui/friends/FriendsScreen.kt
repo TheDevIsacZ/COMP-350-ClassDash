@@ -1,5 +1,6 @@
 package com.example.classseek.ui.friends
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -127,6 +128,13 @@ fun FriendsScreen(
 
     var selectedChatId by remember { mutableStateOf<String?>(null) }
     var selectedChatTitle by remember { mutableStateOf<String?>(null) }
+
+    if (selectedChatId != null) {
+        BackHandler {
+            selectedChatId = null
+            selectedChatTitle = null
+        }
+    }
 
     var status by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
