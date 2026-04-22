@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.classseek.R
+import com.example.classseek.models.Friend
 import com.example.classseek.models.UserProfile
 
 // Define colors based on the provided theme.css (Light mode mostly)
@@ -76,6 +77,17 @@ fun ProfileScreen(
 
             // Profile Info Card
             ProfileInfoCard(userProfile)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Friends List Card
+            FriendsListCard(
+                friends = listOf(
+                    Friend("1", "Alex Johnson", "https://i.pravatar.cc/150?u=1", "Online"),
+                    Friend("2", "Sarah Williams", "https://i.pravatar.cc/150?u=2", "Away"),
+                    Friend("3", "Michael Chen", "https://i.pravatar.cc/150?u=3", "Offline")
+                )
+            )
 
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -318,6 +330,136 @@ fun ProfileInfoCard(userProfile: UserProfile) {
             InfoRow(icon = Icons.Default.LocationOn, text = userProfile.location.ifEmpty { "Not specified" })
             InfoRow(icon = Icons.Default.Link, text = userProfile.githubUrl.ifEmpty { "No link" })
             InfoRow(icon = Icons.Default.CalendarToday, text = userProfile.joinDate.ifEmpty { "Joined Recently" })
+        }
+    }
+}
+
+@Composable
+fun FriendsListCard(friends: List<Friend>) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Friends",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = ProfileTheme.Primary
+                )
+                TextButton(onClick = { /* View all friends */ }) {
+                    Text(
+                        text = "See all",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = ProfileTheme.MutedForeground
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (friends.isEmpty()) {
+                Text(
+                    text = "No friends added yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ProfileTheme.MutedForeground,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                friends.forEach { friend ->
+                    FriendItem(friend)
+                    if (friend != friends.last()) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            color = ProfileTheme.Border.copy(alpha = 0.05f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FriendItem(friend: Friend) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(ProfileTheme.Accent)
+        ) {
+            if (friend.profilePictureUrl.isNotEmpty()) {
+                AsyncImage(
+                    model = friend.profilePictureUrl,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.padding(8.dp),
+                    tint = ProfileTheme.MutedForeground
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1.0f)) {
+            Text(
+                text = friend.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = ProfileTheme.Primary
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val statusColor = when (friend.status) {
+                    "Online" -> Color(0xFF22C55E)
+                    "Away" -> Color(0xFFEAB308)
+                    else -> ProfileTheme.MutedForeground
+                }
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(statusColor, CircleShape)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = friend.status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ProfileTheme.MutedForeground
+                )
+            }
+        }
+
+        IconButton(onClick = { /* Open chat */ }) {
+            Icon(
+                imageVector = Icons.Default.ChatBubbleOutline,
+                contentDescription = "Message",
+                modifier = Modifier.size(20.dp),
+                tint = ProfileTheme.MutedForeground
+            )
         }
     }
 }
