@@ -276,12 +276,15 @@ fun CalendarScreen(
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
-                        items(groupedEvents[dateLabel]!!) { event ->
-                            AgendaItem(
-                                event = event,
-                                canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
-                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
-                            )
+                        val eventsForLabel = groupedEvents[dateLabel]
+                        if (eventsForLabel != null) {
+                            items(eventsForLabel) { event ->
+                                AgendaItem(
+                                    event = event,
+                                    canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
+                                    onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
+                                )
+                            }
                         }
                     }
                 }

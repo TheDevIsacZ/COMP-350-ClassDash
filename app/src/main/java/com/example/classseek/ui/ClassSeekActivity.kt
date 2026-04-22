@@ -142,17 +142,28 @@ class ClassSeekActivity : ComponentActivity() {
                     credential
                 ).setApplicationName("ClassSeek").build()
 
+                // Fetch from the start of today to ensure all events for the day are shown
+                val todayStartCal = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }
+                val timeMin = DateTime(todayStartCal.time)
+
                 val eventsResult = service.events().list("primary")
                     .setOrderBy("startTime")
                     .setSingleEvents(true)
-                    .setMaxResults(50)
+                    .setTimeMin(timeMin)
+                    .setMaxResults(200)
                     .execute()
 
                 val schoolEvents = try {
                     service.events().list(schoolCalendarID)
                         .setOrderBy("startTime")
                         .setSingleEvents(true)
-                        .setMaxResults(50)
+                        .setTimeMin(timeMin)
+                        .setMaxResults(200)
                         .execute()
                         .items ?: emptyList()
                 } catch (e: Exception) {
@@ -269,15 +280,14 @@ class ClassSeekActivity : ComponentActivity() {
         val cal = java.util.Calendar.getInstance()
         cal.timeInMillis = schedule.startDate
 
-        val timeParts = schedule.startTime.split(":")
-        cal.set(
-            java.util.Calendar.HOUR_OF_DAY,
-            if (timeParts.isNotEmpty()) timeParts[0].toInt() else 9
-        )
-        cal.set(
-            java.util.Calendar.MINUTE,
-            if (timeParts.size > 1) timeParts[1].toInt() else 0
-        )
+        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+        val date = try { sdf.parse(schedule.startTime) } catch (e: Exception) { null }
+        val timeCal = java.util.Calendar.getInstance().apply {
+            if (date != null) time = date
+        }
+
+        cal.set(java.util.Calendar.HOUR_OF_DAY, timeCal.get(java.util.Calendar.HOUR_OF_DAY))
+        cal.set(java.util.Calendar.MINUTE, timeCal.get(java.util.Calendar.MINUTE))
         cal.set(java.util.Calendar.SECOND, 0)
         cal.set(java.util.Calendar.MILLISECOND, 0)
 
@@ -294,7 +304,7 @@ class ClassSeekActivity : ComponentActivity() {
 
     private fun getDurationMs(start: String, end: String): Long {
         return try {
-            val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+            val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
             val startTime = sdf.parse(start)
             val endTime = sdf.parse(end)
             (endTime?.time ?: 0) - (startTime?.time ?: 0)
