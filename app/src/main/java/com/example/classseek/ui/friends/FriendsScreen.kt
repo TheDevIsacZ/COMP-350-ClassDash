@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.AddComment
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +32,7 @@ import com.example.classseek.ui.chat.ChatScreen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -55,6 +57,7 @@ private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
 
     val name = getString("name")?.trim().orEmpty()
     val displayName = getString("displayName")?.trim().orEmpty()
+    val isOnline = getBoolean("isOnline") ?: false
 
     return UserSearchItem(
         uid = id,
@@ -64,7 +67,7 @@ private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
         major = getString("major")?.trim().orEmpty(),
         profilePictureUrl = getString("profilePictureUrl")?.trim().orEmpty(),
         isVerified = false, // Default for now
-        isOnline = false // Default for now
+        isOnline = isOnline
     )
 }
 
@@ -116,6 +119,8 @@ fun FriendsScreen(
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
     var activeChatId by remember { mutableStateOf<String?>(null) }
     var activeChatTitle by remember { mutableStateOf<String?>(null) }
+    var showNotFriendsDialog by remember { mutableStateOf(false) }
+    var pendingFriendToAdd by remember { mutableStateOf<UserSearchItem?>(null) }
     val chats = remember { mutableStateListOf<ChatListItem>() }
     val myUid = auth.currentUser?.uid ?: ""
     val scope = rememberCoroutineScope()
@@ -139,15 +144,15 @@ fun FriendsScreen(
 
     // Listen for friends and requests
     val pendingRequests = remember { mutableStateListOf<UserSearchItem>() }
-    LaunchedEffect(myUid) {
-        if (myUid.isBlank()) return@LaunchedEffect
+    DisposableEffect(myUid) {
+        if (myUid.isBlank()) return@DisposableEffect onDispose {}
         
-        db.collection("users").document(myUid).collection("friends")
+        val friendsReg = db.collection("users").document(myUid).collection("friends")
             .addSnapshotListener { snapshot, _ ->
                 friendUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
             }
             
-        db.collection("users").document(myUid).collection("friendRequests")
+        val incomingReg = db.collection("users").document(myUid).collection("friendRequests")
             .addSnapshotListener { snapshot, _ ->
                 pendingRequestUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
                 pendingRequests.clear()
@@ -163,10 +168,16 @@ fun FriendsScreen(
                 }
             }
             
-        db.collection("users").document(myUid).collection("sentFriendRequests")
+        val outgoingReg = db.collection("users").document(myUid).collection("sentFriendRequests")
             .addSnapshotListener { snapshot, _ ->
                 sentRequestUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
             }
+
+        onDispose {
+            friendsReg.remove()
+            incomingReg.remove()
+            outgoingReg.remove()
+        }
     }
 
     // Listen for chats
@@ -185,27 +196,33 @@ fun FriendsScreen(
 
     // Listen for Online Friends (Real friends from Firestore)
     val onlineFriends = remember { mutableStateListOf<UserSearchItem>() }
-    LaunchedEffect(friendUids) {
-        if (myUid.isBlank()) return@LaunchedEffect
-        
-        if (friendUids.isEmpty()) {
+    var onlineFriendsError by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(friendUids) {
+        if (myUid.isBlank() || friendUids.isEmpty()) {
             onlineFriends.clear()
-            return@LaunchedEffect
+            onlineFriendsError = null
+            return@DisposableEffect onDispose {}
         }
 
-        // Fetch the actual user data for these friends
-        // Note: Firestore 'in' query is limited to 10 items. For a real app, you'd handle more.
-        db.collection("users")
-            .whereIn("uid", friendUids.toList().take(10))
-            .get()
-            .addOnSuccessListener { usersSnapshot ->
-                val users = usersSnapshot.documents.mapNotNull { it.toUserSearchItem() }
+        // Listen to the online status of friends
+        // Use FieldPath.documentId() since our UIDs are the document IDs
+        val registration = db.collection("users")
+            .whereIn(FieldPath.documentId(), friendUids.toList().take(30))
+            .whereEqualTo("isOnline", true)
+            .addSnapshotListener { usersSnapshot, error ->
+                if (error != null) {
+                    onlineFriendsError = error.message
+                    onlineFriends.clear()
+                    return@addSnapshotListener
+                }
+                onlineFriendsError = null
+                val users = usersSnapshot?.documents?.mapNotNull { it.toUserSearchItem() }.orEmpty()
                 onlineFriends.clear()
-                onlineFriends.addAll(users.map { user ->
-                    // Mocking online status for now as we don't have real presence
-                    user.copy(isOnline = true)
-                })
+                onlineFriends.addAll(users)
             }
+        
+        onDispose { registration.remove() }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -213,6 +230,7 @@ fun FriendsScreen(
             FriendsNavigation.MAIN -> {
                 MessagesMainScreen(
                     onlineFriends = onlineFriends,
+                    onlineFriendsError = onlineFriendsError,
                     pendingRequests = pendingRequests,
                     chats = chats,
                     onChatClick = { chat ->
@@ -286,16 +304,25 @@ fun FriendsScreen(
                 onDismiss = { selectedUserForAction = null },
                 onMessage = {
                     val targetUser = selectedUserForAction!!
-                    selectedUserForAction = null
-                    scope.launch {
-                        try {
-                            val chatId = repo.openOrCreateDm(myUid, targetUser.uid, targetUser.displayName)
-                            activeChatId = chatId
-                            activeChatTitle = targetUser.displayName
-                            currentScreen = FriendsNavigation.CHAT
-                        } catch (e: Exception) {
-                            // Handle error
+                    val isFriend = friendUids.contains(targetUser.uid)
+                    
+                    if (isFriend) {
+                        selectedUserForAction = null
+                        scope.launch {
+                            try {
+                                val chatId = repo.openOrCreateDm(myUid, targetUser.uid, targetUser.displayName)
+                                activeChatId = chatId
+                                activeChatTitle = targetUser.displayName
+                                currentScreen = FriendsNavigation.CHAT
+                            } catch (e: Exception) {
+                                // Handle error
+                            }
                         }
+                    } else {
+                        // Not friends, show the dialog
+                        pendingFriendToAdd = targetUser
+                        selectedUserForAction = null
+                        showNotFriendsDialog = true
                     }
                 },
                 onAddFriend = {
@@ -342,10 +369,58 @@ fun FriendsScreen(
                         }
                     }
                 },
+                onRemoveFriend = {
+                    val targetUser = selectedUserForAction!!
+                    selectedUserForAction = null
+                    scope.launch {
+                        try {
+                            repo.removeFriend(myUid, targetUser.uid)
+                        } catch (e: Exception) {
+                            // Error
+                        }
+                    }
+                },
                 onViewProfile = {
                     val uid = selectedUserForAction!!.uid
                     selectedUserForAction = null
                     onNavigateToProfile?.invoke(uid)
+                }
+            )
+        }
+
+        if (showNotFriendsDialog) {
+            AlertDialog(
+                onDismissRequest = { 
+                    showNotFriendsDialog = false
+                    pendingFriendToAdd = null
+                },
+                title = { Text("Not Friends Yet") },
+                text = { Text("You must be friends with someone to send them a direct message. Would you like to send a friend request?") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val user = pendingFriendToAdd
+                            showNotFriendsDialog = false
+                            pendingFriendToAdd = null
+                            if (user != null) {
+                                scope.launch {
+                                    try {
+                                        repo.sendFriendRequest(myUid, user.uid)
+                                    } catch (e: Exception) {}
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Send Request")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { 
+                        showNotFriendsDialog = false
+                        pendingFriendToAdd = null
+                    }) {
+                        Text("Cancel")
+                    }
                 }
             )
         }
@@ -393,8 +468,34 @@ fun UserActionDialog(
     onAcceptFriend: () -> Unit = {},
     onDeclineFriend: () -> Unit = {},
     onCancelFriend: () -> Unit = {},
+    onRemoveFriend: () -> Unit = {},
     onViewProfile: () -> Unit
 ) {
+    var showConfirmRemove by remember { mutableStateOf(false) }
+
+    if (showConfirmRemove) {
+        AlertDialog(
+            onDismissRequest = { showConfirmRemove = false },
+            title = { Text("Remove Friend") },
+            text = { Text("Are you sure you want to remove ${user.displayName} from your friends list?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirmRemove = false
+                        onRemoveFriend()
+                    }
+                ) {
+                    Text("Remove", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmRemove = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
@@ -431,14 +532,14 @@ fun UserActionDialog(
                 
                 if (isFriend) {
                     OutlinedButton(
-                        onClick = {}, // Already friends
-                        enabled = false,
+                        onClick = { showConfirmRemove = true },
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red)
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null)
+                        Icon(Icons.Default.PersonRemove, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Friends")
+                        Text("Remove Friend")
                     }
                 } else {
                     when (requestStatus) {
@@ -500,6 +601,7 @@ fun UserActionDialog(
 @Composable
 fun MessagesMainScreen(
     onlineFriends: List<UserSearchItem>,
+    onlineFriendsError: String? = null,
     pendingRequests: List<UserSearchItem>,
     chats: List<ChatListItem>,
     onChatClick: (ChatListItem) -> Unit,
@@ -537,18 +639,11 @@ fun MessagesMainScreen(
                     .size(40.dp)
                     .border(1.dp, Color.LightGray, CircleShape)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Outlined.ChatBubbleOutline,
-                        contentDescription = "New Message",
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(10.dp).padding(start = 14.dp, top = 14.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Outlined.AddComment,
+                    contentDescription = "New Message",
+                    modifier = Modifier.size(22.dp)
+                )
             }
         }
 
@@ -622,12 +717,28 @@ fun MessagesMainScreen(
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                         )
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            items(onlineFriends) { friend ->
-                                OnlineFriendItem(friend, onClick = { onUserClick(friend) })
+                        if (onlineFriendsError != null) {
+                            Text(
+                                text = "Unable to load online status",
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        } else if (onlineFriends.isEmpty()) {
+                            Text(
+                                text = "No friends online",
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        } else {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                items(onlineFriends) { friend ->
+                                    OnlineFriendItem(friend, onClick = { onUserClick(friend) })
+                                }
                             }
                         }
                     }

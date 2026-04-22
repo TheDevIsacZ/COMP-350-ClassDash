@@ -27,7 +27,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,7 +40,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.example.classseek.Notification.MyFirebaseMessagingService
 import com.example.classseek.R
 import com.example.classseek.data.ChatRepository
@@ -326,37 +331,38 @@ fun ClassSeekApp(
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
 
-    var firebaseUser by remember { mutableStateOf(auth.currentUser) }
-    var userProfile by remember { mutableStateOf<UserProfile?>(null) }
-    var isLoadingProfile by remember { mutableStateOf(true) }
+    val firebaseUser = remember { mutableStateOf(auth.currentUser) }
+    val userProfile = remember { mutableStateOf<UserProfile?>(null) }
+    val isLoadingProfile = remember { mutableStateOf(true) }
 
-    var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.CALENDAR) }
-    var isAddingEvent by remember { mutableStateOf(false) }
-    var isEditingProfile by remember { mutableStateOf(false) }
-    var viewOtherUserId by remember { mutableStateOf<String?>(null) }
-    var otherUserProfile by remember { mutableStateOf<UserProfile?>(null) }
-    var isFriendWithOther by remember { mutableStateOf(false) }
-    var friendRequestStatus by remember { mutableStateOf<String?>(null) } // null, "pending", "sent"
-    var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
+    val currentDestination = rememberSaveable { mutableStateOf(AppDestinations.CALENDAR) }
+    val isAddingEvent = remember { mutableStateOf(false) }
+    val isEditingProfile = remember { mutableStateOf(false) }
+    val viewOtherUserId = remember { mutableStateOf<String?>(null) }
+    val otherUserProfile = remember { mutableStateOf<UserProfile?>(null) }
+    val isFriendWithOther = remember { mutableStateOf(false) }
+    val friendRequestStatus = remember { mutableStateOf<String?>(null) } // null, "pending", "sent"
+    val initialDateForNewEvent = remember { mutableStateOf<Long?>(null) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val activity = remember(context) { context as? ClassSeekActivity }
 
-    var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
-    var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
+    val calendarEvents = remember { mutableStateOf<List<Event>>(emptyList()) }
+    val signedInAccount = remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
-    var pendingNotificationChatId by remember { mutableStateOf<String?>(null) }
-    var pendingNotificationChatTitle by remember { mutableStateOf<String?>(null) }
+    val pendingNotificationChatId = remember { mutableStateOf<String?>(null) }
+    val pendingNotificationChatTitle = remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialChatId, initialChatTitle) {
-        pendingNotificationChatId = initialChatId
-        pendingNotificationChatTitle = initialChatTitle
+        pendingNotificationChatId.value = initialChatId
+        pendingNotificationChatTitle.value = initialChatTitle
     }
 
     fun consumePendingNotificationChat() {
-        pendingNotificationChatId = null
-        pendingNotificationChatTitle = null
+        pendingNotificationChatId.value = null
+        pendingNotificationChatTitle.value = null
         onNotificationChatConsumed()
     }
 
@@ -388,24 +394,49 @@ fun ClassSeekApp(
             }
     }
 
-    LaunchedEffect(firebaseUser?.uid) {
-        if (firebaseUser != null) {
+    LaunchedEffect(firebaseUser.value?.uid) {
+        if (firebaseUser.value != null) {
             saveCurrentFcmTokenForUser()
         }
     }
 
-    LaunchedEffect(firebaseUser?.uid, pendingNotificationChatId) {
-        if (firebaseUser != null && pendingNotificationChatId != null) {
-            currentDestination = AppDestinations.FRIENDS
+    LaunchedEffect(firebaseUser.value?.uid) {
+        if (firebaseUser.value != null && pendingNotificationChatId.value != null) {
+            currentDestination.value = AppDestinations.FRIENDS
         }
     }
 
-    LaunchedEffect(firebaseUser) {
-        if (firebaseUser != null) {
-            isLoadingProfile = true
+    DisposableEffect(firebaseUser.value?.uid, lifecycleOwner) {
+        val uid = firebaseUser.value?.uid
+        if (uid == null) return@DisposableEffect onDispose {}
+
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> {
+                    db.collection("users").document(uid).update("isOnline", true)
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    db.collection("users").document(uid).update("isOnline", false)
+                }
+                else -> {}
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            // If user logs out or component is destroyed, ensure they are offline
+            db.collection("users").document(uid).update("isOnline", false)
+        }
+    }
+
+    LaunchedEffect(firebaseUser.value) {
+        if (firebaseUser.value != null) {
+            isLoadingProfile.value = true
             try {
-                val doc = db.collection("users").document(firebaseUser!!.uid).get().await()
-                userProfile = if (doc.exists()) {
+                val doc = db.collection("users").document(firebaseUser.value!!.uid).get().await()
+                userProfile.value = if (doc.exists()) {
                     doc.toObject(UserProfile::class.java)
                 } else {
                     null
@@ -413,11 +444,11 @@ fun ClassSeekApp(
             } catch (e: Exception) {
                 Log.e("AUTH_DEBUG", "Error fetching profile", e)
             } finally {
-                isLoadingProfile = false
+                isLoadingProfile.value = false
             }
         } else {
-            userProfile = null
-            isLoadingProfile = false
+            userProfile.value = null
+            isLoadingProfile.value = false
         }
     }
 
@@ -434,18 +465,18 @@ fun ClassSeekApp(
         googleSignInClient.silentSignIn().addOnCompleteListener { task ->
             if (task.isSuccessful) {
                 val account = task.result
-                signedInAccount = account
+                signedInAccount.value = account
                 scope.launch {
                     val events = activity?.getCalendarEvents(account)
-                    if (events != null) calendarEvents = events
+                    if (events != null) calendarEvents.value = events
                 }
             } else {
                 val account = GoogleSignIn.getLastSignedInAccount(context)
                 if (account != null) {
-                    signedInAccount = account
+                    signedInAccount.value = account
                     scope.launch {
                         val events = activity?.getCalendarEvents(account)
-                        if (events != null) calendarEvents = events
+                        if (events != null) calendarEvents.value = events
                     }
                 }
             }
@@ -458,17 +489,17 @@ fun ClassSeekApp(
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         try {
             val account = task.getResult(ApiException::class.java)
-            signedInAccount = account
+            signedInAccount.value = account
             account?.idToken?.let { idToken ->
                 val credential = GoogleAuthProvider.getCredential(idToken, null)
                 scope.launch {
                     try {
                         val authResult = auth.signInWithCredential(credential).await()
-                        firebaseUser = authResult.user
+                        firebaseUser.value = authResult.user
                         saveCurrentFcmTokenForUser()
 
                         val events = activity?.getCalendarEvents(account)
-                        if (events != null) calendarEvents = events
+                        if (events != null) calendarEvents.value = events
                     } catch (e: Exception) {
                         Log.e("AUTH_DEBUG", "Firebase auth failed", e)
                     }
@@ -479,102 +510,112 @@ fun ClassSeekApp(
         }
     }
 
-    LaunchedEffect(viewOtherUserId, firebaseUser?.uid) {
-        if (viewOtherUserId != null) {
-            try {
-                val currentUid = firebaseUser?.uid
-                val targetUid = viewOtherUserId!!
-                
-                val doc = db.collection("users").document(targetUid).get().await()
-                otherUserProfile = doc.toObject(UserProfile::class.java)
+    DisposableEffect(viewOtherUserId.value, firebaseUser.value?.uid) {
+        val currentUid = firebaseUser.value?.uid
+        val targetUid = viewOtherUserId.value
 
-                if (currentUid != null) {
-                    // Check if they are friends
-                    val friendDoc = db.collection("users")
-                        .document(currentUid)
-                        .collection("friends")
-                        .document(targetUid)
-                        .get()
-                        .await()
-                    isFriendWithOther = friendDoc.exists()
-                    
-                    if (!isFriendWithOther) {
-                        // Check for incoming request
-                        val incomingReq = db.collection("users")
-                            .document(currentUid)
-                            .collection("friendRequests")
-                            .document(targetUid)
-                            .get()
-                            .await()
-                        
-                        if (incomingReq.exists()) {
-                            friendRequestStatus = "pending"
-                        } else {
-                            // Check for outgoing request
-                            val outgoingReq = db.collection("users")
-                                .document(currentUid)
-                                .collection("sentFriendRequests")
-                                .document(targetUid)
-                                .get()
-                                .await()
-                            
-                            if (outgoingReq.exists()) {
-                                friendRequestStatus = "sent"
-                            } else {
-                                friendRequestStatus = null
-                            }
-                        }
-                    } else {
-                        friendRequestStatus = null
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("PROFILE_DEBUG", "Error fetching other profile", e)
-            }
+        if (targetUid == null) {
+            otherUserProfile.value = null
+            isFriendWithOther.value = false
+            friendRequestStatus.value = null
+            onDispose {}
         } else {
-            otherUserProfile = null
-            isFriendWithOther = false
-            friendRequestStatus = null
+            // Profile listener
+            val profileReg = db.collection("users").document(targetUid)
+                .addSnapshotListener { snapshot, _ ->
+                    otherUserProfile.value = snapshot?.toObject(UserProfile::class.java)
+                }
+
+            var friendsReg: com.google.firebase.firestore.ListenerRegistration? = null
+            var incomingReg: com.google.firebase.firestore.ListenerRegistration? = null
+            var outgoingReg: com.google.firebase.firestore.ListenerRegistration? = null
+
+            if (currentUid != null) {
+                // Friends listener
+                friendsReg = db.collection("users").document(currentUid)
+                    .collection("friends").document(targetUid)
+                    .addSnapshotListener { snapshot, _ ->
+                        isFriendWithOther.value = snapshot?.exists() == true
+                    }
+
+                var incomingExists = false
+                var outgoingExists = false
+
+                // Incoming request listener
+                incomingReg = db.collection("users").document(currentUid)
+                    .collection("friendRequests").document(targetUid)
+                    .addSnapshotListener { snapshot, _ ->
+                        incomingExists = snapshot?.exists() == true
+                        friendRequestStatus.value = when {
+                            incomingExists -> "pending"
+                            outgoingExists -> "sent"
+                            else -> null
+                        }
+                    }
+
+                // Outgoing request listener
+                outgoingReg = db.collection("users").document(currentUid)
+                    .collection("sentFriendRequests").document(targetUid)
+                    .addSnapshotListener { snapshot, _ ->
+                        outgoingExists = snapshot?.exists() == true
+                        friendRequestStatus.value = when {
+                            incomingExists -> "pending"
+                            outgoingExists -> "sent"
+                            else -> null
+                        }
+                    }
+            }
+
+            onDispose {
+                profileReg.remove()
+                friendsReg?.remove()
+                incomingReg?.remove()
+                outgoingReg?.remove()
+            }
         }
     }
 
-    if (pendingNotificationChatId != null && firebaseUser != null && userProfile != null) {
+    if (pendingNotificationChatId.value != null && firebaseUser.value != null && userProfile.value != null) {
         ChatScreen(
-            chatId = pendingNotificationChatId!!,
-            title = pendingNotificationChatTitle ?: "Chat",
+            chatId = pendingNotificationChatId.value!!,
+            title = pendingNotificationChatTitle.value ?: "Chat",
             onBack = {
                 consumePendingNotificationChat()
-                currentDestination = AppDestinations.FRIENDS
+                currentDestination.value = AppDestinations.FRIENDS
             }
         )
         return
     }
 
-    if (otherUserProfile != null) {
+    if (otherUserProfile.value != null) {
         ProfileScreen(
-            userProfile = otherUserProfile!!,
+            userProfile = otherUserProfile.value!!,
             isMyProfile = false,
-            isFriend = isFriendWithOther,
-            friendRequestStatus = friendRequestStatus,
+            isFriend = isFriendWithOther.value,
+            friendRequestStatus = friendRequestStatus.value,
             onSignOut = {
-                auth.signOut()
-                googleSignInClient.signOut()
-                firebaseUser = null
-                signedInAccount = null
-                calendarEvents = emptyList()
-                consumePendingNotificationChat()
-                viewOtherUserId = null
+                scope.launch {
+                    firebaseUser.value?.uid?.let { uid ->
+                        db.collection("users").document(uid).update("isOnline", false).await()
+                    }
+                    auth.signOut()
+                    googleSignInClient.signOut()
+                    firebaseUser.value = null
+                    signedInAccount.value = null
+                    calendarEvents.value = emptyList()
+                    consumePendingNotificationChat()
+                    viewOtherUserId.value = null
+                }
             },
             onEditProfile = {}, // Can't edit others
             onDeleteAccount = {}, // Can't delete others
             onAddFriend = {
                 scope.launch {
                     try {
-                        val currentUid = firebaseUser?.uid ?: return@launch
-                        val targetUid = viewOtherUserId ?: return@launch
+                        val currentUid = firebaseUser.value?.uid ?: return@launch
+                        val targetUid = viewOtherUserId.value ?: return@launch
                         val repo = ChatRepository(db)
                         repo.sendFriendRequest(currentUid, targetUid)
-                        friendRequestStatus = "sent"
                     } catch (e: Exception) {
                         Log.e("FRIEND_DEBUG", "Error sending friend request", e)
                     }
@@ -583,12 +624,10 @@ fun ClassSeekApp(
             onAcceptFriend = {
                 scope.launch {
                     try {
-                        val currentUid = firebaseUser?.uid ?: return@launch
-                        val targetUid = viewOtherUserId ?: return@launch
+                        val currentUid = firebaseUser.value?.uid ?: return@launch
+                        val targetUid = viewOtherUserId.value ?: return@launch
                         val repo = ChatRepository(db)
                         repo.acceptFriendRequest(currentUid, targetUid)
-                        isFriendWithOther = true
-                        friendRequestStatus = null
                     } catch (e: Exception) {
                         Log.e("FRIEND_DEBUG", "Error accepting friend request", e)
                     }
@@ -597,11 +636,10 @@ fun ClassSeekApp(
             onDeclineFriend = {
                 scope.launch {
                     try {
-                        val currentUid = firebaseUser?.uid ?: return@launch
-                        val targetUid = viewOtherUserId ?: return@launch
+                        val currentUid = firebaseUser.value?.uid ?: return@launch
+                        val targetUid = viewOtherUserId.value ?: return@launch
                         val repo = ChatRepository(db)
                         repo.declineFriendRequest(currentUid, targetUid)
-                        friendRequestStatus = null
                     } catch (e: Exception) {
                         Log.e("FRIEND_DEBUG", "Error declining friend request", e)
                     }
@@ -610,45 +648,56 @@ fun ClassSeekApp(
             onCancelFriend = {
                 scope.launch {
                     try {
-                        val currentUid = firebaseUser?.uid ?: return@launch
-                        val targetUid = viewOtherUserId ?: return@launch
+                        val currentUid = firebaseUser.value?.uid ?: return@launch
+                        val targetUid = viewOtherUserId.value ?: return@launch
                         val repo = ChatRepository(db)
                         repo.cancelFriendRequest(currentUid, targetUid)
-                        friendRequestStatus = null
                     } catch (e: Exception) {
                         Log.e("FRIEND_DEBUG", "Error cancelling friend request", e)
                     }
                 }
             },
+            onRemoveFriend = {
+                scope.launch {
+                    try {
+                        val currentUid = firebaseUser.value?.uid ?: return@launch
+                        val targetUid = viewOtherUserId.value ?: return@launch
+                        val repo = ChatRepository(db)
+                        repo.removeFriend(currentUid, targetUid)
+                    } catch (e: Exception) {
+                        Log.e("FRIEND_DEBUG", "Error removing friend", e)
+                    }
+                }
+            },
             onBack = {
-                viewOtherUserId = null
+                viewOtherUserId.value = null
             }
         )
         return
     }
 
-    if (firebaseUser == null) {
+    if (firebaseUser.value == null) {
         LoginScreen(
             onSignInClick = {
                 signInLauncher.launch(googleSignInClient.signInIntent)
             }
         )
-    } else if (isLoadingProfile) {
+    } else if (isLoadingProfile.value) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             CircularProgressIndicator()
         }
-    } else if (userProfile == null || isEditingProfile) {
+    } else if (userProfile.value == null || isEditingProfile.value) {
         ProfileCreationScreen(
-            initialProfile = userProfile,
-            initialName = firebaseUser?.displayName ?: "",
-            initialEmail = firebaseUser?.email ?: "",
+            initialProfile = userProfile.value,
+            initialName = firebaseUser.value?.displayName ?: "",
+            initialEmail = firebaseUser.value?.email ?: "",
             onSaveProfile = { newProfile ->
                 scope.launch {
                     try {
-                        val user = firebaseUser ?: throw Exception("No signed-in user")
+                        val user = firebaseUser.value ?: throw Exception("No signed-in user")
 
                         val profileWithId = newProfile.copy(uid = user.uid)
 
@@ -672,7 +721,7 @@ fun ClassSeekApp(
                             "followersCount" to profileWithId.followersCount,
                             "followingCount" to profileWithId.followingCount,
                             "isProfileComplete" to true,
-                            "updatedAt" to com.google.firebase.firestore.FieldValue.serverTimestamp()
+                            "updatedAt" to FieldValue.serverTimestamp()
                         )
 
                         db.collection("users")
@@ -683,32 +732,32 @@ fun ClassSeekApp(
                             )
                             .await()
 
-                        userProfile = profileWithId
-                        isEditingProfile = false
+                        userProfile.value = profileWithId
+                        isEditingProfile.value = false
                         saveCurrentFcmTokenForUser()
                     } catch (e: Exception) {
                         Log.e("AUTH_DEBUG", "Error saving profile", e)
                     }
                 }
             },
-            onBack = if (isEditingProfile) {
-                { isEditingProfile = false }
+            onBack = if (isEditingProfile.value) {
+                { isEditingProfile.value = false }
             } else {
                 null
             }
         )
-    } else if (isAddingEvent) {
+    } else if (isAddingEvent.value) {
         AddEventScreen(
-            initialDateMillis = initialDateForNewEvent,
-            onBackClick = { isAddingEvent = false },
+            initialDateMillis = initialDateForNewEvent.value,
+            onBackClick = { isAddingEvent.value = false },
             onSaveClick = { schedule ->
                 scope.launch {
-                    signedInAccount?.let { account ->
+                    signedInAccount.value?.let { account ->
                         val success = activity?.addEventToCalendar(account, schedule) ?: false
                         if (success) {
                             val events = activity?.getCalendarEvents(account)
-                            if (events != null) calendarEvents = events
-                            isAddingEvent = false
+                            if (events != null) calendarEvents.value = events
+                            isAddingEvent.value = false
                         }
                     }
                 }
@@ -721,32 +770,32 @@ fun ClassSeekApp(
                     item(
                         icon = { Icon(it.icon, contentDescription = it.label) },
                         label = { Text(it.label) },
-                        selected = it == currentDestination,
-                        onClick = { currentDestination = it }
+                        selected = it == currentDestination.value,
+                        onClick = { currentDestination.value = it }
                     )
                 }
             }
         ) {
             Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                 Box(modifier = Modifier.padding(innerPadding)) {
-                    when (currentDestination) {
+                    when (currentDestination.value) {
                         AppDestinations.CALENDAR -> {
                             CalendarScreen(
-                                signedInAccount = signedInAccount,
-                                calendarEvents = calendarEvents,
+                                signedInAccount = signedInAccount.value,
+                                calendarEvents = calendarEvents.value,
                                 onSignInClick = { intent -> signInLauncher.launch(intent) },
                                 onAddEventClick = { dateMillis ->
-                                    initialDateForNewEvent = dateMillis
-                                    isAddingEvent = true
+                                    initialDateForNewEvent.value = dateMillis
+                                    isAddingEvent.value = true
                                 },
                                 onDeleteEventClick = { eventId ->
                                     scope.launch {
-                                        signedInAccount?.let { account ->
+                                        signedInAccount.value?.let { account ->
                                             val success = activity
                                                 ?.deleteEventFromCalendar(account, eventId) ?: false
                                             if (success) {
                                                 val events = activity?.getCalendarEvents(account)
-                                                if (events != null) calendarEvents = events
+                                                if (events != null) calendarEvents.value = events
                                             }
                                         }
                                     }
@@ -756,33 +805,38 @@ fun ClassSeekApp(
 
                         AppDestinations.PROFILE -> {
                             ProfileScreen(
-                                userProfile = userProfile!!,
+                                userProfile = userProfile.value!!,
                                 isMyProfile = true,
                                 onSignOut = {
-                                    auth.signOut()
-                                    googleSignInClient.signOut()
-                                    firebaseUser = null
-                                    signedInAccount = null
-                                    calendarEvents = emptyList()
-                                    consumePendingNotificationChat()
+                                    scope.launch {
+                                        firebaseUser.value?.uid?.let { uid ->
+                                            db.collection("users").document(uid).update("isOnline", false).await()
+                                        }
+                                        auth.signOut()
+                                        googleSignInClient.signOut()
+                                        firebaseUser.value = null
+                                        signedInAccount.value = null
+                                        calendarEvents.value = emptyList()
+                                        consumePendingNotificationChat()
+                                    }
                                 },
                                 onEditProfile = {
-                                    isEditingProfile = true
+                                    isEditingProfile.value = true
                                 },
                                 onDeleteAccount = {
                                     scope.launch {
                                         try {
                                             db.collection("users")
-                                                .document(firebaseUser!!.uid)
+                                                .document(firebaseUser.value!!.uid)
                                                 .delete()
                                                 .await()
 
                                             auth.signOut()
                                             googleSignInClient.signOut()
-                                            firebaseUser = null
-                                            signedInAccount = null
-                                            calendarEvents = emptyList()
-                                            userProfile = null
+                                            firebaseUser.value = null
+                                            signedInAccount.value = null
+                                            calendarEvents.value = emptyList()
+                                            userProfile.value = null
                                             consumePendingNotificationChat()
                                         } catch (e: Exception) {
                                             Log.e("AUTH_DEBUG", "Error deleting account", e)
@@ -794,13 +848,13 @@ fun ClassSeekApp(
 
                         AppDestinations.FRIENDS -> {
                             FriendsScreen(
-                                initialChatId = pendingNotificationChatId,
-                                initialChatTitle = pendingNotificationChatTitle,
+                                initialChatId = pendingNotificationChatId.value,
+                                initialChatTitle = pendingNotificationChatTitle.value,
                                 onInitialChatConsumed = {
                                     consumePendingNotificationChat()
                                 },
                                 onNavigateToProfile = { uid ->
-                                    viewOtherUserId = uid
+                                    viewOtherUserId.value = uid
                                 }
                             )
                         }

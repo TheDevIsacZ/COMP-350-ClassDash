@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -67,6 +68,7 @@ fun ProfileScreen(
     onAcceptFriend: (() -> Unit)? = null,
     onDeclineFriend: (() -> Unit)? = null,
     onCancelFriend: (() -> Unit)? = null,
+    onRemoveFriend: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
@@ -94,6 +96,7 @@ fun ProfileScreen(
                 onAcceptFriend,
                 onDeclineFriend,
                 onCancelFriend,
+                onRemoveFriend,
                 onBack
             )
 
@@ -132,10 +135,12 @@ fun HeaderSection(
     onAcceptFriend: (() -> Unit)? = null,
     onDeclineFriend: (() -> Unit)? = null,
     onCancelFriend: (() -> Unit)? = null,
+    onRemoveFriend: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showRemoveFriendDialog by remember { mutableStateOf(false) }
     var emailConfirmation by remember { mutableStateOf("") }
 
     Box(
@@ -246,18 +251,23 @@ fun HeaderSection(
                     )
                 }
             } else {
-                // Not my profile, show "Add Friend" or "Friends" (checkmark)
+                // Not my profile, show "Add Friend" or "Remove Friend"
                 if (isFriend) {
-                    IconButton(
-                        onClick = { /* Maybe show option to unfriend */ },
-                        modifier = Modifier
-                            .background(Color.Black.copy(alpha = 0.2f), CircleShape)
+                    Button(
+                        onClick = { showRemoveFriendDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
+                        shape = RoundedCornerShape(20.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.height(36.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Friends",
-                            tint = Color.White
+                            imageVector = Icons.Default.PersonRemove,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
                         )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Remove Friend", color = Color.White, fontSize = 12.sp)
                     }
                 } else {
                     when (friendRequestStatus) {
@@ -311,6 +321,30 @@ fun HeaderSection(
                 }
             }
         }
+    }
+
+    // Confirmation dialog for friend removal
+    if (showRemoveFriendDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoveFriendDialog = false },
+            title = { Text("Remove Friend") },
+            text = { Text("Are you sure you want to remove ${userProfile.name} from your friends?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showRemoveFriendDialog = false
+                        onRemoveFriend?.invoke()
+                    }
+                ) {
+                    Text("Remove", color = Color.Red)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveFriendDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Confirmation dialog for account deletion to prevent accidental clicks

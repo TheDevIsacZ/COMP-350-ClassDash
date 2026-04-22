@@ -1026,6 +1026,18 @@ class ChatRepository(
         batch.commit().await()
     }
 
+    suspend fun removeFriend(
+        myUid: String,
+        friendUid: String
+    ) {
+        val batch = db.batch()
+        // 1. Remove from my friends
+        batch.delete(users.document(myUid).collection("friends").document(friendUid))
+        // 2. Remove from their friends
+        batch.delete(users.document(friendUid).collection("friends").document(myUid))
+        batch.commit().await()
+    }
+
     suspend fun cancelFriendRequest(
         myUid: String,
         targetUid: String
