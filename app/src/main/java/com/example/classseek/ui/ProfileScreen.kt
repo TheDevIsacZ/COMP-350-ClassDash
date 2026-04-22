@@ -397,12 +397,18 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                                     color = ProfileTheme.Primary,
                                     modifier = Modifier.weight(1f)
                                 )
-                                Text(
-                                    text = "${classInfo.building} ${classInfo.roomNumber}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = ProfileTheme.MutedForeground,
-                                    modifier = Modifier.padding(start = 8.dp)
-                                )
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = "${classInfo.building} ${classInfo.roomNumber}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = ProfileTheme.MutedForeground
+                                    )
+                                    Text(
+                                        text = "${classInfo.dayOfWeek} at ${classInfo.startTime}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = ProfileTheme.MutedForeground.copy(alpha = 0.8f)
+                                    )
+                                }
                             }
                         }
                     }
