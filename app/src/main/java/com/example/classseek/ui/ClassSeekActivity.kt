@@ -781,10 +781,6 @@ fun ClassSeekApp(
                                 sharedLocation = sharedLocationToView,
                                 sharedLocationName = sharedLocationNameToView
                             )
-                            LaunchedEffect(Unit) {
-                                sharedLocationToView = null
-                                sharedLocationNameToView = null
-                            }
                         }
                         AppDestinations.SETTINGS -> { Greeting("Settings") }
                     }

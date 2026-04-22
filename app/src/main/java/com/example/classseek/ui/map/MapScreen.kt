@@ -58,7 +58,7 @@ enum class MarkerCategory(val label: String, val icon: ImageVector, val color: C
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)), // Orange
     BOOKMARK("Bookmark", Icons.Default.Star, Color(0xFFFFD700)),
     SHARED("Shared", Icons.Default.ShareLocation, Color(0xFF4CAF50)),
-    CLASS("Class", Icons.Default.Circle, Color(0xFF4CAF50))
+    CLASS("Class", Icons.Default.Explore, Color(0xFF4CAF50))
 }
 
 data class MapPlace(
@@ -357,6 +357,11 @@ fun MapScreen(
                         selectedCategory != MarkerCategory.ALL || searchQuery.isNotEmpty() || isSelected
                     } else true
 
+                    // Hide building icon if overlapped and not filtered/searched/selected
+                    val shouldShowBuildingIcon = if (place.category == MarkerCategory.BUILDING && hasOverlappingMarker) {
+                        selectedCategory != MarkerCategory.ALL || searchQuery.isNotEmpty() || isSelected
+                    } else true
+
                     val markerAlpha = if (selectedPlace != null) {
                         if (isSelected) 1.0f else 0.35f
                     } else if (selectedCategory != MarkerCategory.ALL) {
@@ -365,37 +370,39 @@ fun MapScreen(
                         1.0f
                     }
 
-                    key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
-                        MarkerComposable(
-                            state = rememberMarkerState(position = place.location),
-                            alpha = markerAlpha,
-                            anchor = Offset(0.5f, 1.0f),
-                            onClick = {
-                                selectedPlace = place
-                                true
-                            }
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                if (shouldShowName) {
-                                    Surface(
-                                        shape = RoundedCornerShape(3.3.dp),
-                                        color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                        modifier = Modifier.padding(bottom = 1.4.dp)
-                                    ) {
-                                        Text(
-                                            text = place.name,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                            modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
-                                            color = Color.Black
-                                        )
-                                    }
+                    if (shouldShowBuildingIcon) {
+                        key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
+                            MarkerComposable(
+                                state = rememberMarkerState(position = place.location),
+                                alpha = markerAlpha,
+                                anchor = Offset(0.5f, 1.0f),
+                                onClick = {
+                                    selectedPlace = place
+                                    true
                                 }
-                                Icon(
-                                    imageVector = place.category.icon,
-                                    contentDescription = null,
-                                    tint = place.category.color,
-                                    modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
-                                )
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    if (shouldShowName) {
+                                        Surface(
+                                            shape = RoundedCornerShape(3.3.dp),
+                                            color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                                            modifier = Modifier.padding(bottom = 1.4.dp)
+                                        ) {
+                                            Text(
+                                                text = place.name,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                                modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
+                                                color = Color.Black
+                                            )
+                                        }
+                                    }
+                                    Icon(
+                                        imageVector = place.category.icon,
+                                        contentDescription = null,
+                                        tint = place.category.color,
+                                        modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -504,6 +511,7 @@ fun MapScreen(
 
                     DropdownMenu(
                         expanded = isFilterMenuExpanded,
+                        shape = RoundedCornerShape(18.dp),
                         onDismissRequest = { isFilterMenuExpanded = false },
                         modifier = Modifier.background(Color.White.copy(alpha = 0.85f))
                     ) {

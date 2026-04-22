@@ -385,17 +385,25 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                 } else {
                     userProfile.classes.forEach { classInfo ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                            Text(
-                                text = classInfo.className,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = ProfileTheme.Primary
-                            )
-                            Text(
-                                text = "${classInfo.building} ${classInfo.roomNumber}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ProfileTheme.MutedForeground
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = classInfo.className,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = ProfileTheme.Primary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = "${classInfo.building} ${classInfo.roomNumber}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ProfileTheme.MutedForeground,
+                                    modifier = Modifier.padding(start = 8.dp)
+                                )
+                            }
                         }
                     }
                 }
