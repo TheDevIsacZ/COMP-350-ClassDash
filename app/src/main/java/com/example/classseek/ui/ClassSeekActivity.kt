@@ -29,6 +29,8 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +50,7 @@ import com.example.classseek.R
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.UserSearchItem
 import com.example.classseek.ui.calendar.AddEventScreen
 import com.example.classseek.ui.calendar.CalendarScreen
 import com.example.classseek.ui.chat.ChatScreen
@@ -69,8 +72,10 @@ import com.google.api.services.calendar.model.EventDateTime
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.QuerySnapshot
 import com.google.firebase.messaging.FirebaseMessaging
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -83,6 +88,25 @@ import kotlinx.coroutines.withContext
 
 private const val schoolCalendarID =
     "c_d036dc6b1c2f9cf0ee499356cc98d2e8f058d29b901ea774320f587ed01805bb@group.calendar.google.com"
+
+private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
+    val email = getString("email")?.trim().orEmpty()
+    if (email.isBlank()) return null
+
+    val name = getString("name")?.trim().orEmpty()
+    val displayName = getString("displayName")?.trim().orEmpty()
+
+    return UserSearchItem(
+        uid = id,
+        name = name,
+        displayName = displayName.ifBlank { name.ifBlank { email } },
+        email = email,
+        major = getString("major")?.trim().orEmpty(),
+        profilePictureUrl = getString("profilePictureUrl")?.trim().orEmpty(),
+        isVerified = false,
+        isOnline = getBoolean("isOnline") ?: false
+    )
+}
 
 class ClassSeekActivity : ComponentActivity() {
 
@@ -351,17 +375,20 @@ fun ClassSeekApp(
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
-    var pendingNotificationChatId by remember { mutableStateOf<String?>(null) }
-    var pendingNotificationChatTitle by remember { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(initialChatId, initialChatTitle) {
-        pendingNotificationChatId = initialChatId
-        pendingNotificationChatTitle = initialChatTitle
+    var routedChatId by rememberSaveable { mutableStateOf<String?>(null) }
+    var routedChatTitle by rememberSaveable { mutableStateOf<String?>(null) }
+    val profileFriends: SnapshotStateList<UserSearchItem> = remember {
+        mutableStateListOf()
     }
 
-    fun consumePendingNotificationChat() {
-        pendingNotificationChatId = null
-        pendingNotificationChatTitle = null
+    LaunchedEffect(initialChatId, initialChatTitle) {
+        routedChatId = initialChatId
+        routedChatTitle = initialChatTitle
+    }
+
+    fun consumeRoutedChat() {
+        routedChatId = null
+        routedChatTitle = null
         onNotificationChatConsumed()
     }
 
@@ -399,8 +426,8 @@ fun ClassSeekApp(
         }
     }
 
-    LaunchedEffect(firebaseUser?.uid, pendingNotificationChatId) {
-        if (firebaseUser != null && pendingNotificationChatId != null) {
+    LaunchedEffect(firebaseUser?.uid, routedChatId) {
+        if (firebaseUser != null && routedChatId != null) {
             currentDestination = AppDestinations.FRIENDS
         }
     }
@@ -437,6 +464,63 @@ fun ClassSeekApp(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             updatePresence(false)
+        }
+    }
+
+    DisposableEffect(firebaseUser?.uid) {
+        val uid = firebaseUser?.uid
+        if (uid == null) {
+            profileFriends.clear()
+            return@DisposableEffect onDispose {}
+        }
+
+        val friendProfilesByUid = linkedMapOf<String, UserSearchItem>()
+        val friendProfileRegistrations = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
+
+        val friendsRegistration = db.collection("users")
+            .document(uid)
+            .collection("friends")
+            .addSnapshotListener { snapshot: QuerySnapshot?, _ ->
+                friendProfilesByUid.clear()
+                friendProfileRegistrations.forEach { it.remove() }
+                friendProfileRegistrations.clear()
+
+                val friendIds = snapshot?.documents?.map { document -> document.id }.orEmpty()
+                if (friendIds.isEmpty()) {
+                    profileFriends.clear()
+                    return@addSnapshotListener
+                }
+
+                friendIds.forEach { friendUid: String ->
+                    val registration = db.collection("users")
+                        .document(friendUid)
+                        .addSnapshotListener { friendSnapshot: DocumentSnapshot?, _ ->
+                            if (friendSnapshot == null || !friendSnapshot.exists()) {
+                                friendProfilesByUid.remove(friendUid)
+                            } else {
+                                val user = friendSnapshot.toUserSearchItem()
+                                if (user != null) {
+                                    friendProfilesByUid[friendUid] = user
+                                } else {
+                                    friendProfilesByUid.remove(friendUid)
+                                }
+                            }
+
+                            profileFriends.clear()
+                            profileFriends.addAll(
+                                friendProfilesByUid.values.sortedBy { friend: UserSearchItem ->
+                                    friend.displayName.ifBlank { friend.email }.lowercase()
+                                }
+                            )
+                        }
+                    friendProfileRegistrations.add(registration)
+                }
+            }
+
+        onDispose {
+            friendsRegistration.remove()
+            friendProfileRegistrations.forEach { it.remove() }
+            profileFriends.clear()
         }
     }
 
@@ -578,18 +662,6 @@ fun ClassSeekApp(
         }
     }
 
-    if (pendingNotificationChatId != null && firebaseUser != null && userProfile != null) {
-        ChatScreen(
-            chatId = pendingNotificationChatId!!,
-            title = pendingNotificationChatTitle ?: "Chat",
-            onBack = {
-                consumePendingNotificationChat()
-                currentDestination = AppDestinations.FRIENDS
-            }
-        )
-        return
-    }
-
     if (otherUserProfile != null) {
         ProfileScreen(
             userProfile = otherUserProfile!!,
@@ -602,7 +674,7 @@ fun ClassSeekApp(
                 firebaseUser = null
                 signedInAccount = null
                 calendarEvents = emptyList()
-                consumePendingNotificationChat()
+                consumeRoutedChat()
                 viewOtherUserId = null
             },
             onEditProfile = {}, // Can't edit others
@@ -657,6 +729,20 @@ fun ClassSeekApp(
                         friendRequestStatus = null
                     } catch (e: Exception) {
                         Log.e("FRIEND_DEBUG", "Error cancelling friend request", e)
+                    }
+                }
+            },
+            onRemoveFriend = {
+                scope.launch {
+                    try {
+                        val currentUid = firebaseUser?.uid ?: return@launch
+                        val targetUid = viewOtherUserId ?: return@launch
+                        val repo = ChatRepository(db)
+                        repo.removeFriend(currentUid, targetUid)
+                        isFriendWithOther = false
+                        friendRequestStatus = null
+                    } catch (e: Exception) {
+                        Log.e("FRIEND_DEBUG", "Error removing friend", e)
                     }
                 }
             },
@@ -758,12 +844,12 @@ fun ClassSeekApp(
     } else {
         NavigationSuiteScaffold(
             navigationSuiteItems = {
-                AppDestinations.entries.forEach {
+                AppDestinations.entries.forEach { destination: AppDestinations ->
                     item(
-                        icon = { Icon(it.icon, contentDescription = it.label) },
-                        label = { Text(it.label) },
-                        selected = it == currentDestination,
-                        onClick = { currentDestination = it }
+                        icon = { Icon(destination.icon, contentDescription = destination.label) },
+                        label = { Text(destination.label) },
+                        selected = destination == currentDestination,
+                        onClick = { currentDestination = destination }
                     )
                 }
             }
@@ -799,16 +885,48 @@ fun ClassSeekApp(
                             ProfileScreen(
                                 userProfile = userProfile!!,
                                 isMyProfile = true,
+                                friends = profileFriends,
                                 onSignOut = {
                                     auth.signOut()
                                     googleSignInClient.signOut()
                                     firebaseUser = null
                                     signedInAccount = null
                                     calendarEvents = emptyList()
-                                    consumePendingNotificationChat()
+                                    consumeRoutedChat()
                                 },
                                 onEditProfile = {
                                     isEditingProfile = true
+                                },
+                                onFriendMessage = { friend ->
+                                    scope.launch {
+                                        try {
+                                            val currentUid = firebaseUser?.uid ?: return@launch
+                                            val title = friend.displayName.ifBlank {
+                                                friend.name.ifBlank { friend.email }
+                                            }
+                                            val repo = ChatRepository(db)
+                                            val chatId = repo.openOrCreateDm(currentUid, friend.uid, title)
+                                            routedChatId = chatId
+                                            routedChatTitle = title
+                                            currentDestination = AppDestinations.FRIENDS
+                                        } catch (e: Exception) {
+                                            Log.e("FRIEND_DEBUG", "Error opening profile DM", e)
+                                        }
+                                    }
+                                },
+                                onViewFriendProfile = { friendUid ->
+                                    viewOtherUserId = friendUid
+                                },
+                                onRemoveFriendFromList = { friendUid ->
+                                    scope.launch {
+                                        try {
+                                            val currentUid = firebaseUser?.uid ?: return@launch
+                                            val repo = ChatRepository(db)
+                                            repo.removeFriend(currentUid, friendUid)
+                                        } catch (e: Exception) {
+                                            Log.e("FRIEND_DEBUG", "Error removing friend from profile list", e)
+                                        }
+                                    }
                                 },
                                 onDeleteAccount = {
                                     scope.launch {
@@ -824,7 +942,7 @@ fun ClassSeekApp(
                                             signedInAccount = null
                                             calendarEvents = emptyList()
                                             userProfile = null
-                                            consumePendingNotificationChat()
+                                            consumeRoutedChat()
                                         } catch (e: Exception) {
                                             Log.e("AUTH_DEBUG", "Error deleting account", e)
                                         }
@@ -835,10 +953,10 @@ fun ClassSeekApp(
 
                         AppDestinations.FRIENDS -> {
                             FriendsScreen(
-                                initialChatId = pendingNotificationChatId,
-                                initialChatTitle = pendingNotificationChatTitle,
+                                initialChatId = routedChatId,
+                                initialChatTitle = routedChatTitle,
                                 onInitialChatConsumed = {
-                                    consumePendingNotificationChat()
+                                    consumeRoutedChat()
                                 },
                                 onNavigateToProfile = { uid ->
                                     viewOtherUserId = uid

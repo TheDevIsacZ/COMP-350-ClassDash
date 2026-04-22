@@ -855,7 +855,7 @@ fun ChatListItemRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         UserAvatar(
-            imageUrl = "", // For now, no chat images
+            imageUrl = chat.profilePictureUrl,
             label = chat.title,
             modifier = Modifier.size(56.dp)
         )
@@ -945,8 +945,6 @@ fun NewMessageScreen(
     var groupTitle by remember { mutableStateOf("") }
     val selectedMembers = remember { mutableStateListOf<UserSearchItem>() }
 
-    // Frequently contacted and all friends (Mocked/Limited for now)
-    val frequentlyContacted = remember { mutableStateListOf<UserSearchItem>() }
     val allFriends = remember { mutableStateListOf<UserSearchItem>() }
     
     val myUid = auth.currentUser?.uid ?: ""
@@ -954,27 +952,42 @@ fun NewMessageScreen(
     LaunchedEffect(myUid) {
         if (myUid.isBlank()) return@LaunchedEffect
         try {
-            val snapshot = db.collection("users")
-                .whereEqualTo("isProfileComplete", true)
-                .limit(20)
+            val friendIds = db.collection("users")
+                .document(myUid)
+                .collection("friends")
                 .get()
                 .await()
-            val users = snapshot.documents.mapNotNull { it.toUserSearchItem() }
-                .filter { it.uid != myUid }
-            
-            frequentlyContacted.clear()
-            frequentlyContacted.addAll(users.take(3))
-            
+                .documents
+                .map { it.id }
+
             allFriends.clear()
-            allFriends.addAll(users)
+            if (friendIds.isNotEmpty()) {
+                val users = friendIds
+                    .chunked(10)
+                    .flatMap { uidChunk ->
+                        db.collection("users")
+                            .whereIn(FieldPath.documentId(), uidChunk)
+                            .get()
+                            .await()
+                            .documents
+                    }
+                    .mapNotNull { it.toUserSearchItem() }
+                    .sortedBy { it.displayName.ifBlank { it.email }.lowercase() }
+
+                allFriends.addAll(users)
+            }
         } catch (e: Exception) {
             // Log error
         }
     }
 
-    LaunchedEffect(searchQuery) {
+    LaunchedEffect(searchQuery, isCreatingGroup) {
         val query = searchQuery.trim()
         if (query.isBlank()) {
+            searchResults.clear()
+            return@LaunchedEffect
+        }
+        if (isCreatingGroup) {
             searchResults.clear()
             return@LaunchedEffect
         }
@@ -993,6 +1006,19 @@ fun NewMessageScreen(
             // Log error
         }
     }
+
+    val filteredGroupFriends = if (searchQuery.isBlank()) {
+        allFriends
+    } else {
+        val normalized = searchQuery.trim().lowercase()
+        allFriends.filter { user ->
+            user.email.lowercase().contains(normalized) ||
+                user.name.lowercase().contains(normalized) ||
+                user.displayName.lowercase().contains(normalized)
+        }
+    }
+
+    val displayedSearchResults = if (isCreatingGroup) filteredGroupFriends else searchResults
 
     val scope = rememberCoroutineScope()
 
@@ -1062,11 +1088,18 @@ fun NewMessageScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(selectedMembers) { user ->
-                        Box {
+                        Box(
+                            modifier = Modifier.size(44.dp)
+                        ) {
                             UserAvatar(user.profilePictureUrl, user.displayName, Modifier.size(40.dp))
-                            IconButton(
-                                onClick = { selectedMembers.remove(user) },
-                                modifier = Modifier.size(16.dp).align(Alignment.TopEnd).background(Color.Gray, CircleShape)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(16.dp)
+                                    .background(Color(0xFFD32F2F), CircleShape)
+                                    .border(1.dp, Color.White, CircleShape)
+                                    .clickable { selectedMembers.remove(user) },
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                             }
@@ -1079,7 +1112,7 @@ fun NewMessageScreen(
         SearchBar(
             query = searchQuery,
             onQueryChange = { searchQuery = it },
-            placeholder = "Search name or username",
+            placeholder = if (isCreatingGroup) "Search friends" else "Search name or username",
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
         )
 
@@ -1122,28 +1155,6 @@ fun NewMessageScreen(
                         }
                     }
 
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
-
-                    // Frequently Contacted
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
-                            shape = RoundedCornerShape(24.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    "Frequently contacted",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    modifier = Modifier.padding(bottom = 12.dp)
-                                )
-                                frequentlyContacted.forEach { user ->
-                                    UserSearchRow(user = user, onClick = { onUserSelected(user) })
-                                }
-                            }
-                        }
-                    }
-
                 } else {
                     // Selection for group
                     item {
@@ -1153,24 +1164,32 @@ fun NewMessageScreen(
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                allFriends.forEach { user ->
-                                    val isSelected = selectedMembers.any { it.uid == user.uid }
-                                    UserSearchRow(
-                                        user = user,
-                                        onClick = {
-                                            if (isSelected) selectedMembers.removeIf { it.uid == user.uid }
-                                            else selectedMembers.add(user)
-                                        },
-                                        trailing = {
-                                            Checkbox(
-                                                checked = isSelected,
-                                                onCheckedChange = {
-                                                    if (it) selectedMembers.add(user)
-                                                    else selectedMembers.removeIf { m -> m.uid == user.uid }
-                                                }
-                                            )
-                                        }
+                                if (filteredGroupFriends.isEmpty()) {
+                                    Text(
+                                        text = "No friends available to add.",
+                                        modifier = Modifier.padding(vertical = 8.dp),
+                                        color = Color.Gray
                                     )
+                                } else {
+                                    filteredGroupFriends.forEach { user ->
+                                        val isSelected = selectedMembers.any { it.uid == user.uid }
+                                        UserSearchRow(
+                                            user = user,
+                                            onClick = {
+                                                if (isSelected) selectedMembers.removeIf { it.uid == user.uid }
+                                                else selectedMembers.add(user)
+                                            },
+                                            trailing = {
+                                                Checkbox(
+                                                    checked = isSelected,
+                                                    onCheckedChange = {
+                                                        if (it) selectedMembers.add(user)
+                                                        else selectedMembers.removeIf { m -> m.uid == user.uid }
+                                                    }
+                                                )
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1190,10 +1209,10 @@ fun NewMessageScreen(
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            if (searchResults.isEmpty()) {
+                            if (displayedSearchResults.isEmpty()) {
                                 Text("No results found", modifier = Modifier.padding(vertical = 8.dp))
                             } else {
-                                searchResults.forEach { user ->
+                                displayedSearchResults.forEach { user ->
                                     if (isCreatingGroup) {
                                         val isSelected = selectedMembers.any { it.uid == user.uid }
                                         UserSearchRow(

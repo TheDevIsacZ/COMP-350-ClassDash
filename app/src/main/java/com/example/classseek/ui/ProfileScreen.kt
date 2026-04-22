@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -33,12 +34,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.classseek.R
 import com.example.classseek.models.Friend
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.UserActionDialog
+import com.example.classseek.ui.friends.UserSearchItem
 
 // Define colors based on the provided theme.css (Light mode mostly)
 object ProfileTheme {
@@ -59,11 +63,15 @@ object ProfileTheme {
 fun ProfileScreen(
     userProfile: UserProfile,
     isMyProfile: Boolean,
+    friends: List<UserSearchItem> = emptyList(),
     isFriend: Boolean = false,
     friendRequestStatus: String? = null, // null, "pending", "sent"
     onSignOut: () -> Unit,
     onEditProfile: () -> Unit,
     onDeleteAccount: () -> Unit,
+    onFriendMessage: ((UserSearchItem) -> Unit)? = null,
+    onViewFriendProfile: ((String) -> Unit)? = null,
+    onRemoveFriendFromList: ((String) -> Unit)? = null,
     onAddFriend: (() -> Unit)? = null,
     onAcceptFriend: (() -> Unit)? = null,
     onDeclineFriend: (() -> Unit)? = null,
@@ -72,6 +80,7 @@ fun ProfileScreen(
     onBack: (() -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
+    var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
 
     Box(
         modifier = Modifier
@@ -108,9 +117,11 @@ fun ProfileScreen(
             if (isMyProfile) {
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Messages Card
-                RecentMessagesListCard(
-                    chats = emptyList()
+                FriendsListCard(
+                    friends = friends,
+                    onFriendClick = { friend ->
+                        selectedFriend = friend
+                    }
                 )
             }
 
@@ -119,6 +130,27 @@ fun ProfileScreen(
 
         // Profile Image (Overlapping the header and card)
         ProfileImageSection(userProfile.profilePictureUrl)
+
+        selectedFriend?.let { friend ->
+            UserActionDialog(
+                user = friend,
+                isFriend = true,
+                onDismiss = { selectedFriend = null },
+                onMessage = {
+                    selectedFriend = null
+                    onFriendMessage?.invoke(friend)
+                },
+                onAddFriend = {},
+                onRemoveFriend = {
+                    selectedFriend = null
+                    onRemoveFriendFromList?.invoke(friend.uid)
+                },
+                onViewProfile = {
+                    selectedFriend = null
+                    onViewFriendProfile?.invoke(friend.uid)
+                }
+            )
+        }
     }
 }
 
@@ -483,7 +515,10 @@ fun ProfileInfoCard(userProfile: UserProfile) {
 }
 
 @Composable
-fun RecentMessagesListCard(chats: List<com.example.classseek.data.ChatListItem>) {
+fun FriendsListCard(
+    friends: List<UserSearchItem>,
+    onFriendClick: (UserSearchItem) -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -503,32 +538,117 @@ fun RecentMessagesListCard(chats: List<com.example.classseek.data.ChatListItem>)
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Recent Messages",
+                    text = "Friends",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = ProfileTheme.Primary
                 )
-                TextButton(onClick = { /* Could navigate to Messages tab */ }) {
-                    Text(
-                        text = "See all",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = ProfileTheme.MutedForeground
-                    )
-                }
+                Text(
+                    text = friends.size.toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = ProfileTheme.MutedForeground
+                )
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            if (chats.isEmpty()) {
+            if (friends.isEmpty()) {
                 Text(
-                    text = "No recent messages.",
+                    text = "No friends added yet.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = ProfileTheme.MutedForeground,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             } else {
-                // ... logic to show some chats
+                friends.forEachIndexed { index, friend ->
+                    ProfileFriendItem(
+                        user = friend,
+                        onClick = { onFriendClick(friend) }
+                    )
+                    if (index != friends.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 8.dp),
+                            color = ProfileTheme.Border
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+fun ProfileFriendItem(
+    user: UserSearchItem,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(ProfileTheme.Accent)
+        ) {
+            if (user.profilePictureUrl.isNotBlank()) {
+                AsyncImage(
+                    model = user.profilePictureUrl,
+                    contentDescription = "${user.displayName} profile picture",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(10.dp),
+                    tint = ProfileTheme.MutedForeground
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = user.displayName.ifBlank { user.name.ifBlank { user.email } },
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = ProfileTheme.Primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = user.major.ifBlank { user.email },
+                style = MaterialTheme.typography.bodySmall,
+                color = ProfileTheme.MutedForeground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        if (user.isOnline) Color(0xFF22C55E) else ProfileTheme.MutedForeground.copy(alpha = 0.45f),
+                        CircleShape
+                    )
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (user.isOnline) "Online" else "Offline",
+                style = MaterialTheme.typography.bodySmall,
+                color = ProfileTheme.MutedForeground
+            )
         }
     }
 }

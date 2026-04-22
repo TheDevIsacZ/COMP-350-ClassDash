@@ -15,6 +15,8 @@ data class ChatListItem(
     val id: String = "",
     val title: String = "",
     val type: String = "dm",
+    val otherUserUid: String? = null,
+    val profilePictureUrl: String = "",
     val lastMessageText: String? = null,
     val lastMessageAt: Timestamp? = null,
     val hidden: Boolean = false
@@ -78,6 +80,72 @@ class ChatRepository(
             .digest(canonical.toByteArray())
             .joinToString("") { "%02x".format(it) }
         return digest
+    }
+
+    private data class UserChatProfile(
+        val displayName: String,
+        val profilePictureUrl: String
+    )
+
+    private suspend fun getUserChatProfile(uid: String): UserChatProfile {
+        val doc = users.document(uid).get().await()
+        val displayName = doc.getString("displayName")
+            ?.trim()
+            .orEmpty()
+            .ifBlank { doc.getString("name")?.trim().orEmpty() }
+            .ifBlank { doc.getString("email")?.substringBefore("@").orEmpty() }
+            .ifBlank { "User" }
+
+        return UserChatProfile(
+            displayName = displayName,
+            profilePictureUrl = doc.getString("profilePictureUrl")?.trim().orEmpty()
+        )
+    }
+
+    private suspend fun buildDmInboxDoc(
+        chatId: String,
+        otherUserUid: String,
+        lastMessageText: String?,
+        lastMessageAt: Any?
+    ): Map<String, Any?> {
+        val otherProfile = getUserChatProfile(otherUserUid)
+        return mapOf(
+            "chatId" to chatId,
+            "title" to otherProfile.displayName,
+            "type" to "dm",
+            "otherUserUid" to otherUserUid,
+            "profilePictureUrl" to otherProfile.profilePictureUrl,
+            "lastMessageText" to lastMessageText,
+            "lastMessageAt" to lastMessageAt,
+            "hidden" to false
+        )
+    }
+
+    private suspend fun syncDmInboxMetadata(
+        chatId: String,
+        uidA: String,
+        uidB: String,
+        lastMessageText: String? = null,
+        lastMessageAt: Any? = null
+    ) {
+        userInboxRef(uidA).document(chatId)
+            .set(buildDmInboxDoc(chatId, uidB, lastMessageText, lastMessageAt), SetOptions.merge())
+            .await()
+        userInboxRef(uidB).document(chatId)
+            .set(buildDmInboxDoc(chatId, uidA, lastMessageText, lastMessageAt), SetOptions.merge())
+            .await()
+    }
+
+    suspend fun refreshDmInboxMetadata(chatId: String) {
+        val chat = getChatInfo(chatId)
+        if (chat.type != "dm" || chat.memberIds.size != 2) return
+
+        val lastMessageText = chatRef(chatId).get().await().getString("lastMessageText")
+        val lastMessageAt = chatRef(chatId).get().await().getTimestamp("lastMessageAt")
+        val uidA = chat.memberIds[0]
+        val uidB = chat.memberIds[1]
+
+        syncDmInboxMetadata(chatId, uidA, uidB, lastMessageText, lastMessageAt)
     }
 
     suspend fun getChatInfo(chatId: String): ChatInfo {
@@ -145,6 +213,7 @@ class ChatRepository(
         val existingThread = dmThreads.document(dmKey).get().await()
         val existingChatId = existingThread.getString("chatId")
         if (!existingChatId.isNullOrBlank()) {
+            syncDmInboxMetadata(existingChatId, userA, userB)
             return existingChatId
         }
 
@@ -190,17 +259,11 @@ class ChatRepository(
             )
         )
 
-        val inboxDoc = mapOf(
-            "chatId" to chatId,
-            "title" to title.trim(),
-            "type" to "dm",
-            "lastMessageText" to null,
-            "lastMessageAt" to null,
-            "hidden" to false
-        )
+        val userAInboxDoc = buildDmInboxDoc(chatId, userB, null, null)
+        val userBInboxDoc = buildDmInboxDoc(chatId, userA, null, null)
 
-        batch.set(userInboxRef(userA).document(chatId), inboxDoc, SetOptions.merge())
-        batch.set(userInboxRef(userB).document(chatId), inboxDoc, SetOptions.merge())
+        batch.set(userInboxRef(userA).document(chatId), userAInboxDoc, SetOptions.merge())
+        batch.set(userInboxRef(userB).document(chatId), userBInboxDoc, SetOptions.merge())
 
         batch.set(
             dmThreads.document(dmKey),
@@ -384,8 +447,21 @@ class ChatRepository(
         )
 
         chat.memberIds.forEach { uid ->
-            batch.set(
-                userInboxRef(uid).document(chatId),
+            val inboxDoc = if (chat.type == "dm" && chat.memberIds.size == 2) {
+                val otherUid = chat.memberIds.firstOrNull { it != uid }
+                if (otherUid != null) {
+                    buildDmInboxDoc(chatId, otherUid, trimmed, now)
+                } else {
+                    mapOf(
+                        "chatId" to chatId,
+                        "title" to chat.title,
+                        "type" to chat.type,
+                        "lastMessageText" to trimmed,
+                        "lastMessageAt" to now,
+                        "hidden" to false
+                    )
+                }
+            } else {
                 mapOf(
                     "chatId" to chatId,
                     "title" to chat.title,
@@ -393,9 +469,10 @@ class ChatRepository(
                     "lastMessageText" to trimmed,
                     "lastMessageAt" to now,
                     "hidden" to false
-                ),
-                SetOptions.merge()
-            )
+                )
+            }
+
+            batch.set(userInboxRef(uid).document(chatId), inboxDoc, SetOptions.merge())
         }
 
         batch.commit().await()
@@ -898,6 +975,8 @@ class ChatRepository(
             id = getString("chatId") ?: id,
             title = getString("title") ?: "Chat",
             type = getString("type") ?: "dm",
+            otherUserUid = getString("otherUserUid"),
+            profilePictureUrl = getString("profilePictureUrl") ?: "",
             lastMessageText = getString("lastMessageText"),
             lastMessageAt = getTimestamp("lastMessageAt"),
             hidden = getBoolean("hidden") ?: false
