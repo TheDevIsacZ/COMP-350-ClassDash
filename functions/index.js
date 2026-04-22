@@ -73,17 +73,16 @@ exports.sendChatNotification = functions.firestore
             };
 
             // 5. Send multicast message
-            const response = await messaging.sendMulticast(payload);
-            console.log(`${response.successCount} notifications sent, ${response.failureCount} failed`);
-
-            if (response.failureCount > 0) {
-                // Optionally clean up invalid tokens
-                response.responses.forEach((resp, idx) => {
-                    if (!resp.success) {
-                        console.error('Failed token:', tokens[idx], resp.error);
-                        // TODO: remove invalid token from Firestore
-                    }
-                });
+            const response = await messaging.sendEachForMulticast({
+              notification: { title: chatTitle, body: `${senderName}: ${messageText}` },
+              data: {
+                chatId: chatId,
+                chatTitle: chatTitle,
+                // Use a generic click action or remove it
+                click_action: 'OPEN_CHAT_ACTIVITY'
+              },
+              tokens: tokens
+            });
             }
 
             return null;
