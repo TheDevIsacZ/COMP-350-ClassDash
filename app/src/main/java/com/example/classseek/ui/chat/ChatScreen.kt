@@ -20,10 +20,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -31,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -44,7 +50,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -69,6 +77,9 @@ data class ChatUserProfile(
     val email: String,
     val profilePictureUrl: String
 )
+
+private val ChatHeaderAccent = Color(0xFF8B7CFF)
+private val ChatHeaderDivider = Color(0xFFE6E1FF)
 
 @Composable
 private fun ProfileAvatar(
@@ -99,6 +110,110 @@ private fun ProfileAvatar(
             }
         }
     }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun GroupChatHeader(
+    title: String,
+    onBack: () -> Unit,
+    onManage: () -> Unit
+) {
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = Color.White,
+            navigationIconContentColor = ChatHeaderAccent,
+            actionIconContentColor = ChatHeaderAccent,
+            titleContentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(34.dp),
+                    shape = CircleShape,
+                    color = ChatHeaderAccent.copy(alpha = 0.14f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = title.trim().take(1).ifBlank { "G" }.uppercase(),
+                            color = ChatHeaderAccent,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        },
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
+                    contentDescription = "Back",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        },
+        actions = {
+            IconButton(onClick = onManage) {
+                Icon(
+                    imageVector = Icons.Default.MoreVert,
+                    contentDescription = "More options"
+                )
+            }
+        }
+    )
+    HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun DirectMessageHeader(
+    title: String,
+    profilePictureUrl: String,
+    onBack: () -> Unit
+) {
+    TopAppBar(
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = Color.White,
+            navigationIconContentColor = ChatHeaderAccent,
+            titleContentColor = MaterialTheme.colorScheme.onSurface
+        ),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ProfileAvatar(
+                    imageUrl = profilePictureUrl,
+                    label = title,
+                    modifier = Modifier.size(34.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
+                )
+            }
+        },
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
+                    contentDescription = "Back",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    )
+    HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -147,6 +262,8 @@ fun ChatScreen(
     val memberSearchResults = remember(chatId) { mutableStateListOf<ChatUserProfile>() }
     var managingGroup by remember(chatId) { mutableStateOf(false) }
     var confirmDeleteGroup by remember(chatId) { mutableStateOf(false) }
+    var confirmLeaveGroup by remember(chatId) { mutableStateOf(false) }
+    var transferToUid by remember(chatId) { mutableStateOf<String?>(null) }
 
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
@@ -198,6 +315,18 @@ fun ChatScreen(
 
         return lastReadIndex <= targetIndex
     }
+
+    val directMessagePartnerUid = remember(chatInfo?.memberIds, myUid) {
+        chatInfo?.memberIds?.firstOrNull { it != myUid }
+    }
+    val directMessagePartnerProfile = directMessagePartnerUid?.let { userProfiles[it] }
+    val directMessageTitle = directMessagePartnerProfile?.displayName
+        ?.takeIf { it.isNotBlank() }
+        ?: directMessagePartnerProfile?.email
+            ?.substringBefore("@")
+            ?.takeIf { it.isNotBlank() }
+        ?: title
+    val directMessageAvatarUrl = directMessagePartnerProfile?.profilePictureUrl.orEmpty()
 
     val latestSeen = remember(
         latestMyMessageId,
@@ -258,6 +387,7 @@ fun ChatScreen(
         if (info.type == "group") {
             groupMembers = repo.getGroupMembers(chatId)
         } else {
+            repo.refreshDmInboxMetadata(chatId)
             groupMembers = emptyList()
         }
     }
@@ -754,6 +884,15 @@ fun ChatScreen(
                                     ) {
                                         Text("Remove cohost")
                                     }
+
+                                    Button(
+                                        enabled = !managingGroup,
+                                        onClick = {
+                                            transferToUid = member.uid
+                                        }
+                                    ) {
+                                        Text("Transfer Ownership")
+                                    }
                                 }
 
                                 if (canRemoveMember(member)) {
@@ -788,6 +927,17 @@ fun ChatScreen(
 
                             // Spacer(Modifier.height(8.dp))
                             // HorizontalDivider()
+                        }
+                    }
+
+                    item("leave_group_section") {
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            enabled = !managingGroup,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { confirmLeaveGroup = true }
+                        ) {
+                            Text("Leave Group")
                         }
                     }
 
@@ -875,6 +1025,109 @@ fun ChatScreen(
     }
      */
 
+    if (confirmLeaveGroup) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!managingGroup) confirmLeaveGroup = false
+            },
+            title = { Text("Leave group?") },
+            text = {
+                if (normalizedRole(myRole) == "owner") {
+                    Text("As the owner, you must transfer ownership to another member before leaving.")
+                } else {
+                    Text("Are you sure you want to leave this group chat?")
+                }
+            },
+            confirmButton = {
+                if (normalizedRole(myRole) != "owner") {
+                    TextButton(
+                        enabled = !managingGroup,
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    managingGroup = true
+                                    repo.leaveGroupChat(
+                                        chatId = chatId,
+                                        myUid = myUid ?: throw Exception("Not signed in")
+                                    )
+                                    confirmLeaveGroup = false
+                                    showManageDialog = false
+                                    onBack()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    error = e.message ?: "Failed to leave group"
+                                } finally {
+                                    managingGroup = false
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Leave")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = { confirmLeaveGroup = false }
+                ) {
+                    Text(if (normalizedRole(myRole) == "owner") "OK" else "Cancel")
+                }
+            }
+        )
+    }
+
+    if (transferToUid != null) {
+        val targetMember = groupMembers.find { it.uid == transferToUid }
+        val targetName = targetMember?.displayName?.ifBlank { targetMember.email } ?: "this member"
+
+        AlertDialog(
+            onDismissRequest = {
+                if (!managingGroup) transferToUid = null
+            },
+            title = { Text("Transfer Ownership?") },
+            text = {
+                Text("Are you sure you want to transfer ownership to $targetName? You will become a cohost.")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = {
+                        scope.launch {
+                            try {
+                                managingGroup = true
+                                repo.transferOwnership(
+                                    chatId = chatId,
+                                    actingUid = myUid ?: throw Exception("Not signed in"),
+                                    newOwnerUid = transferToUid!!
+                                )
+                                transferToUid = null
+                                refreshGroupMeta()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                error = e.message ?: "Failed to transfer ownership"
+                            } finally {
+                                managingGroup = false
+                            }
+                        }
+                    }
+                ) {
+                    Text("Transfer")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = { transferToUid = null }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
@@ -884,21 +1137,19 @@ fun ChatScreen(
                 .fillMaxSize()
                 .imePadding()
         ) {
-            TopAppBar(
-                title = { Text(title) },
-                navigationIcon = {
-                    TextButton(onClick = onBack) { Text("Back") }
-                },
-                actions = {
-                    if (isGroupChat()) {
-                        TextButton(
-                            onClick = { showManageDialog = true }
-                        ) {
-                            Text("Manage")
-                        }
-                    }
-                }
-            )
+            if (isGroupChat()) {
+                GroupChatHeader(
+                    title = chatInfo?.title ?: title,
+                    onBack = onBack,
+                    onManage = { showManageDialog = true }
+                )
+            } else {
+                DirectMessageHeader(
+                    title = directMessageTitle,
+                    profilePictureUrl = directMessageAvatarUrl,
+                    onBack = onBack
+                )
+            }
 
             if (error != null) {
                 Text(

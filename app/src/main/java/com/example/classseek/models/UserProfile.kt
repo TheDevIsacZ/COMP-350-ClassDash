@@ -13,4 +13,8 @@ data class UserProfile(
     val joinDate: String = "",
     val followersCount: String = "0",
     val followingCount: String = "0"
-)
+) {
+    val isProfileComplete: Boolean
+        get() = name.isNotBlank() && major.isNotBlank()
+}
+
