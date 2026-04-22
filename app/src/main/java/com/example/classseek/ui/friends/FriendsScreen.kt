@@ -31,8 +31,8 @@ import com.example.classseek.data.ChatRepository
 import com.example.classseek.ui.chat.ChatScreen
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FieldPath
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -146,12 +146,12 @@ fun FriendsScreen(
     val pendingRequests = remember { mutableStateListOf<UserSearchItem>() }
     DisposableEffect(myUid) {
         if (myUid.isBlank()) return@DisposableEffect onDispose {}
-        
+
         val friendsReg = db.collection("users").document(myUid).collection("friends")
             .addSnapshotListener { snapshot, _ ->
                 friendUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
             }
-            
+
         val incomingReg = db.collection("users").document(myUid).collection("friendRequests")
             .addSnapshotListener { snapshot, _ ->
                 pendingRequestUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
@@ -167,7 +167,7 @@ fun FriendsScreen(
                     ))
                 }
             }
-            
+
         val outgoingReg = db.collection("users").document(myUid).collection("sentFriendRequests")
             .addSnapshotListener { snapshot, _ ->
                 sentRequestUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
@@ -197,32 +197,49 @@ fun FriendsScreen(
     // Listen for Online Friends (Real friends from Firestore)
     val onlineFriends = remember { mutableStateListOf<UserSearchItem>() }
     var onlineFriendsError by remember { mutableStateOf<String?>(null) }
-
-    DisposableEffect(friendUids) {
+    DisposableEffect(myUid, friendUids) {
         if (myUid.isBlank() || friendUids.isEmpty()) {
             onlineFriends.clear()
             onlineFriendsError = null
             return@DisposableEffect onDispose {}
         }
 
-        // Listen to the online status of friends
-        // Use FieldPath.documentId() since our UIDs are the document IDs
-        val registration = db.collection("users")
-            .whereIn(FieldPath.documentId(), friendUids.toList().take(30))
-            .whereEqualTo("isOnline", true)
-            .addSnapshotListener { usersSnapshot, error ->
-                if (error != null) {
-                    onlineFriendsError = error.message
-                    onlineFriends.clear()
-                    return@addSnapshotListener
-                }
-                onlineFriendsError = null
-                val users = usersSnapshot?.documents?.mapNotNull { it.toUserSearchItem() }.orEmpty()
-                onlineFriends.clear()
-                onlineFriends.addAll(users)
+        val onlineByUid = linkedMapOf<String, UserSearchItem>()
+        val registrations = friendUids
+            .toList()
+            .chunked(10)
+            .map { uidChunk ->
+                db.collection("users")
+                    .whereIn(FieldPath.documentId(), uidChunk)
+                    .whereEqualTo("isOnline", true)
+                    .addSnapshotListener { usersSnapshot, error ->
+                        if (error != null) {
+                            onlineFriendsError = error.message
+                            onlineFriends.clear()
+                            return@addSnapshotListener
+                        }
+
+                        onlineFriendsError = null
+                        val chunkIds = uidChunk.toSet()
+                        onlineByUid.keys.removeAll(chunkIds)
+                        usersSnapshot?.documents
+                            ?.mapNotNull { it.toUserSearchItem() }
+                            ?.forEach { user ->
+                                onlineByUid[user.uid] = user
+                            }
+
+                        onlineFriends.clear()
+                        onlineFriends.addAll(
+                            onlineByUid.values.sortedBy { user ->
+                                user.displayName.ifBlank { user.email }.lowercase()
+                            }
+                        )
+                    }
             }
-        
-        onDispose { registration.remove() }
+
+        onDispose {
+            registrations.forEach { it.remove() }
+        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {

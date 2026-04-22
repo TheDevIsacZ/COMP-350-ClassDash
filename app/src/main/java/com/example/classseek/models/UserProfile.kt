@@ -3,7 +3,6 @@ package com.example.classseek.models
 data class UserProfile(
     val uid: String = "",
     val name: String = "",
-    val displayName: String = "",
     val email: String = "",
     val major: String = "",
     val bio: String = "",
@@ -13,8 +12,7 @@ data class UserProfile(
     val githubUrl: String = "",
     val joinDate: String = "",
     val followersCount: String = "0",
-    val followingCount: String = "0",
-    val isOnline: Boolean = false
+    val followingCount: String = "0"
 ) {
     val isProfileComplete: Boolean
         get() = name.isNotBlank() && major.isNotBlank()
