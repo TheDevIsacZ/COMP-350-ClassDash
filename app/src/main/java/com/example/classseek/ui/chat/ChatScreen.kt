@@ -147,6 +147,8 @@ fun ChatScreen(
     val memberSearchResults = remember(chatId) { mutableStateListOf<ChatUserProfile>() }
     var managingGroup by remember(chatId) { mutableStateOf(false) }
     var confirmDeleteGroup by remember(chatId) { mutableStateOf(false) }
+    var confirmLeaveGroup by remember(chatId) { mutableStateOf(false) }
+    var transferToUid by remember(chatId) { mutableStateOf<String?>(null) }
 
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
@@ -754,6 +756,15 @@ fun ChatScreen(
                                     ) {
                                         Text("Remove cohost")
                                     }
+
+                                    Button(
+                                        enabled = !managingGroup,
+                                        onClick = {
+                                            transferToUid = member.uid
+                                        }
+                                    ) {
+                                        Text("Transfer Ownership")
+                                    }
                                 }
 
                                 if (canRemoveMember(member)) {
@@ -788,6 +799,17 @@ fun ChatScreen(
 
                             // Spacer(Modifier.height(8.dp))
                             // HorizontalDivider()
+                        }
+                    }
+
+                    item("leave_group_section") {
+                        Spacer(Modifier.height(12.dp))
+                        Button(
+                            enabled = !managingGroup,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { confirmLeaveGroup = true }
+                        ) {
+                            Text("Leave Group")
                         }
                     }
 
@@ -874,6 +896,109 @@ fun ChatScreen(
     )
     }
      */
+
+    if (confirmLeaveGroup) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!managingGroup) confirmLeaveGroup = false
+            },
+            title = { Text("Leave group?") },
+            text = {
+                if (normalizedRole(myRole) == "owner") {
+                    Text("As the owner, you must transfer ownership to another member before leaving.")
+                } else {
+                    Text("Are you sure you want to leave this group chat?")
+                }
+            },
+            confirmButton = {
+                if (normalizedRole(myRole) != "owner") {
+                    TextButton(
+                        enabled = !managingGroup,
+                        onClick = {
+                            scope.launch {
+                                try {
+                                    managingGroup = true
+                                    repo.leaveGroupChat(
+                                        chatId = chatId,
+                                        myUid = myUid ?: throw Exception("Not signed in")
+                                    )
+                                    confirmLeaveGroup = false
+                                    showManageDialog = false
+                                    onBack()
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    error = e.message ?: "Failed to leave group"
+                                } finally {
+                                    managingGroup = false
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Leave")
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = { confirmLeaveGroup = false }
+                ) {
+                    Text(if (normalizedRole(myRole) == "owner") "OK" else "Cancel")
+                }
+            }
+        )
+    }
+
+    if (transferToUid != null) {
+        val targetMember = groupMembers.find { it.uid == transferToUid }
+        val targetName = targetMember?.displayName?.ifBlank { targetMember.email } ?: "this member"
+
+        AlertDialog(
+            onDismissRequest = {
+                if (!managingGroup) transferToUid = null
+            },
+            title = { Text("Transfer Ownership?") },
+            text = {
+                Text("Are you sure you want to transfer ownership to $targetName? You will become a cohost.")
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = {
+                        scope.launch {
+                            try {
+                                managingGroup = true
+                                repo.transferOwnership(
+                                    chatId = chatId,
+                                    actingUid = myUid ?: throw Exception("Not signed in"),
+                                    newOwnerUid = transferToUid!!
+                                )
+                                transferToUid = null
+                                refreshGroupMeta()
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                error = e.message ?: "Failed to transfer ownership"
+                            } finally {
+                                managingGroup = false
+                            }
+                        }
+                    }
+                ) {
+                    Text("Transfer")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !managingGroup,
+                    onClick = { transferToUid = null }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize()

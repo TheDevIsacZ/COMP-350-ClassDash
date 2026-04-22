@@ -419,17 +419,25 @@ class ChatRepository(
         val updatedMemberIds = (chat.memberIds + newMemberUid).distinct()
         val title = chat.title
         val now = FieldValue.serverTimestamp()
+        val newMemberName = getUserDisplayName(newMemberUid)
+        val systemText = "$newMemberName has been added"
+        val msgRef = chatMessagesRef(chatId).document()
 
         val batch = db.batch()
 
+        // 1. Update chat doc (member list + metadata)
         batch.update(
             chatRef(chatId),
             mapOf(
                 "memberIds" to updatedMemberIds,
-                "memberCount" to updatedMemberIds.size
+                "memberCount" to updatedMemberIds.size,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to actingUid
             )
         )
 
+        // 2. Create the member doc
         batch.set(
             chatMembersRef(chatId).document(newMemberUid),
             mapOf(
@@ -441,27 +449,35 @@ class ChatRepository(
             )
         )
 
+        // 3. Create the system message
         batch.set(
-            userInboxRef(newMemberUid).document(chatId),
+            msgRef,
             mapOf(
-                "chatId" to chatId,
-                "title" to title,
-                "type" to "group",
-                "lastMessageText" to null,
-                "lastMessageAt" to null,
-                "hidden" to false
-            ),
-            SetOptions.merge()
+                "senderId" to actingUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
         )
+
+        // 4. Update inboxes for ALL members (including the new one)
+        updatedMemberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to title,
+                    "type" to "group",
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
 
         batch.commit().await()
-
-        val newMemberName = getUserDisplayName(newMemberUid)
-        sendSystemMembershipMessage(
-            chatId = chatId,
-            senderId = actingUid,
-            text = "$newMemberName has been added"
-        )
     }
 
     suspend fun removeGroupMember(
@@ -488,26 +504,57 @@ class ChatRepository(
         if (updatedMemberIds.size < 2) throw Exception("Group must keep at least 2 members")
 
         val targetName = getUserDisplayName(targetUid)
+        val systemText = "$targetName has been removed"
+        val now = FieldValue.serverTimestamp()
+        val msgRef = chatMessagesRef(chatId).document()
+
         val batch = db.batch()
 
+        // 1. Update chat doc
         batch.update(
             chatRef(chatId),
             mapOf(
                 "memberIds" to updatedMemberIds,
-                "memberCount" to updatedMemberIds.size
+                "memberCount" to updatedMemberIds.size,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to actingUid
             )
         )
 
+        // 2. Create system message
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to actingUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        // 3. Delete target's membership and inbox
         batch.delete(chatMembersRef(chatId).document(targetUid))
         batch.delete(userInboxRef(targetUid).document(chatId))
 
-        batch.commit().await()
+        // 4. Update inboxes for remaining members
+        updatedMemberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to "group",
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
 
-        sendSystemMembershipMessage(
-            chatId = chatId,
-            senderId = actingUid,
-            text = "$targetName has been removed"
-        )
+        batch.commit().await()
     }
 
     suspend fun leaveGroupChat(chatId: String, myUid: String) {
@@ -522,21 +569,60 @@ class ChatRepository(
         val updatedMemberIds = chat.memberIds.filter { it != myUid }
         if (updatedMemberIds.size < 2) throw Exception("Group must keep at least 2 members")
 
+        val myName = getUserDisplayName(myUid)
+        val systemText = "$myName has left the group"
+        val now = FieldValue.serverTimestamp()
+        val msgRef = chatMessagesRef(chatId).document()
+
         val batch = db.batch()
 
+        // 1. Update chat doc
         batch.update(
             chatRef(chatId),
             mapOf(
                 "memberIds" to updatedMemberIds,
-                "memberCount" to updatedMemberIds.size
+                "memberCount" to updatedMemberIds.size,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to myUid
             )
         )
 
+        // 2. Create system message
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to myUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        // 3. Delete my membership and inbox
         batch.delete(chatMembersRef(chatId).document(myUid))
         batch.delete(userInboxRef(myUid).document(chatId))
 
+        // 4. Update inboxes for remaining members
+        updatedMemberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to "group",
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
         batch.commit().await()
     }
+
 
     suspend fun updateGroupMemberRole(
         chatId: String,
@@ -739,6 +825,7 @@ class ChatRepository(
         actingUid: String,
         newOwnerUid: String
     ) {
+        val chat = getChatInfo(chatId)
         val actingRole = getMyRole(chatId, actingUid)
         if (actingRole != "owner") throw Exception("Only owner can transfer ownership")
 
@@ -746,26 +833,61 @@ class ChatRepository(
         val targetDoc = targetRef.get().await()
         if (!targetDoc.exists()) throw Exception("Target user is not a member of this chat")
 
+        val newOwnerName = getUserDisplayName(newOwnerUid)
+        val systemText = "Ownership transferred to $newOwnerName"
+        val now = FieldValue.serverTimestamp()
+        val msgRef = chatMessagesRef(chatId).document()
+
         val batch = db.batch()
 
-        // Update old owner to cohost or member
+        // 1. Update old owner to cohost
         batch.update(chatMembersRef(chatId).document(actingUid), "role", "cohost")
 
-        // Update new owner
+        // 2. Update new owner to owner
         batch.update(chatMembersRef(chatId).document(newOwnerUid), "role", "owner")
 
-        // Update chat doc
-        batch.update(chatRef(chatId), "createdBy", newOwnerUid)
+        // 3. Update chat doc (createdBy + metadata)
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "createdBy" to newOwnerUid,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to actingUid
+            )
+        )
+
+        // 4. Create system message
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to actingUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        // 5. Update inboxes for ALL members
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
 
         batch.commit().await()
-
-        val newOwnerName = getUserDisplayName(newOwnerUid)
-        sendSystemMembershipMessage(
-            chatId = chatId,
-            senderId = actingUid,
-            text = "Ownership transferred to $newOwnerName"
-        )
     }
+
 
     suspend fun deleteChatListItem(myUid: String, chatId: String) {
         userInboxRef(myUid).document(chatId).delete().await()

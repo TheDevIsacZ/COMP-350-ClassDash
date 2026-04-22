@@ -123,6 +123,7 @@ fun FriendsScreen(
     
     var selectedUserForAction by remember { mutableStateOf<UserSearchItem?>(null) }
     var friendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
 
     // Handle initial chat for deep linking or returning from other screens
     LaunchedEffect(initialChatId) {
@@ -192,6 +193,9 @@ fun FriendsScreen(
                         activeChatId = chat.id
                         activeChatTitle = chat.title
                         currentScreen = FriendsNavigation.CHAT
+                    },
+                    onDeleteChat = { chat ->
+                        chatToDelete = chat
                     },
                     onNewMessageClick = {
                         currentScreen = FriendsNavigation.NEW_MESSAGE
@@ -275,6 +279,36 @@ fun FriendsScreen(
                     val uid = selectedUserForAction!!.uid
                     selectedUserForAction = null
                     onNavigateToProfile?.invoke(uid)
+                }
+            )
+        }
+
+        chatToDelete?.let { chat ->
+            AlertDialog(
+                onDismissRequest = { chatToDelete = null },
+                title = { Text("Delete conversation?") },
+                text = { Text("This will remove the conversation from your inbox. You will still be a member of group chats.") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val targetChatId = chat.id
+                            chatToDelete = null
+                            scope.launch {
+                                try {
+                                    repo.deleteChatListItem(myUid, targetChatId)
+                                } catch (e: Exception) {
+                                    // Handle error
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Delete")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { chatToDelete = null }) {
+                        Text("Cancel")
+                    }
                 }
             )
         }
@@ -365,6 +399,7 @@ fun MessagesMainScreen(
     onlineFriends: List<UserSearchItem>,
     chats: List<ChatListItem>,
     onChatClick: (ChatListItem) -> Unit,
+    onDeleteChat: (ChatListItem) -> Unit,
     onNewMessageClick: () -> Unit,
     onUserClick: (UserSearchItem) -> Unit
 ) {
@@ -475,7 +510,11 @@ fun MessagesMainScreen(
                             )
                         } else {
                             filteredChats.forEachIndexed { index, chat ->
-                                ChatListItemRow(chat = chat, onClick = { onChatClick(chat) })
+                                ChatListItemRow(
+                                    chat = chat,
+                                    onClick = { onChatClick(chat) },
+                                    onDelete = { onDeleteChat(chat) }
+                                )
                                 if (index < filteredChats.size - 1) {
                                     HorizontalDivider(
                                         modifier = Modifier.padding(vertical = 8.dp),
@@ -524,7 +563,11 @@ fun OnlineFriendItem(user: UserSearchItem, onClick: () -> Unit) {
 }
 
 @Composable
-fun ChatListItemRow(chat: ChatListItem, onClick: () -> Unit) {
+fun ChatListItemRow(
+    chat: ChatListItem,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
     Row(
@@ -566,6 +609,14 @@ fun ChatListItemRow(chat: ChatListItem, onClick: () -> Unit) {
                 color = if (chat.lastMessageText == null) Color.Gray else Color.DarkGray,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete chat",
+                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                modifier = Modifier.size(20.dp)
             )
         }
     }
