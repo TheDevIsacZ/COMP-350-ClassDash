@@ -125,7 +125,7 @@ fun ProfileScreen(
                 )
             }
 
-            // Schedule Section
+            Spacer(modifier = Modifier.height(24.dp))
             ScheduleSection(userProfile, onEditSchedule)
 
             Spacer(modifier = Modifier.height(32.dp))
