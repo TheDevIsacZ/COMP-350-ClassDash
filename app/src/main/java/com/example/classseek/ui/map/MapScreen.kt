@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Looper
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -63,6 +64,12 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
     var mapType by remember { mutableStateOf(MapType.SATELLITE) }
     var isFilterMenuExpanded by remember { mutableStateOf(false) }
+
+    if (isListVisible) {
+        BackHandler {
+            isListVisible = false
+        }
+    }
 
     val bounds = remember {
         LatLngBounds(

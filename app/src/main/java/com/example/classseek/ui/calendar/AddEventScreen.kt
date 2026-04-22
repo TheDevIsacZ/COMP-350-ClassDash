@@ -1,5 +1,6 @@
 package com.example.classseek.ui.calendar
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -33,6 +34,10 @@ fun AddEventScreen(
     var startTime by remember { mutableStateOf("09:00") }
     var endTime by remember { mutableStateOf("10:00") }
     var selectedDays by remember { mutableStateOf(setOf<Int>()) }
+
+    BackHandler {
+        onBackClick()
+    }
     
     var startDate by remember { mutableStateOf(initialDateMillis ?: System.currentTimeMillis()) }
     var endDate by remember { mutableStateOf(startDate + 1000L * 60 * 60 * 24 * 7) }

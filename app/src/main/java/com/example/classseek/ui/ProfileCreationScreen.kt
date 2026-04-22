@@ -1,6 +1,7 @@
 package com.example.classseek.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -73,6 +74,12 @@ fun ProfileCreationScreen(
     }
 
     val context = LocalContext.current
+
+    if (onBack != null) {
+        BackHandler {
+            onBack()
+        }
+    }
 
     suspend fun uploadImage(uri: Uri, folder: String): String {
         try {
