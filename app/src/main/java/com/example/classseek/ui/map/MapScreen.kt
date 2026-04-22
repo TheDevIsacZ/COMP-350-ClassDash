@@ -57,9 +57,9 @@ enum class MarkerCategory(val label: String, val icon: ImageVector, val color: C
     BUILDING("Building", Icons.Default.OtherHouses, Color(0xFF2596BE)), // Tealish
     STUDENT_SERVICE("Student Service", Icons.Default.School, Color(0xFFE580FF)),
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)), // Orange
-    BOOKMARK("Bookmark", Icons.Default.Star, Color(0xFFFFD700)),
-    SHARED("Shared", Icons.Default.ShareLocation, Color(0xFF4CAF50)),
-    CLASS("Class", Icons.Default.Explore, Color(0xFF4CAF50))
+    BOOKMARK("Bookmark", Icons.Default.Star, Color(0xFFF8CF6B)),
+    SHARED("Shared", Icons.Default.ShareLocation, Color(0xFFC6BBE8)),
+    CLASS("Class", Icons.Default.Explore, Color(0xFF6BD36E))
 }
 
 data class MapPlace(
@@ -92,6 +92,7 @@ fun MapScreen(
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
     var mapType by remember { mutableStateOf(MapType.SATELLITE) }
     var isFilterMenuExpanded by remember { mutableStateOf(false) }
+    var isMapReady by remember { mutableStateOf(false) }
 
     // State for local share picking
     var showShareDialog by remember { mutableStateOf(false) }
@@ -206,7 +207,6 @@ fun MapScreen(
     }
 
     LaunchedEffect(Unit) {
-        val db = Firebase.firestore
         db.collection("mapScreenData")
             .get()
             .addOnSuccessListener { result ->
@@ -242,9 +242,13 @@ fun MapScreen(
     }
 
     // Handle initial shared location from DM
-    LaunchedEffect(sharedLocation) {
+    LaunchedEffect(sharedLocation, isMapReady) {
         if (sharedLocation != null) {
-            cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(sharedLocation, 18f))
+            if (isMapReady) {
+                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(sharedLocation, 18f))
+            } else {
+                cameraPositionState.position = CameraPosition.fromLatLngZoom(sharedLocation, 18f)
+            }
             selectedPlace = incomingSharedMarker.firstOrNull()
         }
     }
@@ -315,6 +319,7 @@ fun MapScreen(
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
+                onMapLoaded = { isMapReady = true },
                 properties = MapProperties(
                     mapType = mapType,
                     latLngBoundsForCameraTarget = bounds,
@@ -493,7 +498,13 @@ fun MapScreen(
                         searchQuery = newValue
                         allMarkers.find { it.name.contains(newValue, ignoreCase = true) }?.let { match ->
                             selectedPlace = match
-                            scope.launch { cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(match.location, 18f)) }
+                            scope.launch {
+                                if (isMapReady) {
+                                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(match.location, 18f))
+                                } else {
+                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(match.location, 18f)
+                                }
+                            }
                         }
                     },
                     modifier = Modifier.weight(1f),
@@ -612,10 +623,14 @@ fun MapScreen(
                                         modifier = Modifier.clickable {
                                             scope.launch {
                                                 selectedPlace = place
-                                                cameraPositionState.animate(
-                                                    update = CameraUpdateFactory.newLatLngZoom(place.location, 18f),
-                                                    durationMs = 1000
-                                                )
+                                                if (isMapReady) {
+                                                    cameraPositionState.animate(
+                                                        update = CameraUpdateFactory.newLatLngZoom(place.location, 18f),
+                                                        durationMs = 1000
+                                                    )
+                                                } else {
+                                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(place.location, 18f)
+                                                }
                                             }
                                             isListVisible = false
                                         }
