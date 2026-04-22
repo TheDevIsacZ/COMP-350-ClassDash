@@ -1,5 +1,6 @@
 package com.example.classseek.ui.friends
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -125,13 +126,22 @@ fun FriendsScreen(
     val myUid = auth.currentUser?.uid ?: ""
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
-    
+
     var selectedUserForAction by remember { mutableStateOf<UserSearchItem?>(null) }
     var friendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var sentRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
 
+    if (selectedChatId != null) {
+        BackHandler {
+            selectedChatId = null
+            selectedChatTitle = null
+        }
+    }
+
+    var status by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf(false) }
     // Handle initial chat for deep linking or returning from other screens
     LaunchedEffect(initialChatId) {
         if (initialChatId != null) {
@@ -297,7 +307,7 @@ fun FriendsScreen(
                     ChatScreen(
                         chatId = activeChatId!!,
                         title = activeChatTitle ?: "Chat",
-                        onBack = { 
+                        onBack = {
                             currentScreen = FriendsNavigation.MAIN
                             activeChatId = null
                             activeChatTitle = null
@@ -308,7 +318,7 @@ fun FriendsScreen(
                 }
             }
         }
-        
+
         selectedUserForAction?.let { user ->
             UserActionDialog(
                 user = user,
@@ -322,7 +332,7 @@ fun FriendsScreen(
                 onMessage = {
                     val targetUser = selectedUserForAction!!
                     val isFriend = friendUids.contains(targetUser.uid)
-                    
+
                     if (isFriend) {
                         selectedUserForAction = null
                         scope.launch {
@@ -407,7 +417,7 @@ fun FriendsScreen(
 
         if (showNotFriendsDialog) {
             AlertDialog(
-                onDismissRequest = { 
+                onDismissRequest = {
                     showNotFriendsDialog = false
                     pendingFriendToAdd = null
                 },
@@ -432,7 +442,7 @@ fun FriendsScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { 
+                    TextButton(onClick = {
                         showNotFriendsDialog = false
                         pendingFriendToAdd = null
                     }) {
@@ -532,9 +542,9 @@ fun UserActionDialog(
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                 )
                 Text(user.email, style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                
+
                 Spacer(modifier = Modifier.height(24.dp))
-                
+
                 Button(
                     onClick = onMessage,
                     modifier = Modifier.fillMaxWidth(),
@@ -544,9 +554,9 @@ fun UserActionDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Message")
                 }
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
+
                 if (isFriend) {
                     OutlinedButton(
                         onClick = { showConfirmRemove = true },
@@ -601,9 +611,9 @@ fun UserActionDialog(
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
+
                 TextButton(
                     onClick = onViewProfile,
                     modifier = Modifier.fillMaxWidth()
@@ -939,14 +949,14 @@ fun NewMessageScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     val searchResults = remember { mutableStateListOf<UserSearchItem>() }
-    
+
     // Group creation state
     var isCreatingGroup by remember { mutableStateOf(false) }
     var groupTitle by remember { mutableStateOf("") }
     val selectedMembers = remember { mutableStateListOf<UserSearchItem>() }
 
     val allFriends = remember { mutableStateListOf<UserSearchItem>() }
-    
+
     val myUid = auth.currentUser?.uid ?: ""
 
     LaunchedEffect(myUid) {
@@ -998,7 +1008,7 @@ fun NewMessageScreen(
             val docs = db.collection("users")
                 .whereEqualTo("isProfileComplete", true)
                 .get().await().documents
-            
+
             searchResults.clear()
             searchResults.addAll(docs.mapNotNull { it.toUserSearchItem() }
                 .filter { it.uid != myUid && (it.email.lowercase().contains(normalized) || it.name.lowercase().contains(normalized) || it.displayName.lowercase().contains(normalized)) })
@@ -1080,7 +1090,7 @@ fun NewMessageScreen(
                 shape = RoundedCornerShape(28.dp),
                 singleLine = true
             )
-            
+
             if (selectedMembers.isNotEmpty()) {
                 LazyRow(
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
