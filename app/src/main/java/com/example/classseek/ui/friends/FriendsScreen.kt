@@ -133,10 +133,17 @@ fun FriendsScreen(
     var sentRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
 
-    if (selectedChatId != null) {
-        BackHandler {
-            selectedChatId = null
-            selectedChatTitle = null
+    BackHandler(enabled = currentScreen != FriendsNavigation.MAIN) {
+        when (currentScreen) {
+            FriendsNavigation.CHAT -> {
+                activeChatId = null
+                activeChatTitle = null
+                currentScreen = FriendsNavigation.MAIN
+            }
+            FriendsNavigation.NEW_MESSAGE -> {
+                currentScreen = FriendsNavigation.MAIN
+            }
+            FriendsNavigation.MAIN -> Unit
         }
     }
 
