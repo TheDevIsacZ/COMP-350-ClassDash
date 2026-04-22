@@ -25,4 +25,8 @@ data class UserProfile(
     val bookmarkedEventIds: List<String> = emptyList(),
     val semester: String = "",
     val classes: List<ClassInfo> = emptyList()
-)
+) {
+    val isProfileComplete: Boolean
+        get() = name.isNotBlank() && major.isNotBlank()
+}
+

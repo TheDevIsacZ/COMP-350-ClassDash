@@ -11,6 +11,7 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.os.Looper
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -103,6 +104,12 @@ fun MapScreen(
         position = CameraPosition.fromLatLngZoom(LatLng(34.16206611807, -119.0434737072), 17f)
     }
 
+    if (isListVisible) {
+        BackHandler {
+            isListVisible = false
+        }
+    }
+
     val bounds = remember {
         LatLngBounds(
             LatLng(34.14521297909, -119.0623117489),
@@ -153,13 +160,13 @@ fun MapScreen(
     val scheduleMarkers = remember(userProfile?.classes, places) {
         userProfile?.classes?.mapNotNull { classInfo ->
             val buildingInput = classInfo.building.lowercase()
-            
+
             // Re-use robust matching logic
             var match = places.find { place ->
                 val placeName = place.name.lowercase()
                 buildingInput.contains(placeName) || placeName.contains(buildingInput)
             }
-            
+
             if (match == null) {
                 val stopWords = setOf("room", "floor", "level", "suite", "rm", "fl", "den", "east", "west", "north", "south")
                 val words = buildingInput.split(" ", "-", ",").filter { it.length > 2 && it !in stopWords }
@@ -168,7 +175,7 @@ fun MapScreen(
                     words.any { word -> placeName.contains(word) }
                 }
             }
-            
+
             if (match != null) {
                 MapPlace(
                     name = classInfo.className,
@@ -199,6 +206,7 @@ fun MapScreen(
     }
 
     LaunchedEffect(Unit) {
+        val db = Firebase.firestore
         db.collection("mapScreenData")
             .get()
             .addOnSuccessListener { result ->
@@ -224,6 +232,7 @@ fun MapScreen(
                     }
                 }
                 places = fetchedPlaces
+                Log.d("MapScreen", "Loaded ${places.size} places from Firestore")
             }
 
         // Load chats for sharing
@@ -242,6 +251,7 @@ fun MapScreen(
 
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
     var location by remember { mutableStateOf<Location?>(null) }
+
 
     var hasPermission by remember {
         mutableStateOf(
@@ -297,6 +307,7 @@ fun MapScreen(
         }
     }
 
+    // Box to put the map and search bar on
     Box(modifier = modifier.fillMaxSize()) {
         if (hasPermission && location != null) {
             val currentLatLng = LatLng(location!!.latitude, location!!.longitude)
@@ -351,7 +362,7 @@ fun MapScreen(
                             incomingSharedMarker.any { it.location == place.location }
                         } else false
                     }
-                    
+
                     // Hide building name if overlapped, unless filter active or search in progress
                     val shouldShowName = if (place.category == MarkerCategory.BUILDING && hasOverlappingMarker) {
                         selectedCategory != MarkerCategory.ALL || searchQuery.isNotEmpty() || isSelected
@@ -493,7 +504,10 @@ fun MapScreen(
                     shape = RoundedCornerShape(24.dp),
                     colors = TextFieldDefaults.colors(focusedContainerColor = Color.White.copy(alpha = 0.9f), unfocusedContainerColor = Color.White.copy(alpha = 0.9f), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
                 )
+
                 Spacer(modifier = Modifier.width(8.dp))
+
+                // Dropdown menu for filters
                 Box {
                     FloatingActionButton(
                         onClick = { isFilterMenuExpanded = true },
@@ -539,9 +553,9 @@ fun MapScreen(
                     }
                 }
             }
-            
+
             Spacer(Modifier.height(8.dp))
-            
+
             FloatingActionButton(
                 onClick = {
                     if (location != null) {
