@@ -171,7 +171,6 @@ fun ScheduleEditScreen(
 
 @Composable
 private fun TimeNumericInput(time: String, onTimeChange: (String) -> Unit) {
-    // Current state derived from the time string "HH:mm AM/PM"
     var numericText by remember { 
         val h = time.substringBefore(":").filter { it.isDigit() }
         val m = time.substringAfter(":").substringBefore(" ").filter { it.isDigit() }
@@ -206,7 +205,6 @@ private fun TimeNumericInput(time: String, onTimeChange: (String) -> Unit) {
             }
         }
         
-        // Pad for display if needed but the logic handles 1 vs 2 digits for hours
         onTimeChange("${hStr.padStart(1, '0')}:${mStr.padStart(2, '0')} ${if(isAm) "AM" else "PM"}")
     }
 
@@ -228,12 +226,12 @@ private fun TimeNumericInput(time: String, onTimeChange: (String) -> Unit) {
         
         Spacer(Modifier.width(16.dp))
         
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(selected = isAm, onClick = { isAm = true; updateOutput() })
-            Text("AM")
-            Spacer(Modifier.width(8.dp))
-            RadioButton(selected = !isAm, onClick = { isAm = false; updateOutput() })
-            Text("PM")
+        Button(
+            onClick = { isAm = !isAm; updateOutput() },
+            modifier = Modifier.width(70.dp),
+            shape = RoundedCornerShape(2.dp)
+        ) {
+            Text(if (isAm) "AM" else "PM")
         }
     }
 }
