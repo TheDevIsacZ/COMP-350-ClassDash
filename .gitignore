@@ -10,3 +10,6 @@ local.properties
 app/google-services.json
 .kotlin/
 team-release-key.jks
+firebase.json
+.firebaserc
+/functions/
