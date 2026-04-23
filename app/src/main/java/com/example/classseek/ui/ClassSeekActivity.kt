@@ -986,8 +986,8 @@ fun ClassSeekApp(
                                         }
                                     }
                                 },
-                                chatRepository = repo,                     // new
-                                myUid = firebaseUser?.uid ?: ""            // new
+                                chatRepository = repo,
+                                myUid = firebaseUser?.uid ?: ""
                             )
                         }
                         AppDestinations.PROFILE -> {

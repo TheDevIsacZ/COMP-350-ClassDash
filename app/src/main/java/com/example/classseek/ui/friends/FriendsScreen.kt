@@ -1,5 +1,6 @@
 package com.example.classseek.ui.friends
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -135,8 +136,6 @@ fun FriendsScreen(
     var sentRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
 
-<<<<<<< Updated upstream
-=======
     BackHandler(enabled = currentScreen != FriendsNavigation.MAIN) {
         when (currentScreen) {
             FriendsNavigation.CHAT -> {
@@ -150,8 +149,6 @@ fun FriendsScreen(
             FriendsNavigation.MAIN -> Unit
         }
     }
-
->>>>>>> Stashed changes
     var status by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
     // Handle initial chat for deep linking or returning from other screens
