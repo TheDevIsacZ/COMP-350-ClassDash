@@ -351,6 +351,7 @@ fun ClassSeekApp(
 ) {
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
+    val repo = ChatRepository(db)
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var firebaseUser by remember { mutableStateOf(auth.currentUser) }
@@ -999,7 +1000,9 @@ fun ClassSeekApp(
                                             }
                                         }
                                     }
-                                }
+                                },
+                                chatRepository = repo,
+                                myUid = firebaseUser?.uid ?: ""
                             )
                         }
                         AppDestinations.PROFILE -> {
