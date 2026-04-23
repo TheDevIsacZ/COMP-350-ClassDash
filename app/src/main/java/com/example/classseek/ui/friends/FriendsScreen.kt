@@ -963,6 +963,11 @@ fun NewMessageScreen(
 
     // Group creation state
     var isCreatingGroup by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = isCreatingGroup) {
+        isCreatingGroup = false
+    }
+
     var groupTitle by remember { mutableStateOf("") }
     val selectedMembers = remember { mutableStateListOf<UserSearchItem>() }
 

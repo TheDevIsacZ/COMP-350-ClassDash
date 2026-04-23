@@ -1,9 +1,9 @@
 package com.example.classseek.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -11,17 +11,16 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.classseek.models.ClassInfo
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.calendar.TimePickerDialog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -148,19 +147,71 @@ fun ScheduleEditScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        Text("Start Time", style = MaterialTheme.typography.labelMedium)
-                        TimeNumericInput(
-                            time = classInfo.startTime,
-                            onTimeChange = { classes[index] = classInfo.copy(startTime = it) }
-                        )
+                        var showStartTimePicker by remember { mutableStateOf(false) }
+                        var showEndTimePicker by remember { mutableStateOf(false) }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = classInfo.startTime,
+                                onValueChange = { },
+                                label = { Text("Start Time") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .pointerInput(Unit) {
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                if (event.changes.any { it.pressed }) {
+                                                    showStartTimePicker = true
+                                                }
+                                            }
+                                        }
+                                    },
+                                readOnly = true,
+                                enabled = true
+                            )
+                            OutlinedTextField(
+                                value = classInfo.endTime,
+                                onValueChange = { },
+                                label = { Text("End Time") },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .pointerInput(Unit) {
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                if (event.changes.any { it.pressed }) {
+                                                    showEndTimePicker = true
+                                                }
+                                            }
+                                        }
+                                    },
+                                readOnly = true,
+                                enabled = true
+                            )
+                        }
 
-                        Text("End Time", style = MaterialTheme.typography.labelMedium)
-                        TimeNumericInput(
-                            time = classInfo.endTime,
-                            onTimeChange = { classes[index] = classInfo.copy(endTime = it) }
-                        )
+                        if (showStartTimePicker) {
+                            TimePickerDialog(
+                                initialTime = if (classInfo.startTime.isEmpty()) "09:00 AM" else classInfo.startTime,
+                                onTimeSelected = {
+                                    classes[index] = classInfo.copy(startTime = it)
+                                    showStartTimePicker = false
+                                },
+                                onDismiss = { showStartTimePicker = false }
+                            )
+                        }
+
+                        if (showEndTimePicker) {
+                            TimePickerDialog(
+                                initialTime = if (classInfo.endTime.isEmpty()) "10:00 AM" else classInfo.endTime,
+                                onTimeSelected = {
+                                    classes[index] = classInfo.copy(endTime = it)
+                                    showEndTimePicker = false
+                                },
+                                onDismiss = { showEndTimePicker = false }
+                            )
+                        }
                     }
                 }
             }
@@ -169,69 +220,3 @@ fun ScheduleEditScreen(
     }
 }
 
-@Composable
-private fun TimeNumericInput(time: String, onTimeChange: (String) -> Unit) {
-    var numericText by remember { 
-        val h = time.substringBefore(":").filter { it.isDigit() }
-        val m = time.substringAfter(":").substringBefore(" ").filter { it.isDigit() }
-        mutableStateOf(if (h.isNotEmpty() || m.isNotEmpty()) "$h$m" else "") 
-    }
-    var isAm by remember { mutableStateOf(!time.contains("PM")) }
-
-    fun updateOutput() {
-        val hStr: String
-        val mStr: String
-        
-        when (numericText.length) {
-            1 -> {
-                hStr = numericText
-                mStr = "00"
-            }
-            2 -> {
-                hStr = numericText
-                mStr = "00"
-            }
-            3 -> {
-                hStr = numericText.substring(0, 1)
-                mStr = numericText.substring(1)
-            }
-            4 -> {
-                hStr = numericText.substring(0, 2)
-                mStr = numericText.substring(2)
-            }
-            else -> {
-                hStr = "09"
-                mStr = "00"
-            }
-        }
-        
-        onTimeChange("${hStr.padStart(1, '0')}:${mStr.padStart(2, '0')} ${if(isAm) "AM" else "PM"}")
-    }
-
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
-            value = numericText,
-            onValueChange = { input ->
-                if (input.all { it.isDigit() } && input.length <= 4) {
-                    numericText = input
-                    updateOutput()
-                }
-            },
-            label = { Text("Time") },
-            placeholder = { Text("00:00") },
-            modifier = Modifier.width(120.dp),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-        )
-        
-        Spacer(Modifier.width(16.dp))
-        
-        Button(
-            onClick = { isAm = !isAm; updateOutput() },
-            modifier = Modifier.width(70.dp),
-            shape = RoundedCornerShape(2.dp)
-        ) {
-            Text(if (isAm) "AM" else "PM")
-        }
-    }
-}
