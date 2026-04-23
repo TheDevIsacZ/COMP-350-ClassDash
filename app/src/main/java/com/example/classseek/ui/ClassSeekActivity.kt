@@ -1122,7 +1122,6 @@ fun ClassSeekApp(
                                 sharedLocationName = sharedLocationNameToView
                             )
                         }
-                        AppDestinations.SETTINGS -> { Greeting("Settings") }
                     }
                 }
             }
@@ -1135,7 +1134,6 @@ enum class AppDestinations(val label: String, val icon: ImageVector) {
     FRIENDS("Messages", Icons.Default.ChatBubbleOutline),
     CALENDAR("Calendar", Icons.Default.DateRange),
     MAP("Map", Icons.Default.Place),
-    SETTINGS("Settings", Icons.Default.Settings),
 }
 
 @Composable
