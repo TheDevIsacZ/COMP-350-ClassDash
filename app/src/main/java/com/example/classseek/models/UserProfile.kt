@@ -1,5 +1,14 @@
 package com.example.classseek.models
 
+data class ClassInfo(
+    val className: String = "",
+    val building: String = "",
+    val roomNumber: String = "",
+    val dayOfWeek: String = "",
+    val startTime: String = "",
+    val endTime: String = ""
+)
+
 data class UserProfile(
     val uid: String = "",
     val name: String = "",
@@ -12,7 +21,10 @@ data class UserProfile(
     val githubUrl: String = "",
     val joinDate: String = "",
     val followersCount: String = "0",
-    val followingCount: String = "0"
+    val followingCount: String = "0",
+    val bookmarkedEventIds: List<String> = emptyList(),
+    val semester: String = "",
+    val classes: List<ClassInfo> = emptyList()
 ) {
     val isProfileComplete: Boolean
         get() = name.isNotBlank() && major.isNotBlank()
