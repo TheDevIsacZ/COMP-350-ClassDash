@@ -341,9 +341,8 @@ fun TimePickerDialog(
         is24Hour = is24Hour
     )
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    BasicAlertDialog(
+        onDismissRequest = onDismiss
     ) {
         Surface(
             shape = MaterialTheme.shapes.extraLarge,

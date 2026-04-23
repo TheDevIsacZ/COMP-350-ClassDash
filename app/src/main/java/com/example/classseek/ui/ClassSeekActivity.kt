@@ -293,9 +293,21 @@ class ClassSeekActivity : ComponentActivity() {
         val cal = java.util.Calendar.getInstance()
         cal.timeInMillis = schedule.startDate
 
-        val timeParts = schedule.startTime.split(":")
-        cal.set(java.util.Calendar.HOUR_OF_DAY, timeParts.getOrNull(0)?.toInt() ?: 9)
-        cal.set(java.util.Calendar.MINUTE, timeParts.getOrNull(1)?.toInt() ?: 0)
+        try {
+            val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+            val date = sdf.parse(schedule.startTime)
+            if (date != null) {
+                val timeCal = java.util.Calendar.getInstance()
+                timeCal.time = date
+                cal.set(java.util.Calendar.HOUR_OF_DAY, timeCal.get(java.util.Calendar.HOUR_OF_DAY))
+                cal.set(java.util.Calendar.MINUTE, timeCal.get(java.util.Calendar.MINUTE))
+            }
+        } catch (e: Exception) {
+            Log.e("CALENDAR_DEBUG", "Failed to parse startTime: ${schedule.startTime}", e)
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+            cal.set(java.util.Calendar.MINUTE, 0)
+        }
+
         cal.set(java.util.Calendar.SECOND, 0)
         cal.set(java.util.Calendar.MILLISECOND, 0)
 
@@ -691,18 +703,16 @@ fun ClassSeekApp(
 
                 eventCal.set(java.util.Calendar.DAY_OF_WEEK, dayOfWeek)
 
-                val startTimeStr = classInfo.startTime
-                if (startTimeStr.isBlank() || !startTimeStr.contains(":")) return@mapNotNull null
-
-                val startParts = startTimeStr.substringBefore(" ").split(":")
-                val isStartPm = startTimeStr.contains("PM")
-                val startHour = if (startParts.isNotEmpty()) {
-                    var h = startParts[0].toIntOrNull() ?: 9
-                    if (isStartPm && h < 12) h += 12
-                    if (!isStartPm && h == 12) h = 0
-                    h
-                } else 9
-                val startMin = if (startParts.size > 1) startParts[1].toIntOrNull() ?: 0 else 0
+                val sdf = SimpleDateFormat("hh:mm a", Locale.US)
+                val startCal = java.util.Calendar.getInstance()
+                try {
+                    sdf.parse(classInfo.startTime)?.let { startCal.time = it }
+                } catch (e: Exception) {
+                    startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                    startCal.set(java.util.Calendar.MINUTE, 0)
+                }
+                val startHour = startCal.get(java.util.Calendar.HOUR_OF_DAY)
+                val startMin = startCal.get(java.util.Calendar.MINUTE)
 
                 eventCal.set(java.util.Calendar.HOUR_OF_DAY, startHour)
                 eventCal.set(java.util.Calendar.MINUTE, startMin)
@@ -713,23 +723,15 @@ fun ClassSeekApp(
                     eventCal.add(java.util.Calendar.WEEK_OF_YEAR, 1)
                 }
 
-                val endTimeStr = classInfo.endTime
-                val endHour: Int
-                val endMin: Int
-                if (endTimeStr.isNotBlank() && endTimeStr.contains(":")) {
-                    val endParts = endTimeStr.substringBefore(" ").split(":")
-                    val isEndPm = endTimeStr.contains("PM")
-                    endHour = if (endParts.isNotEmpty()) {
-                        var h = endParts[0].toIntOrNull() ?: (startHour + 1)
-                        if (isEndPm && h < 12) h += 12
-                        if (!isEndPm && h == 12) h = 0
-                        h
-                    } else startHour + 1
-                    endMin = if (endParts.size > 1) endParts[1].toIntOrNull() ?: startMin else startMin
-                } else {
-                    endHour = startHour + 1
-                    endMin = startMin
+                val endCal = java.util.Calendar.getInstance()
+                try {
+                    sdf.parse(classInfo.endTime)?.let { endCal.time = it }
+                } catch (e: Exception) {
+                    endCal.set(java.util.Calendar.HOUR_OF_DAY, startHour + 1)
+                    endCal.set(java.util.Calendar.MINUTE, startMin)
                 }
+                val endHour = endCal.get(java.util.Calendar.HOUR_OF_DAY)
+                val endMin = endCal.get(java.util.Calendar.MINUTE)
 
                 val endDateTimeCal = eventCal.clone() as java.util.Calendar
                 endDateTimeCal.set(java.util.Calendar.HOUR_OF_DAY, endHour)
