@@ -90,22 +90,27 @@ fun ProfileScreen(
                 .fillMaxSize()
                 .verticalScroll(scrollState)
         ) {
-            // Header with Gradient and Settings Icon
-            HeaderSection(
-                userProfile = userProfile,
-                isMyProfile = isMyProfile,
-                isFriend = isFriend,
-                friendRequestStatus = friendRequestStatus,
-                onEditProfile = onEditProfile,
-                onSignOut = onSignOut,
-                onDeleteAccount = onDeleteAccount,
-                onAddFriend = onAddFriend,
-                onAcceptFriend = onAcceptFriend,
-                onDeclineFriend = onDeclineFriend,
-                onCancelFriend = onCancelFriend,
-                onRemoveFriend = onRemoveFriend,
-                onBack = onBack
-            )
+            Box {
+                // Header with Gradient and Settings Icon
+                HeaderSection(
+                    userProfile = userProfile,
+                    isMyProfile = isMyProfile,
+                    isFriend = isFriend,
+                    friendRequestStatus = friendRequestStatus,
+                    onEditProfile = onEditProfile,
+                    onSignOut = onSignOut,
+                    onDeleteAccount = onDeleteAccount,
+                    onAddFriend = onAddFriend,
+                    onAcceptFriend = onAcceptFriend,
+                    onDeclineFriend = onDeclineFriend,
+                    onCancelFriend = onCancelFriend,
+                    onRemoveFriend = onRemoveFriend,
+                    onBack = onBack
+                )
+
+                // Profile Image (Overlapping the header and card)
+                ProfileImageSection(userProfile.profilePictureUrl)
+            }
 
             Spacer(modifier = Modifier.height(60.dp)) // Space for the overlapping profile image
 
@@ -130,9 +135,6 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
         }
-
-        // Profile Image (Overlapping the header and card)
-        ProfileImageSection(userProfile.profilePictureUrl)
 
         selectedFriend?.let { friend ->
             UserActionDialog(
