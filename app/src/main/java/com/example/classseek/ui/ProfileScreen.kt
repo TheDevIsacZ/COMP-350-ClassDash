@@ -1,6 +1,5 @@
 package com.example.classseek.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,8 +12,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
@@ -32,13 +31,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.example.classseek.R
 import com.example.classseek.models.Friend
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.friends.UserActionDialog
@@ -77,7 +74,8 @@ fun ProfileScreen(
     onDeclineFriend: (() -> Unit)? = null,
     onCancelFriend: (() -> Unit)? = null,
     onRemoveFriend: (() -> Unit)? = null,
-    onBack: (() -> Unit)? = null
+    onBack: (() -> Unit)? = null,
+    onEditSchedule: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
@@ -94,25 +92,27 @@ fun ProfileScreen(
         ) {
             // Header with Gradient and Settings Icon
             HeaderSection(
-                userProfile,
-                isMyProfile,
-                isFriend,
-                friendRequestStatus,
-                onEditProfile,
-                onSignOut,
-                onDeleteAccount,
-                onAddFriend,
-                onAcceptFriend,
-                onDeclineFriend,
-                onCancelFriend,
-                onRemoveFriend,
-                onBack
+                userProfile = userProfile,
+                isMyProfile = isMyProfile,
+                isFriend = isFriend,
+                friendRequestStatus = friendRequestStatus,
+                onEditProfile = onEditProfile,
+                onSignOut = onSignOut,
+                onDeleteAccount = onDeleteAccount,
+                onAddFriend = onAddFriend,
+                onAcceptFriend = onAcceptFriend,
+                onDeclineFriend = onDeclineFriend,
+                onCancelFriend = onCancelFriend,
+                onRemoveFriend = onRemoveFriend,
+                onBack = onBack
             )
 
             Spacer(modifier = Modifier.height(60.dp)) // Space for the overlapping profile image
 
             // Profile Info Card
             ProfileInfoCard(userProfile)
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             if (isMyProfile) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -124,6 +124,9 @@ fun ProfileScreen(
                     }
                 )
             }
+
+            Spacer(modifier = Modifier.height(24.dp))
+            ScheduleSection(userProfile, onEditSchedule)
 
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -159,7 +162,7 @@ fun HeaderSection(
     userProfile: UserProfile,
     isMyProfile: Boolean,
     isFriend: Boolean,
-    friendRequestStatus: String? = null,
+    friendRequestStatus: String?,
     onEditProfile: () -> Unit,
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit,
@@ -222,7 +225,7 @@ fun HeaderSection(
                 }
             }
         }
-        
+
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -259,12 +262,12 @@ fun HeaderSection(
                             showMenu = false
                             onSignOut()
                         },
-                        leadingIcon = { 
+                        leadingIcon = {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Logout,
                                 contentDescription = null,
                                 tint = Color.Red
-                            ) 
+                            )
                         }
                     )
                     DropdownMenuItem(
@@ -273,12 +276,12 @@ fun HeaderSection(
                             showMenu = false
                             showDeleteConfirmDialog = true
                         },
-                        leadingIcon = { 
+                        leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.DeleteForever,
                                 contentDescription = null,
                                 tint = Color.Red
-                            ) 
+                            )
                         }
                     )
                 }
@@ -725,6 +728,95 @@ fun FriendItem(friend: Friend) {
 }
 
 @Composable
+fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            IconButton(
+                onClick = onEditClick,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.05f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Edit Schedule",
+                    tint = ProfileTheme.MutedForeground
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Current Schedule",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = ProfileTheme.Primary
+                )
+
+                if (userProfile.semester.isNotEmpty()) {
+                    Text(
+                        text = userProfile.semester,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ProfileTheme.MutedForeground,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+
+                if (userProfile.classes.isEmpty()) {
+                    Text(
+                        text = "Empty",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = ProfileTheme.MutedForeground
+                    )
+                } else {
+                    userProfile.classes.forEach { classInfo ->
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = classInfo.className,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = ProfileTheme.Primary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        text = "${classInfo.building} ${classInfo.roomNumber}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = ProfileTheme.MutedForeground
+                                    )
+                                    Text(
+                                        text = "${classInfo.dayOfWeek} at ${classInfo.startTime}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = ProfileTheme.MutedForeground.copy(alpha = 0.8f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun InfoRow(icon: ImageVector, text: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -804,20 +896,9 @@ fun WelcomeCard(onSignOut: () -> Unit) {
                 onClick = onSignOut,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(12.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, ProfileTheme.Border)
-            ) {
-                Text("Sign Out", color = ProfileTheme.Primary, fontWeight = FontWeight.Medium)
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            Text(
-                text = "Version 2.0.1 (Social Redesign)",
-                style = MaterialTheme.typography.labelSmall,
-                color = ProfileTheme.MutedForeground.copy(alpha = 0.6f)
-            )
+                ) {
+                    Text("Sign Out")
+                }
         }
     }
 }

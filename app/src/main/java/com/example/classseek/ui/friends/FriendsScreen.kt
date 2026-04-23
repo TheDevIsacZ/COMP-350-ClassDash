@@ -30,6 +30,7 @@ import coil.compose.AsyncImage
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.ui.chat.ChatScreen
+import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldPath
@@ -115,7 +116,8 @@ fun FriendsScreen(
     initialChatId: String? = null,
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null,
-    onNavigateToProfile: ((String) -> Unit)? = null
+    onNavigateToProfile: ((String) -> Unit)? = null,
+    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
 ) {
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
     var activeChatId by remember { mutableStateOf<String?>(null) }
@@ -124,6 +126,7 @@ fun FriendsScreen(
     var pendingFriendToAdd by remember { mutableStateOf<UserSearchItem?>(null) }
     val chats = remember { mutableStateListOf<ChatListItem>() }
     val myUid = auth.currentUser?.uid ?: ""
+
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
 
@@ -319,6 +322,7 @@ fun FriendsScreen(
                             activeChatId = null
                             activeChatTitle = null
                         },
+                        onLocationClick = onLocationClick,
                         repo = repo,
                         auth = auth
                     )
@@ -1083,8 +1087,6 @@ fun NewMessageScreen(
                 ) {
                     Text("Create")
                 }
-            } else {
-                Spacer(modifier = Modifier.width(40.dp))
             }
         }
 
