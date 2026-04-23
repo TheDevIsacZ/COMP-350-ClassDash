@@ -7,6 +7,7 @@ import android.widget.CalendarView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,7 +27,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Button
@@ -38,13 +42,16 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.IconToggleButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,10 +62,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import com.example.classseek.data.ChatListItem
+import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -66,6 +74,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import com.google.api.client.util.DateTime
 import com.google.api.services.calendar.model.Event
+import com.google.api.services.calendar.model.EventDateTime
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -73,6 +82,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar as JavaCalendar
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,7 +92,9 @@ fun CalendarScreen(
     userProfile: UserProfile?,
     onSignInClick: (Intent) -> Unit,
     onAddEventClick: (Long) -> Unit,
-    onDeleteEventClick: (String) -> Unit
+    onDeleteEventClick: (String) -> Unit,
+    chatRepository: ChatRepository,
+    myUid: String
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -91,6 +103,8 @@ fun CalendarScreen(
     var showBottomSheet by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
     var showStarredOnly by remember { mutableStateOf(false) }
+    var showChatPicker by remember { mutableStateOf(false) }
+    var selectedEventForSharing by remember { mutableStateOf<Event?>(null) }
 
     var hasCalendarPermission by remember {
         mutableStateOf(
@@ -175,7 +189,6 @@ fun CalendarScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Fixed Header Section
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -279,7 +292,11 @@ fun CalendarScreen(
                                 event = event,
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
-                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
+                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onShareClick = {
+                                    selectedEventForSharing = event
+                                    showChatPicker = true
+                                }
                             )
                         }
                     }
@@ -306,7 +323,11 @@ fun CalendarScreen(
                                 event = event,
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
-                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
+                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onShareClick = {
+                                    selectedEventForSharing = event
+                                    showChatPicker = true
+                                }
                             )
                         }
                     }
@@ -369,8 +390,83 @@ fun CalendarScreen(
                                 event = event,
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
-                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } }
+                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onShareClick = {
+                                    selectedEventForSharing = event
+                                    showChatPicker = true
+                                }
                             )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showChatPicker && selectedEventForSharing != null && myUid.isNotBlank()) {
+        var chats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
+        LaunchedEffect(Unit) {
+            try {
+                chats = chatRepository.getMyChats(myUid)
+            } catch (e: Exception) {
+                // Optionally show error message
+            }
+        }
+
+        val pickerSheetState = rememberModalBottomSheetState()
+        ModalBottomSheet(
+            onDismissRequest = { showChatPicker = false },
+            sheetState = pickerSheetState
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Share event with...",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                if (chats.isEmpty()) {
+                    Text("No chats available", modifier = Modifier.padding(vertical = 16.dp))
+                } else {
+                    LazyColumn {
+                        items(chats) { chat ->
+                            ListItem(
+                                headlineContent = { Text(chat.title) },
+                                leadingContent = {
+                                    Icon(
+                                        if (chat.type == "group") Icons.Default.Group else Icons.Default.Person,
+                                        contentDescription = null
+                                    )
+                                },
+                                modifier = Modifier.clickable {
+                                    scope.launch {
+                                        try {
+                                            val event = selectedEventForSharing!!
+                                            val start = formatEventDateTime(event.start)
+                                            val end = formatEventDateTime(event.end)
+                                            chatRepository.sendEventMessage(
+                                                chatId = chat.id,
+                                                senderId = myUid,
+                                                eventTitle = event.summary ?: "Untitled Event",
+                                                eventStart = start,
+                                                eventEnd = end,
+                                                eventLocation = event.location ?: "",
+                                                eventId = event.id
+                                            )
+                                            showChatPicker = false
+                                            selectedEventForSharing = null
+                                        } catch (e: Exception) {
+                                            // Optionally show error message
+                                        }
+                                    }
+                                }
+                            )
+                            HorizontalDivider()
                         }
                     }
                 }
@@ -384,7 +480,8 @@ fun AgendaItem(
     event: Event,
     userProfile: UserProfile?,
     canDelete: Boolean = false,
-    onDeleteClick: () -> Unit = {}
+    onDeleteClick: () -> Unit = {},
+    onShareClick: () -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
@@ -442,6 +539,14 @@ fun AgendaItem(
                         )
                     }
 
+                    IconButton(onClick = onShareClick) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share event",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
                     if (canDelete) {
                         Box {
                             IconButton(onClick = { showMenu = true }) {
@@ -479,4 +584,15 @@ private fun formatTime(dateTime: DateTime?): String {
     val date = Date(dateTime.value)
     val sdf = SimpleDateFormat("h:mm a", Locale.getDefault())
     return sdf.format(date)
+}
+
+private fun formatEventDateTime(dateTime: EventDateTime?): String {
+    if (dateTime == null) return ""
+    return if (dateTime.dateTime != null) {
+        val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+        sdf.format(Date(dateTime.dateTime.value))
+    } else if (dateTime.date != null) {
+        val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+        sdf.format(Date(dateTime.date.value))
+    } else ""
 }

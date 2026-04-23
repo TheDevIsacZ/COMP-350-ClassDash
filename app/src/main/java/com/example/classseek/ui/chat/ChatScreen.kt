@@ -1338,7 +1338,7 @@ private fun MessageRow(
                                     Text(
                                         text = msg.locationName ?: "Shared Location",
                                         style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                                        fontWeight = FontWeight.Bold
                                     )
                                     Text(
                                         text = "Tap to view on map",
@@ -1347,6 +1347,20 @@ private fun MessageRow(
                                             onLocationClick(LatLng(msg.latitude, msg.longitude), msg.locationName ?: "Shared Location")
                                         }
                                     )
+                                }
+                            }
+                        } else if (msg.type == "event") {
+                            Column {
+                                Text(
+                                    text = "📅 ${msg.eventTitle ?: "Event"}",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (!msg.eventStart.isNullOrBlank()) {
+                                    Text("🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}", style = MaterialTheme.typography.bodySmall)
+                                }
+                                if (!msg.eventLocation.isNullOrBlank()) {
+                                    Text("📍 ${msg.eventLocation}", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         } else {
