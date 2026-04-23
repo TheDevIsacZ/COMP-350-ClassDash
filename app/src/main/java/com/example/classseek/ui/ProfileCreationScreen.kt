@@ -1,6 +1,7 @@
 package com.example.classseek.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -14,7 +15,9 @@ import androidx.compose.material.icons.Icons
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,7 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.classseek.models.ClassInfo
 import com.example.classseek.models.UserProfile
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.launch
@@ -74,15 +79,21 @@ fun ProfileCreationScreen(
 
     val context = LocalContext.current
 
+    if (onBack != null) {
+        BackHandler {
+            onBack()
+        }
+    }
+
     suspend fun uploadImage(uri: Uri, folder: String): String {
         try {
             val storageRef = FirebaseStorage.getInstance().reference
             val fileName = UUID.randomUUID().toString()
             val imageRef = storageRef.child("$folder/$fileName")
-            
+
             // Start the upload process to Firebase Storage
             imageRef.putFile(uri).await()
-            
+
             // Retrieve the public download URL after a successful upload
             return imageRef.downloadUrl.await().toString()
         } catch (e: Exception) {
@@ -235,6 +246,7 @@ fun ProfileCreationScreen(
                     modifier = Modifier.fillMaxWidth(),
                     minLines = 3
                 )
+                
                 Spacer(modifier = Modifier.height(24.dp))
 
                 if (isUploading) {
@@ -274,7 +286,10 @@ fun ProfileCreationScreen(
                                     bannerUrl = finalBannerUrl,
                                     joinDate = joinDate,
                                     followersCount = initialProfile?.followersCount ?: "0",
-                                    followingCount = initialProfile?.followingCount ?: "0"
+                                    followingCount = initialProfile?.followingCount ?: "0",
+                                    bookmarkedEventIds = initialProfile?.bookmarkedEventIds ?: emptyList(),
+                                    semester = initialProfile?.semester ?: "Fall",
+                                    classes = initialProfile?.classes ?: emptyList()
                                 )
                             )
                         } catch (e: Exception) {
@@ -304,3 +319,4 @@ fun ProfileCreationScreen(
         }
     }
 }
+

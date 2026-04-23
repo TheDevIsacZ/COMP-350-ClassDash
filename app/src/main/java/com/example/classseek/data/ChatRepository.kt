@@ -15,6 +15,8 @@ data class ChatListItem(
     val id: String = "",
     val title: String = "",
     val type: String = "dm",
+    val otherUserUid: String? = null,
+    val profilePictureUrl: String = "",
     val lastMessageText: String? = null,
     val lastMessageAt: Timestamp? = null,
     val hidden: Boolean = false
@@ -27,7 +29,15 @@ data class Message(
     val text: String? = null,
     val createdAt: Timestamp? = null,
     val replyToMessageId: String? = null,
-    val hasPendingWrites: Boolean = false
+    val hasPendingWrites: Boolean = false,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val locationName: String? = null,
+    val eventTitle: String? = null,
+    val eventStart: String? = null,
+    val eventEnd: String? = null,
+    val eventLocation: String? = null,
+    val eventId: String? = null
 )
 
 data class ReadReceiptState(
@@ -78,6 +88,72 @@ class ChatRepository(
             .digest(canonical.toByteArray())
             .joinToString("") { "%02x".format(it) }
         return digest
+    }
+
+    private data class UserChatProfile(
+        val displayName: String,
+        val profilePictureUrl: String
+    )
+
+    private suspend fun getUserChatProfile(uid: String): UserChatProfile {
+        val doc = users.document(uid).get().await()
+        val displayName = doc.getString("displayName")
+            ?.trim()
+            .orEmpty()
+            .ifBlank { doc.getString("name")?.trim().orEmpty() }
+            .ifBlank { doc.getString("email")?.substringBefore("@").orEmpty() }
+            .ifBlank { "User" }
+
+        return UserChatProfile(
+            displayName = displayName,
+            profilePictureUrl = doc.getString("profilePictureUrl")?.trim().orEmpty()
+        )
+    }
+
+    private suspend fun buildDmInboxDoc(
+        chatId: String,
+        otherUserUid: String,
+        lastMessageText: String?,
+        lastMessageAt: Any?
+    ): Map<String, Any?> {
+        val otherProfile = getUserChatProfile(otherUserUid)
+        return mapOf(
+            "chatId" to chatId,
+            "title" to otherProfile.displayName,
+            "type" to "dm",
+            "otherUserUid" to otherUserUid,
+            "profilePictureUrl" to otherProfile.profilePictureUrl,
+            "lastMessageText" to lastMessageText,
+            "lastMessageAt" to lastMessageAt,
+            "hidden" to false
+        )
+    }
+
+    private suspend fun syncDmInboxMetadata(
+        chatId: String,
+        uidA: String,
+        uidB: String,
+        lastMessageText: String? = null,
+        lastMessageAt: Any? = null
+    ) {
+        userInboxRef(uidA).document(chatId)
+            .set(buildDmInboxDoc(chatId, uidB, lastMessageText, lastMessageAt), SetOptions.merge())
+            .await()
+        userInboxRef(uidB).document(chatId)
+            .set(buildDmInboxDoc(chatId, uidA, lastMessageText, lastMessageAt), SetOptions.merge())
+            .await()
+    }
+
+    suspend fun refreshDmInboxMetadata(chatId: String) {
+        val chat = getChatInfo(chatId)
+        if (chat.type != "dm" || chat.memberIds.size != 2) return
+
+        val lastMessageText = chatRef(chatId).get().await().getString("lastMessageText")
+        val lastMessageAt = chatRef(chatId).get().await().getTimestamp("lastMessageAt")
+        val uidA = chat.memberIds[0]
+        val uidB = chat.memberIds[1]
+
+        syncDmInboxMetadata(chatId, uidA, uidB, lastMessageText, lastMessageAt)
     }
 
     suspend fun getChatInfo(chatId: String): ChatInfo {
@@ -145,6 +221,7 @@ class ChatRepository(
         val existingThread = dmThreads.document(dmKey).get().await()
         val existingChatId = existingThread.getString("chatId")
         if (!existingChatId.isNullOrBlank()) {
+            syncDmInboxMetadata(existingChatId, userA, userB)
             return existingChatId
         }
 
@@ -190,17 +267,11 @@ class ChatRepository(
             )
         )
 
-        val inboxDoc = mapOf(
-            "chatId" to chatId,
-            "title" to title.trim(),
-            "type" to "dm",
-            "lastMessageText" to null,
-            "lastMessageAt" to null,
-            "hidden" to false
-        )
+        val userAInboxDoc = buildDmInboxDoc(chatId, userB, null, null)
+        val userBInboxDoc = buildDmInboxDoc(chatId, userA, null, null)
 
-        batch.set(userInboxRef(userA).document(chatId), inboxDoc, SetOptions.merge())
-        batch.set(userInboxRef(userB).document(chatId), inboxDoc, SetOptions.merge())
+        batch.set(userInboxRef(userA).document(chatId), userAInboxDoc, SetOptions.merge())
+        batch.set(userInboxRef(userB).document(chatId), userBInboxDoc, SetOptions.merge())
 
         batch.set(
             dmThreads.document(dmKey),
@@ -384,8 +455,21 @@ class ChatRepository(
         )
 
         chat.memberIds.forEach { uid ->
-            batch.set(
-                userInboxRef(uid).document(chatId),
+            val inboxDoc = if (chat.type == "dm" && chat.memberIds.size == 2) {
+                val otherUid = chat.memberIds.firstOrNull { it != uid }
+                if (otherUid != null) {
+                    buildDmInboxDoc(chatId, otherUid, trimmed, now)
+                } else {
+                    mapOf(
+                        "chatId" to chatId,
+                        "title" to chat.title,
+                        "type" to chat.type,
+                        "lastMessageText" to trimmed,
+                        "lastMessageAt" to now,
+                        "hidden" to false
+                    )
+                }
+            } else {
                 mapOf(
                     "chatId" to chatId,
                     "title" to chat.title,
@@ -393,9 +477,10 @@ class ChatRepository(
                     "lastMessageText" to trimmed,
                     "lastMessageAt" to now,
                     "hidden" to false
-                ),
-                SetOptions.merge()
-            )
+                )
+            }
+
+            batch.set(userInboxRef(uid).document(chatId), inboxDoc, SetOptions.merge())
         }
 
         batch.commit().await()
@@ -419,6 +504,9 @@ class ChatRepository(
         val updatedMemberIds = (chat.memberIds + newMemberUid).distinct()
         val title = chat.title
         val now = FieldValue.serverTimestamp()
+        val newMemberName = getUserDisplayName(newMemberUid)
+        val systemText = "$newMemberName has been added"
+        val msgRef = chatMessagesRef(chatId).document()
 
         val batch = db.batch()
 
@@ -426,7 +514,10 @@ class ChatRepository(
             chatRef(chatId),
             mapOf(
                 "memberIds" to updatedMemberIds,
-                "memberCount" to updatedMemberIds.size
+                "memberCount" to updatedMemberIds.size,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to actingUid
             )
         )
 
@@ -442,26 +533,32 @@ class ChatRepository(
         )
 
         batch.set(
-            userInboxRef(newMemberUid).document(chatId),
+            msgRef,
             mapOf(
-                "chatId" to chatId,
-                "title" to title,
-                "type" to "group",
-                "lastMessageText" to null,
-                "lastMessageAt" to null,
-                "hidden" to false
-            ),
-            SetOptions.merge()
+                "senderId" to actingUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
         )
+
+        updatedMemberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to title,
+                    "type" to "group",
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
 
         batch.commit().await()
-
-        val newMemberName = getUserDisplayName(newMemberUid)
-        sendSystemMembershipMessage(
-            chatId = chatId,
-            senderId = actingUid,
-            text = "$newMemberName has been added"
-        )
     }
 
     suspend fun removeGroupMember(
@@ -488,26 +585,53 @@ class ChatRepository(
         if (updatedMemberIds.size < 2) throw Exception("Group must keep at least 2 members")
 
         val targetName = getUserDisplayName(targetUid)
+        val systemText = "$targetName has been removed"
+        val now = FieldValue.serverTimestamp()
+        val msgRef = chatMessagesRef(chatId).document()
+
         val batch = db.batch()
 
         batch.update(
             chatRef(chatId),
             mapOf(
                 "memberIds" to updatedMemberIds,
-                "memberCount" to updatedMemberIds.size
+                "memberCount" to updatedMemberIds.size,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to actingUid
+            )
+        )
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to actingUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
             )
         )
 
         batch.delete(chatMembersRef(chatId).document(targetUid))
         batch.delete(userInboxRef(targetUid).document(chatId))
 
-        batch.commit().await()
+        updatedMemberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to "group",
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
 
-        sendSystemMembershipMessage(
-            chatId = chatId,
-            senderId = actingUid,
-            text = "$targetName has been removed"
-        )
+        batch.commit().await()
     }
 
     suspend fun leaveGroupChat(chatId: String, myUid: String) {
@@ -522,18 +646,52 @@ class ChatRepository(
         val updatedMemberIds = chat.memberIds.filter { it != myUid }
         if (updatedMemberIds.size < 2) throw Exception("Group must keep at least 2 members")
 
+        val myName = getUserDisplayName(myUid)
+        val systemText = "$myName has left the group"
+        val now = FieldValue.serverTimestamp()
+        val msgRef = chatMessagesRef(chatId).document()
+
         val batch = db.batch()
 
         batch.update(
             chatRef(chatId),
             mapOf(
                 "memberIds" to updatedMemberIds,
-                "memberCount" to updatedMemberIds.size
+                "memberCount" to updatedMemberIds.size,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to myUid
+            )
+        )
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to myUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
             )
         )
 
         batch.delete(chatMembersRef(chatId).document(myUid))
         batch.delete(userInboxRef(myUid).document(chatId))
+
+        updatedMemberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to "group",
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
 
         batch.commit().await()
     }
@@ -642,6 +800,61 @@ class ChatRepository(
         return msgRef.id
     }
 
+    suspend fun sendLocationMessage(
+        chatId: String,
+        senderId: String,
+        latitude: Double,
+        longitude: Double,
+        locationName: String
+    ): String {
+        val msgRef = chatMessagesRef(chatId).document()
+        val batch = db.batch()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
+        val text = "Shared Location: $locationName"
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "location",
+                "text" to text,
+                "latitude" to latitude,
+                "longitude" to longitude,
+                "locationName" to locationName,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to text,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to text,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
+    }
+
     suspend fun updateMyLastRead(
         chatId: String,
         myUid: String,
@@ -722,41 +935,67 @@ class ChatRepository(
             }
     }
 
-    /**
-     * IMPORTANT:
-     * With the current Firestore rules, a client cannot fully and safely
-     * recursively delete:
-     * - messages
-     * - owner member doc
-     * - chat doc
-     * - inbox docs
-     *
-     * So a true permanent delete should be implemented in a Cloud Function
-     * or with expanded admin rules.
-     */
-    suspend fun deleteGroupChatPermanently(
+    suspend fun transferOwnership(
         chatId: String,
-        actingUid: String
+        actingUid: String,
+        newOwnerUid: String
     ) {
-        val role = getMyRole(chatId, actingUid)
-        if (role != "owner") {
-            throw Exception("Only owner can permanently delete the group")
+        val chat = getChatInfo(chatId)
+        val actingRole = getMyRole(chatId, actingUid)
+        if (actingRole != "owner") throw Exception("Only owner can transfer ownership")
+
+        val targetRef = chatMembersRef(chatId).document(newOwnerUid)
+        val targetDoc = targetRef.get().await()
+        if (!targetDoc.exists()) throw Exception("Target user is not a member of this chat")
+
+        val newOwnerName = getUserDisplayName(newOwnerUid)
+        val systemText = "Ownership transferred to $newOwnerName"
+        val now = FieldValue.serverTimestamp()
+        val msgRef = chatMessagesRef(chatId).document()
+
+        val batch = db.batch()
+
+        batch.update(chatMembersRef(chatId).document(actingUid), "role", "cohost")
+        batch.update(chatMembersRef(chatId).document(newOwnerUid), "role", "owner")
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "createdBy" to newOwnerUid,
+                "lastMessageAt" to now,
+                "lastMessageText" to systemText,
+                "lastMessageSenderId" to actingUid
+            )
+        )
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to actingUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
         }
 
-        throw Exception(
-            "Permanent delete is not supported from the client with current Firestore rules. Use a Cloud Function or expand delete rules."
-        )
+        batch.commit().await()
     }
 
-    private fun DocumentSnapshot.toChatListItem(): ChatListItem {
-        return ChatListItem(
-            id = getString("chatId") ?: id,
-            title = getString("title") ?: "Chat",
-            type = getString("type") ?: "dm",
-            lastMessageText = getString("lastMessageText"),
-            lastMessageAt = getTimestamp("lastMessageAt"),
-            hidden = getBoolean("hidden") ?: false
-        )
+    suspend fun deleteChatListItem(myUid: String, chatId: String) {
+        userInboxRef(myUid).document(chatId).delete().await()
     }
 
     private fun DocumentSnapshot.toMessage(): Message {
@@ -767,8 +1006,214 @@ class ChatRepository(
             text = getString("text"),
             createdAt = getTimestamp("createdAt"),
             replyToMessageId = getString("replyToMessageId"),
-            hasPendingWrites = metadata.hasPendingWrites()
+            hasPendingWrites = metadata.hasPendingWrites(),
+            latitude = getDouble("latitude"),
+            longitude = getDouble("longitude"),
+            locationName = getString("locationName"),
+            eventTitle = getString("eventTitle"),
+            eventStart = getString("eventStart"),
+            eventEnd = getString("eventEnd"),
+            eventLocation = getString("eventLocation"),
+            eventId = getString("eventId")
         )
+    }
+
+    private fun DocumentSnapshot.toChatListItem(): ChatListItem {
+        return ChatListItem(
+            id = getString("chatId") ?: id,
+            title = getString("title") ?: "Chat",
+            type = getString("type") ?: "dm",
+            otherUserUid = getString("otherUserUid"),
+            profilePictureUrl = getString("profilePictureUrl") ?: "",
+            lastMessageText = getString("lastMessageText"),
+            lastMessageAt = getTimestamp("lastMessageAt"),
+            hidden = getBoolean("hidden") ?: false
+        )
+    }
+
+    suspend fun sendFriendRequest(
+        myUid: String,
+        targetUid: String
+    ) {
+        if (myUid == targetUid) return
+
+        val myProfileDoc = users.document(myUid).get().await()
+        val targetProfileDoc = users.document(targetUid).get().await()
+
+        val myName = myProfileDoc.getString("displayName") ?: myProfileDoc.getString("name") ?: "User"
+        val myEmail = myProfileDoc.getString("email") ?: ""
+        val myPhoto = myProfileDoc.getString("profilePictureUrl") ?: ""
+
+        val targetName = targetProfileDoc.getString("displayName") ?: targetProfileDoc.getString("name") ?: "User"
+        val targetEmail = targetProfileDoc.getString("email") ?: ""
+        val targetPhoto = targetProfileDoc.getString("profilePictureUrl") ?: ""
+
+        val now = FieldValue.serverTimestamp()
+        val batch = db.batch()
+
+        batch.set(
+            users.document(targetUid).collection("friendRequests").document(myUid),
+            mapOf(
+                "uid" to myUid,
+                "fromUid" to myUid,
+                "toUid" to targetUid,
+                "displayName" to myName,
+                "email" to myEmail,
+                "profilePictureUrl" to myPhoto,
+                "status" to "pending",
+                "createdAt" to now
+            )
+        )
+
+        batch.set(
+            users.document(myUid).collection("sentFriendRequests").document(targetUid),
+            mapOf(
+                "uid" to targetUid,
+                "fromUid" to myUid,
+                "toUid" to targetUid,
+                "displayName" to targetName,
+                "email" to targetEmail,
+                "profilePictureUrl" to targetPhoto,
+                "status" to "pending",
+                "createdAt" to now
+            )
+        )
+
+        batch.commit().await()
+    }
+
+    suspend fun acceptFriendRequest(
+        myUid: String,
+        requesterUid: String
+    ) {
+        val myProfileDoc = users.document(myUid).get().await()
+        val requesterProfileDoc = users.document(requesterUid).get().await()
+
+        val myName = myProfileDoc.getString("displayName") ?: myProfileDoc.getString("name") ?: "User"
+        val myPhoto = myProfileDoc.getString("profilePictureUrl") ?: ""
+
+        val requesterName = requesterProfileDoc.getString("displayName") ?: requesterProfileDoc.getString("name") ?: "User"
+        val requesterPhoto = requesterProfileDoc.getString("profilePictureUrl") ?: ""
+
+        val now = FieldValue.serverTimestamp()
+        val batch = db.batch()
+
+        batch.set(
+            users.document(myUid).collection("friends").document(requesterUid),
+            mapOf(
+                "uid" to requesterUid,
+                "name" to requesterName,
+                "profilePictureUrl" to requesterPhoto,
+                "status" to "accepted",
+                "addedAt" to now
+            )
+        )
+
+        batch.set(
+            users.document(requesterUid).collection("friends").document(myUid),
+            mapOf(
+                "uid" to myUid,
+                "name" to myName,
+                "profilePictureUrl" to myPhoto,
+                "status" to "accepted",
+                "addedAt" to now
+            )
+        )
+
+        batch.delete(users.document(myUid).collection("friendRequests").document(requesterUid))
+        batch.delete(users.document(requesterUid).collection("sentFriendRequests").document(myUid))
+
+        batch.commit().await()
+    }
+
+    suspend fun declineFriendRequest(
+        myUid: String,
+        requesterUid: String
+    ) {
+        val batch = db.batch()
+        batch.delete(users.document(myUid).collection("friendRequests").document(requesterUid))
+        batch.delete(users.document(requesterUid).collection("sentFriendRequests").document(myUid))
+        batch.commit().await()
+    }
+
+    suspend fun removeFriend(
+        myUid: String,
+        friendUid: String
+    ) {
+        val batch = db.batch()
+        batch.delete(users.document(myUid).collection("friends").document(friendUid))
+        batch.delete(users.document(friendUid).collection("friends").document(myUid))
+        batch.commit().await()
+    }
+
+    suspend fun cancelFriendRequest(
+        myUid: String,
+        targetUid: String
+    ) {
+        val batch = db.batch()
+        batch.delete(users.document(myUid).collection("sentFriendRequests").document(targetUid))
+        batch.delete(users.document(targetUid).collection("friendRequests").document(myUid))
+        batch.commit().await()
+    }
+
+    suspend fun sendEventMessage(
+        chatId: String,
+        senderId: String,
+        eventTitle: String,
+        eventStart: String,
+        eventEnd: String,
+        eventLocation: String,
+        eventId: String? = null
+    ): String {
+        val msgRef = chatMessagesRef(chatId).document()
+        val batch = db.batch()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
+
+        val messageText = "📅 Shared an event: $eventTitle"
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "event",
+                "text" to messageText,
+                "eventTitle" to eventTitle,
+                "eventStart" to eventStart,
+                "eventEnd" to eventEnd,
+                "eventLocation" to eventLocation,
+                "eventId" to eventId,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to messageText,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to messageText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
     }
 
     suspend fun findExistingDmChatId(uidA: String, uidB: String): String? {
