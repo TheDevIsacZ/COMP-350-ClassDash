@@ -12,3 +12,4 @@ app/google-services.json
 team-release-key.jks
 firebase.json
 .firebaserc
+/functions/
