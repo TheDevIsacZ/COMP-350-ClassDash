@@ -112,7 +112,7 @@ fun ProfileScreen(
                 ProfileImageSection(userProfile.profilePictureUrl)
             }
 
-            Spacer(modifier = Modifier.height(60.dp)) // Space for the overlapping profile image
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Profile Info Card
             ProfileInfoCard(userProfile)
