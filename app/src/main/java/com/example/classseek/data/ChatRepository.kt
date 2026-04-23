@@ -510,6 +510,7 @@ class ChatRepository(
 
         val batch = db.batch()
 
+        // 1. Update chat doc (member list + metadata)
         batch.update(
             chatRef(chatId),
             mapOf(
@@ -521,6 +522,7 @@ class ChatRepository(
             )
         )
 
+        // 2. Create the member doc
         batch.set(
             chatMembersRef(chatId).document(newMemberUid),
             mapOf(
@@ -532,6 +534,7 @@ class ChatRepository(
             )
         )
 
+        // 3. Create the system message
         batch.set(
             msgRef,
             mapOf(
@@ -543,6 +546,7 @@ class ChatRepository(
             )
         )
 
+        // 4. Update inboxes for ALL members (including the new one)
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
@@ -591,6 +595,7 @@ class ChatRepository(
 
         val batch = db.batch()
 
+        // 1. Update chat doc
         batch.update(
             chatRef(chatId),
             mapOf(
@@ -602,6 +607,7 @@ class ChatRepository(
             )
         )
 
+        // 2. Create system message
         batch.set(
             msgRef,
             mapOf(
@@ -613,9 +619,11 @@ class ChatRepository(
             )
         )
 
+        // 3. Delete target's membership and inbox
         batch.delete(chatMembersRef(chatId).document(targetUid))
         batch.delete(userInboxRef(targetUid).document(chatId))
 
+        // 4. Update inboxes for remaining members
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
@@ -653,6 +661,7 @@ class ChatRepository(
 
         val batch = db.batch()
 
+        // 1. Update chat doc
         batch.update(
             chatRef(chatId),
             mapOf(
@@ -675,6 +684,7 @@ class ChatRepository(
             )
         )
 
+        // 3. Delete my membership and inbox
         batch.delete(chatMembersRef(chatId).document(myUid))
         batch.delete(userInboxRef(myUid).document(chatId))
 
@@ -695,6 +705,7 @@ class ChatRepository(
 
         batch.commit().await()
     }
+
 
     suspend fun updateGroupMemberRole(
         chatId: String,
@@ -935,6 +946,18 @@ class ChatRepository(
             }
     }
 
+    /**
+     * IMPORTANT:
+     * With the current Firestore rules, a client cannot fully and safely
+     * recursively delete:
+     * - messages
+     * - owner member doc
+     * - chat doc
+     * - inbox docs
+     *
+     * So a true permanent delete should be implemented in a Cloud Function
+     * or with expanded admin rules.
+     */
     suspend fun transferOwnership(
         chatId: String,
         actingUid: String,
@@ -1016,6 +1039,41 @@ class ChatRepository(
             eventLocation = getString("eventLocation"),
             eventId = getString("eventId")
         )
+
+        // 4. Create system message
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to actingUid,
+                "type" to "system",
+                "text" to systemText,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        // 5. Update inboxes for ALL members
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to systemText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+    }
+
+
+    suspend fun deleteChatListItem(myUid: String, chatId: String) {
+        userInboxRef(myUid).document(chatId).delete().await()
     }
 
     private fun DocumentSnapshot.toChatListItem(): ChatListItem {
