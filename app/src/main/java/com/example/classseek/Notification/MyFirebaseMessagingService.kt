@@ -10,16 +10,12 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.classseek.R
-import com.example.classseek.Notification.FcmManager
 import com.example.classseek.ui.ClassSeekActivity
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -31,8 +27,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         const val EXTRA_CHAT_ID = "chat_id"
         const val EXTRA_CHAT_TITLE = "chat_title"
     }
-
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         Log.d(TAG, "From: ${remoteMessage.from}")
@@ -66,24 +60,34 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         Log.d(TAG, "Refreshed token: $token")
-        val user = FirebaseAuth.getInstance().currentUser
-        if (user != null) {
-            serviceScope.launch {
-                try {
-                    FcmManager.saveTokenToFirestore(user.uid, token)
-                    Log.d(TAG, "Token saved successfully via FcmManager")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to save token via FcmManager", e)
-                }
-            }
-        } else {
-            Log.d(TAG, "No signed-in user, token not saved yet")
-        }
+        sendRegistrationToServer(token)
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        serviceScope.coroutineContext.cancel()
+    private fun sendRegistrationToServer(token: String) {
+        val user = FirebaseAuth.getInstance().currentUser ?: run {
+            Log.d(TAG, "No signed-in user, skipping token save")
+            return
+        }
+
+        val db = FirebaseFirestore.getInstance()
+
+        val deviceDoc = mapOf(
+            "token" to token,
+            "platform" to "android",
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+
+        db.collection("users")
+            .document(user.uid)
+            .collection("devices")
+            .document(token)
+            .set(deviceDoc)
+            .addOnSuccessListener {
+                Log.d(TAG, "FCM token saved successfully")
+            }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Failed to save FCM token", e)
+            }
     }
 
     private fun sendChatNotification(

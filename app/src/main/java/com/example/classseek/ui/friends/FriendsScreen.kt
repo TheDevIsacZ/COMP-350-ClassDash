@@ -149,6 +149,7 @@ fun FriendsScreen(
             FriendsNavigation.MAIN -> Unit
         }
     }
+
     var status by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
     // Handle initial chat for deep linking or returning from other screens
@@ -962,6 +963,11 @@ fun NewMessageScreen(
 
     // Group creation state
     var isCreatingGroup by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = isCreatingGroup) {
+        isCreatingGroup = false
+    }
+
     var groupTitle by remember { mutableStateOf("") }
     val selectedMembers = remember { mutableStateListOf<UserSearchItem>() }
 

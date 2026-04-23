@@ -11,6 +11,7 @@ import android.hardware.SensorManager
 import android.location.Location
 import android.os.Looper
 import android.util.Log
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -102,6 +103,12 @@ fun MapScreen(
 
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(34.16206611807, -119.0434737072), 17f)
+    }
+
+    if (isListVisible) {
+        BackHandler {
+            isListVisible = false
+        }
     }
 
     val bounds = remember {

@@ -132,8 +132,10 @@ class ClassSeekActivity : ComponentActivity() {
     }
 
     private fun updateNotificationRouteFromIntent(intent: Intent?) {
-        launchChatIdState.value = intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_ID)
-        launchChatTitleState.value = intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_TITLE)
+        launchChatIdState.value =
+            intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_ID)
+        launchChatTitleState.value =
+            intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_TITLE)
     }
 
     suspend fun getCalendarEvents(account: GoogleSignInAccount): List<Event>? {
@@ -152,16 +154,27 @@ class ClassSeekActivity : ComponentActivity() {
                     credential
                 ).setApplicationName("ClassSeek").build()
 
+                // Fetch from the start of today to ensure all events for the day are shown
+                val todayStartCal = java.util.Calendar.getInstance().apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }
+                val timeMin = DateTime(todayStartCal.time)
+
                 val eventsResult = service.events().list("primary")
                     .setOrderBy("startTime")
                     .setSingleEvents(true)
-                    .setMaxResults(50)
+                    .setTimeMin(timeMin)
+                    .setMaxResults(100)
                     .execute()
 
                 val schoolEvents = try {
                     service.events().list(schoolCalendarID)
                         .setOrderBy("startTime")
                         .setSingleEvents(true)
+                        .setTimeMin(timeMin)
                         .setMaxResults(100)
                         .execute()
                         .items ?: emptyList()
@@ -280,9 +293,21 @@ class ClassSeekActivity : ComponentActivity() {
         val cal = java.util.Calendar.getInstance()
         cal.timeInMillis = schedule.startDate
 
-        val timeParts = schedule.startTime.split(":")
-        cal.set(java.util.Calendar.HOUR_OF_DAY, timeParts.getOrNull(0)?.toInt() ?: 9)
-        cal.set(java.util.Calendar.MINUTE, timeParts.getOrNull(1)?.toInt() ?: 0)
+        try {
+            val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+            val date = sdf.parse(schedule.startTime)
+            if (date != null) {
+                val timeCal = java.util.Calendar.getInstance()
+                timeCal.time = date
+                cal.set(java.util.Calendar.HOUR_OF_DAY, timeCal.get(java.util.Calendar.HOUR_OF_DAY))
+                cal.set(java.util.Calendar.MINUTE, timeCal.get(java.util.Calendar.MINUTE))
+            }
+        } catch (e: Exception) {
+            Log.e("CALENDAR_DEBUG", "Failed to parse startTime: ${schedule.startTime}", e)
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+            cal.set(java.util.Calendar.MINUTE, 0)
+        }
+
         cal.set(java.util.Calendar.SECOND, 0)
         cal.set(java.util.Calendar.MILLISECOND, 0)
 
@@ -297,7 +322,7 @@ class ClassSeekActivity : ComponentActivity() {
 
     private fun getDurationMs(start: String, end: String): Long {
         return try {
-            val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+            val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
             val startTime = sdf.parse(start)
             val endTime = sdf.parse(end)
             (endTime?.time ?: 0) - (startTime?.time ?: 0)
@@ -326,7 +351,6 @@ fun ClassSeekApp(
 ) {
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
-    val repo = ChatRepository(db)
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var firebaseUser by remember { mutableStateOf(auth.currentUser) }
@@ -679,18 +703,16 @@ fun ClassSeekApp(
 
                 eventCal.set(java.util.Calendar.DAY_OF_WEEK, dayOfWeek)
 
-                val startTimeStr = classInfo.startTime
-                if (startTimeStr.isBlank() || !startTimeStr.contains(":")) return@mapNotNull null
-
-                val startParts = startTimeStr.substringBefore(" ").split(":")
-                val isStartPm = startTimeStr.contains("PM")
-                val startHour = if (startParts.isNotEmpty()) {
-                    var h = startParts[0].toIntOrNull() ?: 9
-                    if (isStartPm && h < 12) h += 12
-                    if (!isStartPm && h == 12) h = 0
-                    h
-                } else 9
-                val startMin = if (startParts.size > 1) startParts[1].toIntOrNull() ?: 0 else 0
+                val sdf = SimpleDateFormat("hh:mm a", Locale.US)
+                val startCal = java.util.Calendar.getInstance()
+                try {
+                    sdf.parse(classInfo.startTime)?.let { startCal.time = it }
+                } catch (e: Exception) {
+                    startCal.set(java.util.Calendar.HOUR_OF_DAY, 9)
+                    startCal.set(java.util.Calendar.MINUTE, 0)
+                }
+                val startHour = startCal.get(java.util.Calendar.HOUR_OF_DAY)
+                val startMin = startCal.get(java.util.Calendar.MINUTE)
 
                 eventCal.set(java.util.Calendar.HOUR_OF_DAY, startHour)
                 eventCal.set(java.util.Calendar.MINUTE, startMin)
@@ -701,23 +723,15 @@ fun ClassSeekApp(
                     eventCal.add(java.util.Calendar.WEEK_OF_YEAR, 1)
                 }
 
-                val endTimeStr = classInfo.endTime
-                val endHour: Int
-                val endMin: Int
-                if (endTimeStr.isNotBlank() && endTimeStr.contains(":")) {
-                    val endParts = endTimeStr.substringBefore(" ").split(":")
-                    val isEndPm = endTimeStr.contains("PM")
-                    endHour = if (endParts.isNotEmpty()) {
-                        var h = endParts[0].toIntOrNull() ?: (startHour + 1)
-                        if (isEndPm && h < 12) h += 12
-                        if (!isEndPm && h == 12) h = 0
-                        h
-                    } else startHour + 1
-                    endMin = if (endParts.size > 1) endParts[1].toIntOrNull() ?: startMin else startMin
-                } else {
-                    endHour = startHour + 1
-                    endMin = startMin
+                val endCal = java.util.Calendar.getInstance()
+                try {
+                    sdf.parse(classInfo.endTime)?.let { endCal.time = it }
+                } catch (e: Exception) {
+                    endCal.set(java.util.Calendar.HOUR_OF_DAY, startHour + 1)
+                    endCal.set(java.util.Calendar.MINUTE, startMin)
                 }
+                val endHour = endCal.get(java.util.Calendar.HOUR_OF_DAY)
+                val endMin = endCal.get(java.util.Calendar.MINUTE)
 
                 val endDateTimeCal = eventCal.clone() as java.util.Calendar
                 endDateTimeCal.set(java.util.Calendar.HOUR_OF_DAY, endHour)
@@ -985,9 +999,7 @@ fun ClassSeekApp(
                                             }
                                         }
                                     }
-                                },
-                                chatRepository = repo,
-                                myUid = firebaseUser?.uid ?: ""
+                                }
                             )
                         }
                         AppDestinations.PROFILE -> {

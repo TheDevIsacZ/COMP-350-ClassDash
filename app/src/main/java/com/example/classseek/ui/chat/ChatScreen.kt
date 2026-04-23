@@ -1349,21 +1349,6 @@ private fun MessageRow(
                                     )
                                 }
                             }
-                        } else if (msg.type == "event") {
-                            Column {
-                                Text(
-                                    text = "📅 ${msg.eventTitle ?: "Event"}",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (!msg.eventStart.isNullOrBlank()) {
-                                    Text("🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}", style = MaterialTheme.typography.bodySmall)
-                                }
-                                if (!msg.eventLocation.isNullOrBlank()) {
-                                    Text("📍 ${msg.eventLocation}", style = MaterialTheme.typography.bodySmall)
-                                }
-                                // Optionally add a button to add to calendar (requires Google Sign-In)
-                            }
                         } else {
                             Text(msg.text ?: "[${msg.type}]")
                         }
