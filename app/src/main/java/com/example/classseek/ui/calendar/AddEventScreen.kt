@@ -18,6 +18,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import com.example.classseek.models.ClassSchedule
 import java.util.*
 import java.text.SimpleDateFormat
@@ -31,8 +33,8 @@ fun AddEventScreen(
 ) {
     var eventName by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
-    var startTime by remember { mutableStateOf("09:00") }
-    var endTime by remember { mutableStateOf("10:00") }
+    var startTime by remember { mutableStateOf("09:00 AM") }
+    var endTime by remember { mutableStateOf("10:00 AM") }
     var selectedDays by remember { mutableStateOf(setOf<Int>()) }
 
     BackHandler {
@@ -44,6 +46,9 @@ fun AddEventScreen(
 
     var showStartDatePicker by remember { mutableStateOf(false) }
     var showEndDatePicker by remember { mutableStateOf(false) }
+
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
 
     val days = listOf("M", "T", "W", "T", "F", "S", "S")
     val dayValues = listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY, Calendar.SUNDAY)
@@ -127,15 +132,41 @@ fun AddEventScreen(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = startTime,
-                    onValueChange = { startTime = it },
+                    onValueChange = { },
                     label = { Text("Start Time") },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.any { it.pressed }) {
+                                        showStartTimePicker = true
+                                    }
+                                }
+                            }
+                        },
+                    readOnly = true,
+                    enabled = true
                 )
                 OutlinedTextField(
                     value = endTime,
-                    onValueChange = { endTime = it },
+                    onValueChange = { },
                     label = { Text("End Time") },
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier
+                        .weight(1f)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.any { it.pressed }) {
+                                        showEndTimePicker = true
+                                    }
+                                }
+                            }
+                        },
+                    readOnly = true,
+                    enabled = true
                 )
             }
 
@@ -220,7 +251,19 @@ fun AddEventScreen(
                 TextButton(onClick = { showStartDatePicker = false }) { Text("Cancel") }
             }
         ) {
-            DatePicker(state = datePickerState)
+            val colors = DatePickerDefaults.colors(
+                dayContentColor = Color.Black,
+                weekdayContentColor = Color.Black,
+                todayContentColor = Color(0xFF4CAF50), // Standard Green
+                todayDateBorderColor = Color(0xFF4CAF50)
+            )
+            DatePicker(
+                state = datePickerState,
+                colors = colors,
+                showModeToggle = false,
+                title = null,
+                headline = null
+            )
         }
     }
 
@@ -238,7 +281,112 @@ fun AddEventScreen(
                 TextButton(onClick = { showEndDatePicker = false }) { Text("Cancel") }
             }
         ) {
-            DatePicker(state = datePickerState)
+            val colors = DatePickerDefaults.colors(
+                dayContentColor = Color.Black,
+                weekdayContentColor = Color.Black,
+                todayContentColor = Color(0xFF4CAF50),
+                todayDateBorderColor = Color(0xFF4CAF50)
+            )
+            DatePicker(
+                state = datePickerState,
+                colors = colors,
+                showModeToggle = false,
+                title = null,
+                headline = null
+            )
+        }
+    }
+
+    if (showStartTimePicker) {
+        TimePickerDialog(
+            initialTime = startTime,
+            onTimeSelected = {
+                startTime = it
+                showStartTimePicker = false
+            },
+            onDismiss = { showStartTimePicker = false }
+        )
+    }
+
+    if (showEndTimePicker) {
+        TimePickerDialog(
+            initialTime = endTime,
+            onTimeSelected = {
+                endTime = it
+                showEndTimePicker = false
+            },
+            onDismiss = { showEndTimePicker = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimePickerDialog(
+    initialTime: String,
+    onTimeSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+    val date = try { sdf.parse(initialTime) } catch (e: Exception) { null }
+    val cal = Calendar.getInstance().apply {
+        if (date != null) time = date
+    }
+
+    val is24Hour = false
+    
+    val timePickerState = rememberTimePickerState(
+        initialHour = cal.get(Calendar.HOUR_OF_DAY),
+        initialMinute = cal.get(Calendar.MINUTE),
+        is24Hour = is24Hour
+    )
+
+    BasicAlertDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            tonalElevation = 6.dp,
+            modifier = Modifier
+                .width(IntrinsicSize.Min)
+                .height(IntrinsicSize.Min)
+                .background(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 20.dp),
+                    text = "Select time",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TimePicker(state = timePickerState)
+                Row(
+                    modifier = Modifier
+                        .padding(top = 24.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel")
+                    }
+                    TextButton(
+                        onClick = {
+                            val resultCal = Calendar.getInstance().apply {
+                                set(Calendar.HOUR_OF_DAY, timePickerState.hour)
+                                set(Calendar.MINUTE, timePickerState.minute)
+                            }
+                            onTimeSelected(sdf.format(resultCal.time))
+                        }
+                    ) {
+                        Text("OK")
+                    }
+                }
+            }
         }
     }
 }
