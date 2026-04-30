@@ -366,14 +366,6 @@ fun SettingsHeaderSection(userProfile: UserProfile) {
                 )
             )
         }
-
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineSmall,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
-        )
     }
 }
 
