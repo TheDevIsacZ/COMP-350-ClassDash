@@ -1,34 +1,53 @@
+
 package com.example.classseek.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.*
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -41,16 +60,13 @@ import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.friends.UserActionDialog
 import com.example.classseek.ui.friends.UserSearchItem
 
-// Define colors based on the provided theme.css (Light mode mostly)
 object ProfileTheme {
     val Primary = Color(0xFF030213)
-    val Background = Color(0xFFF3F4F6) // Slightly gray background for the overall screen
+    val Background = Color(0xFFF3F4F6)
     val CardBackground = Color.White
     val MutedForeground = Color(0xFF717182)
     val Accent = Color(0xFFE9EBEF)
     val Border = Color(0x1A000000)
-    
-    // Gradient colors for the header
     val GradientStart = Color(0xFFFF9E00)
     val GradientMid = Color(0xFFFF5400)
     val GradientEnd = Color(0xFFD00000)
@@ -60,46 +76,39 @@ object ProfileTheme {
 fun ProfileScreen(
     userProfile: UserProfile,
     isMyProfile: Boolean,
-    friends: List<UserSearchItem> = emptyList(),
+    favoriteFriends: List<UserSearchItem> = emptyList(),
     isFriend: Boolean = false,
-    friendRequestStatus: String? = null, // null, "pending", "sent"
+    friendRequestStatus: String? = null,
     onSignOut: () -> Unit,
     onEditProfile: () -> Unit,
     onDeleteAccount: () -> Unit,
     onFriendMessage: ((UserSearchItem) -> Unit)? = null,
     onViewFriendProfile: ((String) -> Unit)? = null,
     onRemoveFriendFromList: ((String) -> Unit)? = null,
+    onTogglePinFriend: ((String) -> Unit)? = null,
     onAddFriend: (() -> Unit)? = null,
     onAcceptFriend: (() -> Unit)? = null,
     onDeclineFriend: (() -> Unit)? = null,
     onCancelFriend: (() -> Unit)? = null,
     onRemoveFriend: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
-    onEditSchedule: () -> Unit
+    onEditSchedule: () -> Unit,
+    onViewAllFriends: (() -> Unit)? = null
 ) {
-    val scrollState = rememberScrollState()
     var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
+    val pinnedFriends = remember(favoriteFriends) { favoriteFriends.take(3) }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(ProfileTheme.Background)
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().background(ProfileTheme.Background),
+        contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-        ) {
+        item {
             Box {
-                // Header with Gradient and Settings Icon
                 HeaderSection(
                     userProfile = userProfile,
                     isMyProfile = isMyProfile,
                     isFriend = isFriend,
                     friendRequestStatus = friendRequestStatus,
-                    onEditProfile = onEditProfile,
-                    onSignOut = onSignOut,
-                    onDeleteAccount = onDeleteAccount,
                     onAddFriend = onAddFriend,
                     onAcceptFriend = onAcceptFriend,
                     onDeclineFriend = onDeclineFriend,
@@ -107,287 +116,86 @@ fun ProfileScreen(
                     onRemoveFriend = onRemoveFriend,
                     onBack = onBack
                 )
-
-                // Profile Image (Overlapping the header and card)
                 ProfileImageSection(userProfile.profilePictureUrl)
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Profile Info Card
-            ProfileInfoCard(userProfile)
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            if (isMyProfile) {
-                Spacer(modifier = Modifier.height(16.dp))
-
-                FriendsListCard(
-                    friends = friends,
-                    onFriendClick = { friend ->
-                        selectedFriend = friend
-                    }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-            ScheduleSection(userProfile, onEditSchedule)
-
-            Spacer(modifier = Modifier.height(32.dp))
         }
 
-        selectedFriend?.let { friend ->
-            UserActionDialog(
-                user = friend,
-                isFriend = true,
-                onDismiss = { selectedFriend = null },
-                onMessage = {
-                    selectedFriend = null
-                    onFriendMessage?.invoke(friend)
-                },
-                onAddFriend = {},
-                onRemoveFriend = {
-                    selectedFriend = null
-                    onRemoveFriendFromList?.invoke(friend.uid)
-                },
-                onViewProfile = {
-                    selectedFriend = null
-                    onViewFriendProfile?.invoke(friend.uid)
-                }
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        item {
+            ScheduleSection(
+                userProfile = userProfile,
+                onEditClick = onEditSchedule,
+                showEditButton = isMyProfile
             )
         }
+
+        if (isMyProfile) {
+            item { Spacer(modifier = Modifier.height(16.dp)) }
+            item {
+                FavoriteFriendsCard(
+                    friends = pinnedFriends,
+                    onFriendClick = { selectedFriend = it },
+                    onViewAllClick = { onViewAllFriends?.invoke() }
+                )
+            }
+        }
+    }
+
+    selectedFriend?.let { friend ->
+        UserActionDialog(
+            user = friend,
+            isFriend = true,
+            isPinned = true,
+            onDismiss = { selectedFriend = null },
+            onTogglePin = {
+                selectedFriend = null
+                onTogglePinFriend?.invoke(friend.uid)
+            },
+            onMessage = {
+                selectedFriend = null
+                onFriendMessage?.invoke(friend)
+            },
+            onAddFriend = {},
+            onRemoveFriend = {
+                selectedFriend = null
+                onRemoveFriendFromList?.invoke(friend.uid)
+            },
+            onViewProfile = {
+                selectedFriend = null
+                onViewFriendProfile?.invoke(friend.uid)
+            }
+        )
     }
 }
 
 @Composable
-fun HeaderSection(
+fun SettingsProfileScreen(
     userProfile: UserProfile,
-    isMyProfile: Boolean,
-    isFriend: Boolean,
-    friendRequestStatus: String?,
     onEditProfile: () -> Unit,
+    onEditSchedule: () -> Unit,
     onSignOut: () -> Unit,
-    onDeleteAccount: () -> Unit,
-    onAddFriend: (() -> Unit)? = null,
-    onAcceptFriend: (() -> Unit)? = null,
-    onDeclineFriend: (() -> Unit)? = null,
-    onCancelFriend: (() -> Unit)? = null,
-    onRemoveFriend: (() -> Unit)? = null,
-    onBack: (() -> Unit)? = null
+    onDeleteAccount: () -> Unit
 ) {
-    var showMenu by remember { mutableStateOf(false) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
-    var showRemoveFriendDialog by remember { mutableStateOf(false) }
     var emailConfirmation by remember { mutableStateOf("") }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(180.dp)
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().background(ProfileTheme.Background),
+        contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        if (userProfile.bannerUrl.isNotEmpty()) {
-            AsyncImage(
-                model = userProfile.bannerUrl,
-                contentDescription = "Banner Image",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                ProfileTheme.GradientStart,
-                                ProfileTheme.GradientMid,
-                                ProfileTheme.GradientEnd
-                            )
-                        )
-                    )
-            )
-        }
-        
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-        ) {
-            if (onBack != null) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.2f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
-                    )
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(16.dp)
-        ) {
-            if (isMyProfile) {
-                IconButton(
-                    onClick = { showMenu = true },
-                    modifier = Modifier
-                        .background(Color.Black.copy(alpha = 0.2f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = Color.White
-                    )
-                }
-
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false }
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Edit Profile") },
-                        onClick = {
-                            showMenu = false
-                            onEditProfile()
-                        },
-                        leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Sign Out", color = Color.Red) },
-                        onClick = {
-                            showMenu = false
-                            onSignOut()
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Logout,
-                                contentDescription = null,
-                                tint = Color.Red
-                            )
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Delete Account", color = Color.Red) },
-                        onClick = {
-                            showMenu = false
-                            showDeleteConfirmDialog = true
-                        },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = Icons.Default.DeleteForever,
-                                contentDescription = null,
-                                tint = Color.Red
-                            )
-                        }
-                    )
-                }
-            } else {
-                // Not my profile, show "Add Friend" or "Remove Friend"
-                if (isFriend) {
-                    Button(
-                        onClick = { showRemoveFriendDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
-                        shape = RoundedCornerShape(20.dp),
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PersonRemove,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Remove Friend", color = Color.White, fontSize = 12.sp)
-                    }
-                } else {
-                    when (friendRequestStatus) {
-                        "sent" -> {
-                            Button(
-                                onClick = { onCancelFriend?.invoke() },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.3f)),
-                                shape = RoundedCornerShape(20.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp)
-                            ) {
-                                Text("Requested", color = Color.White, fontSize = 12.sp)
-                            }
-                        }
-                        "pending" -> {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Button(
-                                    onClick = { onAcceptFriend?.invoke() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.height(36.dp)
-                                ) {
-                                    Text("Accept", color = Color.Black, fontSize = 12.sp)
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = { onDeclineFriend?.invoke() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.3f)),
-                                    shape = RoundedCornerShape(20.dp),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                    modifier = Modifier.height(36.dp)
-                                ) {
-                                    Text("Decline", color = Color.White, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                        else -> {
-                            IconButton(
-                                onClick = { onAddFriend?.invoke() },
-                                modifier = Modifier
-                                    .background(Color.Black.copy(alpha = 0.2f), CircleShape)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.PersonAdd,
-                                    contentDescription = "Add Friend",
-                                    tint = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        item { Box { SettingsHeaderSection(userProfile); ProfileImageSection(userProfile.profilePictureUrl) } }
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+        item { SettingsProfileInfoCard(userProfile) }
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+        item { ScheduleSection(userProfile, onEditSchedule, showEditButton = true) }
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+        item { SettingsActionsCard(onEditProfile, onSignOut) { showDeleteConfirmDialog = true } }
     }
 
-    // Confirmation dialog for friend removal
-    if (showRemoveFriendDialog) {
-        AlertDialog(
-            onDismissRequest = { showRemoveFriendDialog = false },
-            title = { Text("Remove Friend") },
-            text = { Text("Are you sure you want to remove ${userProfile.name} from your friends?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showRemoveFriendDialog = false
-                        onRemoveFriend?.invoke()
-                    }
-                ) {
-                    Text("Remove", color = Color.Red)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRemoveFriendDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Confirmation dialog for account deletion to prevent accidental clicks
     if (showDeleteConfirmDialog) {
         AlertDialog(
-            onDismissRequest = { 
+            onDismissRequest = {
                 showDeleteConfirmDialog = false
                 emailConfirmation = ""
             },
@@ -398,7 +206,7 @@ fun HeaderSection(
                     Spacer(modifier = Modifier.height(16.dp))
                     Text("Please enter your email (${userProfile.email}) to confirm:")
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
+                    androidx.compose.material3.OutlinedTextField(
                         value = emailConfirmation,
                         onValueChange = { emailConfirmation = it },
                         label = { Text("Email Address") },
@@ -410,61 +218,247 @@ fun HeaderSection(
             confirmButton = {
                 Button(
                     onClick = {
-                        // Validate email entry matches the user's email before allowing deletion
                         if (emailConfirmation.trim().equals(userProfile.email.trim(), ignoreCase = true)) {
-                            onDeleteAccount()
                             showDeleteConfirmDialog = false
+                            onDeleteAccount()
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
                     enabled = emailConfirmation.trim().equals(userProfile.email.trim(), ignoreCase = true)
-                ) {
-                    Text("Delete Forever")
-                }
+                ) { Text("Delete Forever") }
             },
             dismissButton = {
-                TextButton(onClick = { 
+                TextButton(onClick = {
                     showDeleteConfirmDialog = false
                     emailConfirmation = ""
-                }) {
-                    Text("Cancel")
-                }
+                }) { Text("Cancel") }
             }
         )
     }
 }
 
 @Composable
+fun HeaderSection(
+    userProfile: UserProfile,
+    isMyProfile: Boolean,
+    isFriend: Boolean,
+    friendRequestStatus: String?,
+    onAddFriend: (() -> Unit)? = null,
+    onAcceptFriend: (() -> Unit)? = null,
+    onDeclineFriend: (() -> Unit)? = null,
+    onCancelFriend: (() -> Unit)? = null,
+    onRemoveFriend: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null
+) {
+    var showRemoveFriendDialog by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+        if (userProfile.bannerUrl.isNotEmpty()) {
+            AsyncImage(
+                model = userProfile.bannerUrl,
+                contentDescription = "Banner Image",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize().background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(ProfileTheme.GradientStart, ProfileTheme.GradientMid, ProfileTheme.GradientEnd)
+                    )
+                )
+            )
+        }
+
+        Box(modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
+            if (onBack != null) {
+                IconButton(onClick = onBack, modifier = Modifier.background(Color.Black.copy(alpha = 0.2f), CircleShape)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+            }
+        }
+
+        if (!isMyProfile) {
+            Box(modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)) {
+                if (isFriend) {
+                    Button(
+                        onClick = { showRemoveFriendDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
+                        shape = RoundedCornerShape(20.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.height(36.dp)
+                    ) {
+                        Icon(Icons.Default.PersonRemove, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.padding(2.dp))
+                        Text("Remove Friend", color = Color.White, fontSize = 12.sp)
+                    }
+                } else {
+                    when (friendRequestStatus) {
+                        "sent" -> Button(
+                            onClick = { onCancelFriend?.invoke() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.3f)),
+                            shape = RoundedCornerShape(20.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp)
+                        ) { Text("Requested", color = Color.White, fontSize = 12.sp) }
+                        "pending" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            Button(
+                                onClick = { onAcceptFriend?.invoke() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) { Text("Accept", color = Color.Black, fontSize = 12.sp) }
+                            Spacer(modifier = Modifier.padding(4.dp))
+                            Button(
+                                onClick = { onDeclineFriend?.invoke() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+                                shape = RoundedCornerShape(20.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) { Text("Decline", color = Color.White, fontSize = 12.sp) }
+                        }
+                        else -> IconButton(
+                            onClick = { onAddFriend?.invoke() },
+                            modifier = Modifier.background(Color.Black.copy(alpha = 0.2f), CircleShape)
+                        ) {
+                            Icon(Icons.Default.PersonAdd, contentDescription = "Add Friend", tint = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showRemoveFriendDialog) {
+        AlertDialog(
+            onDismissRequest = { showRemoveFriendDialog = false },
+            title = { Text("Remove Friend") },
+            text = { Text("Are you sure you want to remove ${userProfile.name} from your friends?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRemoveFriendDialog = false
+                    onRemoveFriend?.invoke()
+                }) { Text("Remove", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveFriendDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+@Composable
+fun SettingsHeaderSection(userProfile: UserProfile) {
+    Box(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+        if (userProfile.bannerUrl.isNotEmpty()) {
+            AsyncImage(
+                model = userProfile.bannerUrl,
+                contentDescription = "Banner Image",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize().background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(ProfileTheme.GradientStart, ProfileTheme.GradientMid, ProfileTheme.GradientEnd)
+                    )
+                )
+            )
+        }
+
+        Text(
+            text = "Settings",
+            style = MaterialTheme.typography.headlineSmall,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+        )
+    }
+}
+
+@Composable
+fun SettingsProfileInfoCard(userProfile: UserProfile) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+            Text(userProfile.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
+            Text(userProfile.email, style = MaterialTheme.typography.bodyMedium, color = ProfileTheme.MutedForeground)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = userProfile.bio.ifEmpty { "No bio provided." },
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.Primary,
+                lineHeight = 20.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun FavoriteFriendsCard(
+    friends: List<UserSearchItem>,
+    onFriendClick: (UserSearchItem) -> Unit,
+    onViewAllClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("Favorited Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (friends.isEmpty()) {
+                Text(
+                    text = "No favorited friends yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ProfileTheme.MutedForeground,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else {
+                friends.forEachIndexed { index, friend ->
+                    ProfileFriendItem(user = friend, onClick = { onFriendClick(friend) })
+                    if (index != friends.lastIndex) {
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = ProfileTheme.Border)
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            TextButton(onClick = onViewAllClick, modifier = Modifier.align(Alignment.Start)) { Text("View all") }
+        }
+    }
+}
+
+@Composable
 fun ProfileImageSection(imageUrl: String) {
     Box(
-        modifier = Modifier
-            .padding(top = 130.dp, start = 24.dp)
+        modifier = Modifier.padding(top = 130.dp, start = 24.dp)
             .size(100.dp)
             .border(4.dp, Color.White, CircleShape)
             .clip(CircleShape)
             .background(Color.Gray)
     ) {
         if (imageUrl.isNotEmpty()) {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = "Profile Picture",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
+            AsyncImage(model = imageUrl, contentDescription = "Profile Picture", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         } else {
-            // Placeholder
             Image(
                 imageVector = Icons.Default.Person,
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize().padding(20.dp),
-                colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White)
+                colorFilter = ColorFilter.tint(Color.White)
             )
         }
-        
-        // Online status indicator
+
         Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
+            modifier = Modifier.align(Alignment.BottomEnd)
                 .padding(end = 4.dp, bottom = 4.dp)
                 .size(16.dp)
                 .border(2.dp, Color.White, CircleShape)
@@ -474,132 +468,15 @@ fun ProfileImageSection(imageUrl: String) {
 }
 
 @Composable
-fun ProfileInfoCard(userProfile: UserProfile) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 40.dp, start = 16.dp, end = 16.dp, bottom = 16.dp)
-        ) {
-            Text(
-                text = userProfile.name,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = ProfileTheme.Primary
-            )
-            Text(
-                text = userProfile.email,
-                style = MaterialTheme.typography.bodyMedium,
-                color = ProfileTheme.MutedForeground
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = userProfile.bio.ifEmpty { "No bio provided." },
-                style = MaterialTheme.typography.bodyMedium,
-                color = ProfileTheme.Primary,
-                lineHeight = 20.sp
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Info rows: Location, Link, Joined
-            InfoRow(icon = Icons.Default.LocationOn, text = userProfile.location.ifEmpty { "Not specified" })
-            InfoRow(icon = Icons.Default.Link, text = userProfile.githubUrl.ifEmpty { "No link" })
-            InfoRow(icon = Icons.Default.CalendarToday, text = userProfile.joinDate.ifEmpty { "Joined Recently" })
-        }
-    }
-}
-
-@Composable
-fun FriendsListCard(
-    friends: List<UserSearchItem>,
-    onFriendClick: (UserSearchItem) -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Friends",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = ProfileTheme.Primary
-                )
-                Text(
-                    text = friends.size.toString(),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = ProfileTheme.MutedForeground
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (friends.isEmpty()) {
-                Text(
-                    text = "No friends added yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = ProfileTheme.MutedForeground,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            } else {
-                friends.forEachIndexed { index, friend ->
-                    ProfileFriendItem(
-                        user = friend,
-                        onClick = { onFriendClick(friend) }
-                    )
-                    if (index != friends.lastIndex) {
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 8.dp),
-                            color = ProfileTheme.Border
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun ProfileFriendItem(
     user: UserSearchItem,
     onClick: () -> Unit
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(ProfileTheme.Accent)
-        ) {
+        Box(modifier = Modifier.size(44.dp).clip(CircleShape).background(ProfileTheme.Accent)) {
             if (user.profilePictureUrl.isNotBlank()) {
                 AsyncImage(
                     model = user.profilePictureUrl,
@@ -608,18 +485,11 @@ fun ProfileFriendItem(
                     contentScale = ContentScale.Crop
                 )
             } else {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(10.dp),
-                    tint = ProfileTheme.MutedForeground
-                )
+                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.fillMaxSize().padding(10.dp), tint = ProfileTheme.MutedForeground)
             }
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.padding(6.dp))
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -641,14 +511,12 @@ fun ProfileFriendItem(
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        if (user.isOnline) Color(0xFF22C55E) else ProfileTheme.MutedForeground.copy(alpha = 0.45f),
-                        CircleShape
-                    )
+                modifier = Modifier.size(8.dp).background(
+                    if (user.isOnline) Color(0xFF22C55E) else ProfileTheme.MutedForeground.copy(alpha = 0.45f),
+                    CircleShape
+                )
             )
-            Spacer(modifier = Modifier.width(6.dp))
+            Spacer(modifier = Modifier.padding(3.dp))
             Text(
                 text = if (user.isOnline) "Online" else "Offline",
                 style = MaterialTheme.typography.bodySmall,
@@ -659,129 +527,74 @@ fun ProfileFriendItem(
 }
 
 @Composable
-fun FriendItem(friend: Friend) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+fun SettingsActionsCard(
+    onEditProfile: () -> Unit,
+    onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(ProfileTheme.Accent)
-        ) {
-            if (friend.profilePictureUrl.isNotEmpty()) {
-                AsyncImage(
-                    model = friend.profilePictureUrl,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = null,
-                    modifier = Modifier.padding(8.dp),
-                    tint = ProfileTheme.MutedForeground
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1.0f)) {
-            Text(
-                text = friend.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                color = ProfileTheme.Primary
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val statusColor = when (friend.status) {
-                    "Online" -> Color(0xFF22C55E)
-                    "Away" -> Color(0xFFEAB308)
-                    else -> ProfileTheme.MutedForeground
-                }
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .background(statusColor, CircleShape)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = friend.status,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ProfileTheme.MutedForeground
-                )
-            }
-        }
-
-        IconButton(onClick = { /* Open chat */ }) {
-            Icon(
-                imageVector = Icons.Default.ChatBubbleOutline,
-                contentDescription = "Message",
-                modifier = Modifier.size(20.dp),
-                tint = ProfileTheme.MutedForeground
-            )
+        Column(modifier = Modifier.fillMaxWidth()) {
+            SettingsActionRow("Edit Profile", "Update your profile information", onEditProfile)
+            HorizontalDivider(color = ProfileTheme.Border)
+            SettingsActionRow("Sign Out", "Sign out of your account", onSignOut)
+            HorizontalDivider(color = ProfileTheme.Border)
+            SettingsActionRow("Delete Account", "Permanently remove your account", onDeleteAccount, titleColor = Color.Red)
         }
     }
 }
 
 @Composable
-fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
+fun SettingsActionRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    titleColor: Color = ProfileTheme.Primary
+) {
+    Column(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(16.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, color = titleColor, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = ProfileTheme.MutedForeground)
+    }
+}
+
+@Composable
+fun ScheduleSection(
+    userProfile: UserProfile,
+    onEditClick: () -> Unit,
+    showEditButton: Boolean = true
+) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
-            IconButton(
-                onClick = onEditClick,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.05f), CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "Edit Schedule",
-                    tint = ProfileTheme.MutedForeground
-                )
+            if (showEditButton) {
+                IconButton(
+                    onClick = onEditClick,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.05f), CircleShape)
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit Schedule", tint = ProfileTheme.MutedForeground)
+                }
             }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Text(
-                    text = "Current Schedule",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = ProfileTheme.Primary
-                )
+
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("Current Schedule", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
 
                 if (userProfile.semester.isNotEmpty()) {
-                    Text(
-                        text = userProfile.semester,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ProfileTheme.MutedForeground,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
+                    Text(userProfile.semester, style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground, modifier = Modifier.padding(bottom = 6.dp))
                 } else {
                     Spacer(modifier = Modifier.height(4.dp))
                 }
 
                 if (userProfile.classes.isEmpty()) {
-                    Text(
-                        text = "Empty",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = ProfileTheme.MutedForeground
-                    )
+                    Text("Empty", style = MaterialTheme.typography.bodyMedium, color = ProfileTheme.MutedForeground)
                 } else {
                     userProfile.classes.forEach { classInfo ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -798,13 +611,9 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                                     modifier = Modifier.weight(1f)
                                 )
                                 Column(horizontalAlignment = Alignment.End) {
+                                    Text("${classInfo.building} ${classInfo.roomNumber}", style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground)
                                     Text(
-                                        text = "${classInfo.building} ${classInfo.roomNumber}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = ProfileTheme.MutedForeground
-                                    )
-                                    Text(
-                                        text = "${classInfo.dayOfWeek} at ${classInfo.startTime}",
+                                        "${classInfo.dayOfWeek} at ${classInfo.startTime}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = ProfileTheme.MutedForeground.copy(alpha = 0.8f)
                                     )
@@ -819,88 +628,27 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
 }
 
 @Composable
-fun InfoRow(icon: ImageVector, text: String) {
+fun FriendItem(friend: Friend) {
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.padding(vertical = 4.dp)
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = ProfileTheme.MutedForeground
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = ProfileTheme.MutedForeground
-        )
-    }
-}
+        Box(modifier = Modifier.size(40.dp).clip(CircleShape).background(ProfileTheme.Accent)) {
+            if (friend.profilePictureUrl.isNotEmpty()) {
+                AsyncImage(model = friend.profilePictureUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            } else {
+                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.padding(8.dp), tint = ProfileTheme.MutedForeground)
+            }
+        }
 
-@Composable
-fun StatColumn(label: String, value: String) {
-    Column {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = ProfileTheme.Primary
-        )
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = ProfileTheme.MutedForeground,
-            fontWeight = FontWeight.Bold
-        )
-    }
-}
+        Spacer(modifier = Modifier.padding(6.dp))
 
-@Composable
-fun WelcomeCard(onSignOut: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = "Welcome to your Profile",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                color = ProfileTheme.Primary
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "This is your modern profile page. Connect with followers and showcase your presence on the platform.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = ProfileTheme.MutedForeground,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                lineHeight = 20.sp
-            )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(friend.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = ProfileTheme.Primary)
+        }
 
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            HorizontalDivider(color = ProfileTheme.Border)
-            
-            Spacer(modifier = Modifier.height(24.dp))
-
-            OutlinedButton(
-                onClick = onSignOut,
-                modifier = Modifier
-                    .fillMaxWidth()
-                ) {
-                    Text("Sign Out")
-                }
+        IconButton(onClick = {}) {
+            Icon(Icons.Default.ChatBubbleOutline, contentDescription = "Message", modifier = Modifier.size(20.dp), tint = ProfileTheme.MutedForeground)
         }
     }
 }
