@@ -481,23 +481,25 @@ fun MapScreen(
                     val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
                     val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
 
-                    // Logic to hide building labels if overlapped by specific categories
+                    // Logic to hide location markers if overlapped by specific categories (Bookmarks, Classes, Shared)
                     val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers, incomingSharedMarker) {
-                        if (place.category == MarkerCategory.BUILDING) {
+                        if (place.category == MarkerCategory.BUILDING || 
+                            place.category == MarkerCategory.STUDENT_SERVICE || 
+                            place.category == MarkerCategory.DINING) {
                             bookmarkMarkers.any { it.location == place.location } ||
                                     scheduleMarkers.any { it.location == place.location } ||
                                     incomingSharedMarker.any { it.location == place.location }
                         } else false
                     }
 
-                    // Hide building name if overlapped, unless filter active or search in progress
-                    val shouldShowName = if (place.category == MarkerCategory.BUILDING && hasOverlappingMarker) {
-                        selectedCategory != MarkerCategory.ALL || searchQuery.isNotEmpty() || isSelected
+                    // Hide building/service name if overlapped, unless filter active or specifically selected
+                    val shouldShowName = if (hasOverlappingMarker) {
+                        selectedCategory == place.category || isSelected
                     } else true
 
-                    // Hide building icon if overlapped and not filtered/searched/selected
-                    val shouldShowBuildingIcon = if (place.category == MarkerCategory.BUILDING && hasOverlappingMarker) {
-                        selectedCategory != MarkerCategory.ALL || searchQuery.isNotEmpty() || isSelected
+                    // Hide building/service icon if overlapped, unless category filter used or specifically selected/searched
+                    val shouldShowBuildingIcon = if (hasOverlappingMarker) {
+                        selectedCategory == place.category || isSelected
                     } else true
 
                     val markerAlpha = if (selectedPlace != null) {
@@ -787,7 +789,7 @@ fun MapScreen(
             FloatingActionButton(
                 onClick = {
                     if (location != null) {
-                        selectedPlace = MapPlace("Current Location", LatLng(location!!.latitude, location!!.longitude), MarkerCategory.SHARED, "Share your coordinates")
+                        selectedPlace = MapPlace("Current Location", LatLng(location!!.latitude, location!!.longitude), MarkerCategory.SHARED, "Share your live location")
                         showShareDialog = true
                     }
                 },
