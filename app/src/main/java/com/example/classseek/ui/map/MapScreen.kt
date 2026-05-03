@@ -15,27 +15,35 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
@@ -66,7 +74,8 @@ data class MapPlace(
     val name: String,
     val location: LatLng,
     val category: MarkerCategory,
-    val description: String = ""
+    val description: String = "",
+    val senderId: String? = null
 )
 
 @SuppressLint("MissingPermission")
@@ -78,13 +87,16 @@ fun MapScreen(
     temporaryMarkers: List<MapPlace> = emptyList(),
     onAddTemporaryMarker: (MapPlace) -> Unit = {},
     sharedLocation: LatLng? = null,
-    sharedLocationName: String? = null
+    sharedLocationName: String? = null,
+    sharedByUid: String? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = Firebase.firestore
     val auth = FirebaseAuth.getInstance()
     val repo = remember { ChatRepository(db) }
+
+    val userProfiles = remember { mutableStateMapOf<String, UserProfile>() }
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(MarkerCategory.ALL) }
@@ -100,6 +112,26 @@ fun MapScreen(
 
     // State for compass heading
     var heading by remember { mutableStateOf(0f) }
+
+    fun fetchUserProfile(uid: String) {
+        if (uid.isBlank() || userProfiles.containsKey(uid)) return
+
+        db.collection("users").document(uid).get()
+            .addOnSuccessListener { doc ->
+                if (doc.exists()) {
+                    userProfiles[uid] = UserProfile(
+                        uid = uid,
+                        name = doc.getString("name") ?: "User",
+                        email = doc.getString("email") ?: "",
+                        profilePictureUrl = doc.getString("profilePictureUrl") ?: ""
+                    )
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e("MapScreen", "Failed to fetch profile for $uid: ${e.message}")
+                userProfiles[uid] = UserProfile(uid, "User", "", "")
+            }
+    }
 
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(34.16206611807, -119.0434737072), 17f)
@@ -189,9 +221,9 @@ fun MapScreen(
     }
 
     // Include the shared location from DM if it exists
-    val incomingSharedMarker = remember(sharedLocation, sharedLocationName) {
+    val incomingSharedMarker = remember(sharedLocation, sharedLocationName, sharedByUid) {
         if (sharedLocation != null && sharedLocationName != null) {
-            listOf(MapPlace(sharedLocationName, sharedLocation, MarkerCategory.SHARED, "Shared with you"))
+            listOf(MapPlace(sharedLocationName, sharedLocation, MarkerCategory.SHARED, "Shared with you", sharedByUid))
         } else emptyList()
     }
 
@@ -203,6 +235,14 @@ fun MapScreen(
     val displayPlaces = remember(allMarkers, selectedCategory) {
         allMarkers.filter { place ->
             selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
+        }
+    }
+
+    LaunchedEffect(allMarkers) {
+        allMarkers.forEach { place ->
+            if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                fetchUserProfile(place.senderId)
+            }
         }
     }
 
@@ -238,6 +278,27 @@ fun MapScreen(
         // Load chats for sharing
         auth.currentUser?.uid?.let { uid ->
             repo.listenToMyChats(uid, { chats -> myChats = chats }, { Log.e("MapScreen", "Error loading chats", it) })
+        }
+    }
+
+    var currentUserProfile by remember { mutableStateOf<UserProfile?>(userProfile) }
+
+    LaunchedEffect(auth.currentUser?.uid) {
+        val uid = auth.currentUser?.uid
+        if (uid != null) {
+            // Use a SnapshotListener for real-time updates, or .get() for a fresh fetch
+            db.collection("users").document(uid)
+                .addSnapshotListener { snapshot, e ->
+                    if (e != null) {
+                        Log.w("MapScreen", "Listen failed", e)
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null && snapshot.exists()) {
+                        // Directly convert the document to your UserProfile model
+                        currentUserProfile = snapshot.toObject(UserProfile::class.java)
+                        Log.d("MapScreen", "Live Profile Loaded: ${currentUserProfile?.profilePictureUrl}")
+                    }
+                }
         }
     }
 
@@ -337,34 +398,71 @@ fun MapScreen(
                 uiSettings = MapUiSettings(mapToolbarEnabled = false),
                 onMapClick = { selectedPlace = null }
             ) {
-                MarkerComposable(
-                    state = rememberMarkerState(position = currentLatLng),
-                    anchor = Offset(0.5f, 0.5f),
-                    onClick = {
-                        selectedPlace = MapPlace("My Location", currentLatLng, MarkerCategory.SHARED, "Share your live location")
-                        true
+                val profilePicUrl = currentUserProfile?.profilePictureUrl
+                val userMarkerState = rememberMarkerState(position = currentLatLng)
+
+                // Debug logs to track profile picture URL updates
+                LaunchedEffect(profilePicUrl) {
+                    Log.d("MapScreen", "User profilePicUrl updated in MapScreen: '$profilePicUrl'")
+                }
+
+                // Keep marker position synchronized with current location
+                LaunchedEffect(currentLatLng) {
+                    userMarkerState.position = currentLatLng
+                }
+
+                // Use key to force MarkerComposable refresh when profile picture changes
+                key(profilePicUrl) {
+                    MarkerComposable(
+                        state = userMarkerState,
+                        anchor = Offset(0.5f, 0.5f),
+                        onClick = {
+                            selectedPlace = MapPlace("My Location", currentLatLng, MarkerCategory.SHARED, "Share your live location")
+                            true
+                        }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFE9EBEF)) // Match ProfileTheme.Accent from ProfileScreen
+                                .border(2.dp, Color.White, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            // Default icon as fallback/background
+
+
+                            if (!profilePicUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(profilePicUrl)
+                                        .allowHardware(false)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = "User Location",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                    onState = { state ->
+                                        if (state is coil.compose.AsyncImagePainter.State.Error) {
+                                            Log.e("MapScreen", "AsyncImage failed to load: ${state.result.throwable.message}")
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     }
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Navigation,
-                        contentDescription = "User Location",
-                        tint = Color(0xFF4285F4), // Google Blue
-                        modifier = Modifier
-                            .size(32.dp)
-                            .rotate(heading)
-                    )
                 }
 
                 allMarkers.forEach { place ->
                     val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
                     val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
-                    
+
                     // Logic to hide building labels if overlapped by specific categories
                     val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers, incomingSharedMarker) {
                         if (place.category == MarkerCategory.BUILDING) {
                             bookmarkMarkers.any { it.location == place.location } ||
-                            scheduleMarkers.any { it.location == place.location } ||
-                            incomingSharedMarker.any { it.location == place.location }
+                                    scheduleMarkers.any { it.location == place.location } ||
+                                    incomingSharedMarker.any { it.location == place.location }
                         } else false
                     }
 
@@ -412,12 +510,38 @@ fun MapScreen(
                                             )
                                         }
                                     }
-                                    Icon(
-                                        imageVector = place.category.icon,
-                                        contentDescription = null,
-                                        tint = place.category.color,
-                                        modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
-                                    )
+
+                                    if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                                        val senderProfile = userProfiles[place.senderId]
+                                        if (senderProfile?.profilePictureUrl?.isNotBlank() == true) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(senderProfile.profilePictureUrl)
+                                                    .allowHardware(false)
+                                                    .build(),
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(32.dp)
+                                                    .clip(CircleShape)
+                                                    .border(2.dp, place.category.color, CircleShape),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.AccountCircle,
+                                                contentDescription = null,
+                                                tint = place.category.color,
+                                                modifier = Modifier.size(32.dp)
+                                            )
+                                        }
+                                    } else {
+                                        Icon(
+                                            imageVector = place.category.icon,
+                                            contentDescription = null,
+                                            tint = place.category.color,
+                                            modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -439,7 +563,27 @@ fun MapScreen(
                 Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(text = place.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        if (place.description.isNotEmpty()) Text(text = place.description, style = MaterialTheme.typography.bodySmall)
+
+                        if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                            val profile = userProfiles[place.senderId]
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(profile?.profilePictureUrl ?: "")
+                                        .allowHardware(false)
+                                        .build(),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp).clip(CircleShape).background(Color.LightGray)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Shared by ${profile?.name ?: "Loading..."}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        } else if (place.description.isNotEmpty()) {
+                            Text(text = place.description, style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                     Button(onClick = { showShareDialog = true }) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -462,7 +606,27 @@ fun MapScreen(
                             items(myChats) { chat ->
                                 ListItem(
                                     headlineContent = { Text(chat.title) },
-                                    leadingContent = { Icon(if (chat.type == "group") Icons.Default.Groups else Icons.Default.Person, null) },
+                                    leadingContent = {
+                                        if (chat.type == "dm" && chat.profilePictureUrl.isNotBlank()) {
+                                            AsyncImage(
+                                                model = ImageRequest.Builder(LocalContext.current)
+                                                    .data(chat.profilePictureUrl)
+                                                    .allowHardware(false)
+                                                    .build(),
+                                                contentDescription = null,
+                                                modifier = Modifier
+                                                    .size(40.dp)
+                                                    .clip(CircleShape),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = if (chat.type == "group") Icons.Default.Groups else Icons.Default.Person,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(40.dp)
+                                            )
+                                        }
+                                    },
                                     modifier = Modifier.clickable {
                                         scope.launch {
                                             auth.currentUser?.uid?.let { myUid ->
