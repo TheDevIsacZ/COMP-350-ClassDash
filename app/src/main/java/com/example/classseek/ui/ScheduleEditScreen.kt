@@ -1,6 +1,5 @@
 package com.example.classseek.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,7 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -90,12 +89,37 @@ fun ScheduleEditScreen(
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text("Class ${index + 1}", fontWeight = FontWeight.Bold)
-                            if (classes.size > 1) {
-                                IconButton(onClick = { classes.removeAt(index) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
-                                }
+                            
+                            val isClassEmpty = classInfo.className.isBlank() && 
+                                             classInfo.building.isBlank() && 
+                                             classInfo.roomNumber.isBlank() && 
+                                             classInfo.dayOfWeek.isBlank() && 
+                                             classInfo.startTime.isBlank() && 
+                                             classInfo.endTime.isBlank()
+                            
+                            val isLastAndEmpty = classes.size == 1 && isClassEmpty
+
+                            IconButton(
+                                onClick = {
+                                    if (classes.size > 1) {
+                                        classes.removeAt(index)
+                                    } else {
+                                        classes[index] = ClassInfo()
+                                    }
+                                },
+                                enabled = !isLastAndEmpty
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Remove,
+                                    contentDescription = "Remove or Clear Class",
+                                    tint = if (isLastAndEmpty) Color.Gray else Color.Red
+                                )
                             }
                         }
                         
@@ -219,4 +243,3 @@ fun ScheduleEditScreen(
         }
     }
 }
-

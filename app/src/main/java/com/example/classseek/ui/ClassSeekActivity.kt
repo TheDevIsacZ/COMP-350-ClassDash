@@ -758,11 +758,13 @@ fun ClassSeekApp(
             otherUserProfile = null
         }
         if (otherUserProfile != null) {
+            val otherBookmarkedEvents = displayedEvents.filter { otherUserProfile?.bookmarkedEventIds?.contains(it.id) == true }
             ProfileScreen(
                 userProfile = otherUserProfile!!,
                 isMyProfile = false,
                 isFriend = isFriendWithOther,
                 friendRequestStatus = friendRequestStatus,
+                bookmarkedEvents = otherBookmarkedEvents,
                 onSignOut = {
                     auth.signOut()
                     googleSignInClient.signOut()
@@ -1027,10 +1029,12 @@ fun ClassSeekApp(
                             )
                         }
                         AppDestinations.PROFILE -> {
+                            val myBookmarkedEvents = displayedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
                             ProfileScreen(
                                 userProfile = userProfile!!,
                                 isMyProfile = true,
                                 friends = profileFriends,
+                                bookmarkedEvents = myBookmarkedEvents,
                                 onSignOut = {
                                     auth.signOut()
                                     googleSignInClient.signOut()
@@ -1086,6 +1090,18 @@ fun ClassSeekApp(
                                             repo.removeFriend(currentUid, friendUid)
                                         } catch (e: Exception) {
                                             Log.e("FRIEND_DEBUG", "Error removing friend from profile list", e)
+                                        }
+                                    }
+                                },
+                                onRemoveBookmark = { eventId ->
+                                    scope.launch {
+                                        try {
+                                            val uid = firebaseUser?.uid ?: return@launch
+                                            db.collection("users").document(uid)
+                                                .update("bookmarkedEventIds", FieldValue.arrayRemove(eventId))
+                                                .await()
+                                        } catch (e: Exception) {
+                                            Log.e("PROFILE_DEBUG", "Error removing bookmark", e)
                                         }
                                     }
                                 },
