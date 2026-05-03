@@ -54,11 +54,15 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
 import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.api.services.calendar.model.Event
+import com.google.api.services.calendar.model.EventDateTime
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.firestore
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class MarkerCategory(val label: String, val icon: ImageVector, val color: Color) {
     ALL("All", Icons.Default.Place, Color.Gray),
@@ -75,9 +79,13 @@ data class MapPlace(
     val location: LatLng,
     val category: MarkerCategory,
     val description: String = "",
-    val senderId: String? = null
+    val senderId: String? = null,
+    val eventId: String? = null,
+    val eventStart: String? = null,
+    val eventEnd: String? = null
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @SuppressLint("MissingPermission")
 @Composable
 fun MapScreen(
@@ -181,7 +189,11 @@ fun MapScreen(
                     MapPlace(
                         name = event.summary ?: match.name,
                         location = match.location,
-                        category = MarkerCategory.BOOKMARK
+                        category = MarkerCategory.BOOKMARK,
+                        eventId = event.id,
+                        eventStart = formatEventDateTime(event.start),
+                        eventEnd = formatEventDateTime(event.end),
+                        description = event.location ?: ""
                     )
                 } else {
                     null
@@ -190,7 +202,7 @@ fun MapScreen(
     }
 
     // Schedule markers derived from user profile classes
-    val scheduleMarkers = remember(userProfile?.classes, places) {
+    val scheduleMarkers = remember(calendarEvents, userProfile?.classes, places) {
         userProfile?.classes?.mapNotNull { classInfo ->
             val buildingInput = classInfo.building.lowercase()
 
@@ -210,11 +222,16 @@ fun MapScreen(
             }
 
             if (match != null) {
+                // Find a corresponding event to get times
+                val originalEvent = calendarEvents.find { it.summary == classInfo.className }
                 MapPlace(
                     name = classInfo.className,
                     location = match.location,
                     category = MarkerCategory.CLASS,
-                    description = "${classInfo.building} ${classInfo.roomNumber}"
+                    description = "${classInfo.building} ${classInfo.roomNumber}",
+                    eventId = originalEvent?.id,
+                    eventStart = originalEvent?.let { formatEventDateTime(it.start) },
+                    eventEnd = originalEvent?.let { formatEventDateTime(it.end) }
                 )
             } else null
         } ?: emptyList()
@@ -430,7 +447,14 @@ fun MapScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             // Default icon as fallback/background
-
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "User Location",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(10.dp),
+                                tint = Color(0xFF717182) // Match ProfileTheme.MutedForeground from ProfileScreen
+                            )
 
                             if (!profilePicUrl.isNullOrBlank()) {
                                 AsyncImage(
@@ -595,14 +619,27 @@ fun MapScreen(
         }
 
         if (showShareDialog) {
-            AlertDialog(
+            val shareSheetState = rememberModalBottomSheetState()
+            ModalBottomSheet(
                 onDismissRequest = { showShareDialog = false },
-                title = { Text("Share Location") },
-                text = {
-                    Column {
-                        Text("Select a chat to send this location to:")
-                        Spacer(Modifier.height(8.dp))
-                        LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                sheetState = shareSheetState
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        text = "Share with...",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    if (myChats.isEmpty()) {
+                        Text("No chats available", modifier = Modifier.padding(vertical = 16.dp))
+                    } else {
+                        LazyColumn(modifier = Modifier.fillMaxWidth()) {
                             items(myChats) { chat ->
                                 ListItem(
                                     headlineContent = { Text(chat.title) },
@@ -621,7 +658,7 @@ fun MapScreen(
                                             )
                                         } else {
                                             Icon(
-                                                imageVector = if (chat.type == "group") Icons.Default.Groups else Icons.Default.Person,
+                                                imageVector = if (chat.type == "group") Icons.Default.Group else Icons.Default.Person,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(40.dp)
                                             )
@@ -630,15 +667,31 @@ fun MapScreen(
                                     modifier = Modifier.clickable {
                                         scope.launch {
                                             auth.currentUser?.uid?.let { myUid ->
-                                                repo.sendLocationMessage(
-                                                    chatId = chat.id,
-                                                    senderId = myUid,
-                                                    latitude = selectedPlace!!.location.latitude,
-                                                    longitude = selectedPlace!!.location.longitude,
-                                                    locationName = selectedPlace!!.name
-                                                )
-                                                if (selectedPlace!!.name == "Current Location") {
-                                                    onAddTemporaryMarker(selectedPlace!!)
+                                                val place = selectedPlace!!
+                                                if (place.eventId != null) {
+                                                    // Share as an Event (Sync with CalendarScreen logic)
+                                                    repo.sendEventMessage(
+                                                        chatId = chat.id,
+                                                        senderId = myUid,
+                                                        eventTitle = place.name,
+                                                        eventStart = place.eventStart ?: "",
+                                                        eventEnd = place.eventEnd ?: "",
+                                                        eventLocation = place.description.ifBlank { place.name },
+                                                        eventId = place.eventId
+                                                    )
+                                                } else {
+                                                    // Share as a Location
+                                                    repo.sendLocationMessage(
+                                                        chatId = chat.id,
+                                                        senderId = myUid,
+                                                        latitude = place.location.latitude,
+                                                        longitude = place.location.longitude,
+                                                        locationName = place.name
+                                                    )
+                                                }
+                                                
+                                                if (place.name == "Current Location") {
+                                                    onAddTemporaryMarker(place)
                                                 }
                                                 showShareDialog = false
                                                 selectedPlace = null
@@ -646,12 +699,12 @@ fun MapScreen(
                                         }
                                     }
                                 )
+                                HorizontalDivider()
                             }
                         }
                     }
-                },
-                confirmButton = { TextButton(onClick = { showShareDialog = false }) { Text("Cancel") } }
-            )
+                }
+            }
         }
 
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopCenter)) {
@@ -834,4 +887,22 @@ fun MapScreen(
             }
         }
     }
+}
+
+private fun formatDate(dateTime: com.google.api.client.util.DateTime?): String {
+    if (dateTime == null) return "Unknown Date"
+    val date = Date(dateTime.value)
+    val sdf = SimpleDateFormat("EEEE, MMMM d", Locale.getDefault())
+    return sdf.format(date)
+}
+
+private fun formatEventDateTime(dateTime: EventDateTime?): String {
+    if (dateTime == null) return ""
+    return if (dateTime.dateTime != null) {
+        val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+        sdf.format(Date(dateTime.dateTime.value))
+    } else if (dateTime.date != null) {
+        val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+        sdf.format(Date(dateTime.date.value))
+    } else ""
 }

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -59,12 +60,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
@@ -433,15 +438,29 @@ fun CalendarScreen(
                 if (chats.isEmpty()) {
                     Text("No chats available", modifier = Modifier.padding(vertical = 16.dp))
                 } else {
-                    LazyColumn {
+                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
                         items(chats) { chat ->
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
-                                    Icon(
-                                        if (chat.type == "group") Icons.Default.Group else Icons.Default.Person,
-                                        contentDescription = null
-                                    )
+                                    if (chat.type == "dm" && chat.profilePictureUrl.isNotBlank()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(chat.profilePictureUrl)
+                                                .build(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = if (chat.type == "group") Icons.Default.Group else Icons.Default.Person,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(40.dp)
+                                        )
+                                    }
                                 },
                                 modifier = Modifier.clickable {
                                     scope.launch {
@@ -470,6 +489,7 @@ fun CalendarScreen(
                         }
                     }
                 }
+                Spacer(Modifier.height(32.dp))
             }
         }
     }
