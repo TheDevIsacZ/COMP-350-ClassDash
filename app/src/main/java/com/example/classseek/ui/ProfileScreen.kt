@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -61,6 +62,7 @@ object ProfileTheme {
     val GradientEnd = Color(0xFFD00000)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     userProfile: UserProfile,
@@ -86,6 +88,8 @@ fun ProfileScreen(
 ) {
     val scrollState = rememberScrollState()
     var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
+    
+    var eventToUnbookmark by remember { mutableStateOf<Event?>(null) }
 
     Box(
         modifier = Modifier
@@ -143,7 +147,9 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 BookmarkedEventsSection(
                     events = bookmarkedEvents,
-                    onRemoveBookmark = { onRemoveBookmark?.invoke(it) }
+                    onRemoveBookmark = { event ->
+                        eventToUnbookmark = event
+                    }
                 )
             }
 
@@ -169,6 +175,58 @@ fun ProfileScreen(
                     onViewFriendProfile?.invoke(friend.uid)
                 }
             )
+        }
+        
+        // Confirmation Bottom Sheet for removing bookmarks
+        if (eventToUnbookmark != null) {
+            ModalBottomSheet(
+                onDismissRequest = { eventToUnbookmark = null },
+                sheetState = rememberModalBottomSheetState()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp)
+                        .padding(bottom = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Remove Bookmark",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Are you sure you want to remove this bookmark?",
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = ProfileTheme.MutedForeground
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { eventToUnbookmark = null },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Cancel")
+                        }
+                        Button(
+                            onClick = {
+                                eventToUnbookmark?.id?.let { onRemoveBookmark?.invoke(it) }
+                                eventToUnbookmark = null
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                        ) {
+                            Text("Remove", color = Color.White)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -804,7 +862,8 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                         color = ProfileTheme.MutedForeground
                     )
                 } else {
-                    userProfile.classes.filter { it.className.isNotBlank() }.forEach { classInfo ->
+                    val activeClasses = userProfile.classes.filter { it.className.isNotBlank() }
+                    activeClasses.forEachIndexed { index, classInfo ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -846,6 +905,12 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                                     }
                                 }
                             }
+                            if (index != activeClasses.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    color = ProfileTheme.Border
+                                )
+                            }
                         }
                     }
                 }
@@ -857,7 +922,7 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
 @Composable
 fun BookmarkedEventsSection(
     events: List<Event>,
-    onRemoveBookmark: (String) -> Unit
+    onRemoveBookmark: (Event) -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -886,7 +951,7 @@ fun BookmarkedEventsSection(
                 Icon(
                     imageVector = Icons.Default.Star,
                     contentDescription = null,
-                    tint = Color(0xFFFFD700)
+                    tint = Color.Gray
                 )
             }
 
@@ -915,8 +980,26 @@ fun BookmarkedEventsSection(
                                 color = ProfileTheme.MutedForeground
                             )
                         }
+                        if (!event.location.isNullOrBlank()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = ProfileTheme.MutedForeground
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = event.location,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ProfileTheme.MutedForeground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     }
-                    IconButton(onClick = { event.id?.let { onRemoveBookmark(it) } }) {
+                    IconButton(onClick = { onRemoveBookmark(event) }) {
                         Icon(
                             imageVector = Icons.Default.Star,
                             contentDescription = "Remove Bookmark",
