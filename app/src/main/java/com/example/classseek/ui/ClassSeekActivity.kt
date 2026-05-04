@@ -387,6 +387,7 @@ fun ClassSeekApp(
     val temporaryMarkers = remember { mutableStateListOf<MapPlace>() }
     var sharedLocationToView by remember { mutableStateOf<LatLng?>(null) }
     var sharedLocationNameToView by remember { mutableStateOf<String?>(null) }
+    var sharedLocationByUidToView by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialChatId, initialChatTitle) {
         pendingNotificationChatId = initialChatId
@@ -758,11 +759,13 @@ fun ClassSeekApp(
             otherUserProfile = null
         }
         if (otherUserProfile != null) {
+            val otherBookmarkedEvents = displayedEvents.filter { otherUserProfile?.bookmarkedEventIds?.contains(it.id) == true }
             ProfileScreen(
                 userProfile = otherUserProfile!!,
                 isMyProfile = false,
                 isFriend = isFriendWithOther,
                 friendRequestStatus = friendRequestStatus,
+                bookmarkedEvents = otherBookmarkedEvents,
                 onSignOut = {
                     auth.signOut()
                     googleSignInClient.signOut()
@@ -868,9 +871,10 @@ fun ClassSeekApp(
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.FRIENDS
             },
-            onLocationClick = { latLng, name ->
+            onLocationClick = { latLng, name, senderId ->
                 sharedLocationToView = latLng
                 sharedLocationNameToView = name
+                sharedLocationByUidToView = senderId
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.MAP
             }
@@ -1027,10 +1031,12 @@ fun ClassSeekApp(
                             )
                         }
                         AppDestinations.PROFILE -> {
+                            val myBookmarkedEvents = displayedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
                             ProfileScreen(
                                 userProfile = userProfile!!,
                                 isMyProfile = true,
                                 friends = profileFriends,
+                                bookmarkedEvents = myBookmarkedEvents,
                                 onSignOut = {
                                     auth.signOut()
                                     googleSignInClient.signOut()
@@ -1089,6 +1095,18 @@ fun ClassSeekApp(
                                         }
                                     }
                                 },
+                                onRemoveBookmark = { eventId ->
+                                    scope.launch {
+                                        try {
+                                            val uid = firebaseUser?.uid ?: return@launch
+                                            db.collection("users").document(uid)
+                                                .update("bookmarkedEventIds", FieldValue.arrayRemove(eventId))
+                                                .await()
+                                        } catch (e: Exception) {
+                                            Log.e("PROFILE_DEBUG", "Error removing bookmark", e)
+                                        }
+                                    }
+                                },
                                 onEditSchedule = { isEditingSchedule = true }
                             )
                         }
@@ -1104,9 +1122,10 @@ fun ClassSeekApp(
                                 onNavigateToProfile = { uid ->
                                     viewOtherUserId = uid
                                 },
-                                onLocationClick = { latLng, name ->
+                                onLocationClick = { latLng, name, senderId ->
                                     sharedLocationToView = latLng
                                     sharedLocationNameToView = name
+                                    sharedLocationByUidToView = senderId
                                     currentDestination = AppDestinations.MAP
                                 },
                                 auth = auth
@@ -1119,7 +1138,8 @@ fun ClassSeekApp(
                                 temporaryMarkers = temporaryMarkers,
                                 onAddTemporaryMarker = { temporaryMarkers.add(it) },
                                 sharedLocation = sharedLocationToView,
-                                sharedLocationName = sharedLocationNameToView
+                                sharedLocationName = sharedLocationNameToView,
+                                sharedByUid = sharedLocationByUidToView
                             )
                         }
                     }

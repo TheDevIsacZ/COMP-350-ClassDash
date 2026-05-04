@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -40,6 +42,10 @@ import com.example.classseek.models.Friend
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.friends.UserActionDialog
 import com.example.classseek.ui.friends.UserSearchItem
+import com.google.api.services.calendar.model.Event
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // Define colors based on the provided theme.css (Light mode mostly)
 object ProfileTheme {
@@ -56,6 +62,7 @@ object ProfileTheme {
     val GradientEnd = Color(0xFFD00000)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
     userProfile: UserProfile,
@@ -63,6 +70,7 @@ fun ProfileScreen(
     friends: List<UserSearchItem> = emptyList(),
     isFriend: Boolean = false,
     friendRequestStatus: String? = null, // null, "pending", "sent"
+    bookmarkedEvents: List<Event> = emptyList(),
     onSignOut: () -> Unit,
     onEditProfile: () -> Unit,
     onDeleteAccount: () -> Unit,
@@ -74,11 +82,14 @@ fun ProfileScreen(
     onDeclineFriend: (() -> Unit)? = null,
     onCancelFriend: (() -> Unit)? = null,
     onRemoveFriend: (() -> Unit)? = null,
+    onRemoveBookmark: ((String) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     onEditSchedule: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
+    
+    var eventToUnbookmark by remember { mutableStateOf<Event?>(null) }
 
     Box(
         modifier = Modifier
@@ -120,18 +131,27 @@ fun ProfileScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             if (isMyProfile) {
-                Spacer(modifier = Modifier.height(16.dp))
-
                 FriendsListCard(
                     friends = friends,
                     onFriendClick = { friend ->
                         selectedFriend = friend
                     }
                 )
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
             ScheduleSection(userProfile, onEditSchedule)
+
+            // Bookmarked events section at the bottom
+            if (isMyProfile && bookmarkedEvents.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(16.dp))
+                BookmarkedEventsSection(
+                    events = bookmarkedEvents,
+                    onRemoveBookmark = { event ->
+                        eventToUnbookmark = event
+                    }
+                )
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
         }
@@ -156,7 +176,66 @@ fun ProfileScreen(
                 }
             )
         }
+        
+        // Confirmation Bottom Sheet for removing bookmarks
+        if (eventToUnbookmark != null) {
+            ModalBottomSheet(
+                onDismissRequest = { eventToUnbookmark = null },
+                sheetState = rememberModalBottomSheetState()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp)
+                        .padding(bottom = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Remove Bookmark",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Are you sure you want to remove this bookmark?",
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = ProfileTheme.MutedForeground
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { eventToUnbookmark = null },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Cancel")
+                        }
+                        Button(
+                            onClick = {
+                                eventToUnbookmark?.id?.let { onRemoveBookmark?.invoke(it) }
+                                eventToUnbookmark = null
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red)
+                        ) {
+                            Text("Remove", color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
     }
+}
+
+private fun formatEventDate(dateTime: com.google.api.client.util.DateTime?): String {
+    if (dateTime == null) return ""
+    val date = Date(dateTime.value)
+    val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+    return sdf.format(date)
 }
 
 @Composable
@@ -776,14 +855,15 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                     Spacer(modifier = Modifier.height(4.dp))
                 }
 
-                if (userProfile.classes.isEmpty()) {
+                if (userProfile.classes.isEmpty() || userProfile.classes.all { it.className.isBlank() }) {
                     Text(
                         text = "Empty",
                         style = MaterialTheme.typography.bodyMedium,
                         color = ProfileTheme.MutedForeground
                     )
                 } else {
-                    userProfile.classes.forEach { classInfo ->
+                    val activeClasses = userProfile.classes.filter { it.className.isNotBlank() }
+                    activeClasses.forEachIndexed { index, classInfo ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -798,20 +878,137 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
                                     modifier = Modifier.weight(1f)
                                 )
                                 Column(horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        text = "${classInfo.building} ${classInfo.roomNumber}",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = ProfileTheme.MutedForeground
-                                    )
-                                    Text(
-                                        text = "${classInfo.dayOfWeek} at ${classInfo.startTime}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = ProfileTheme.MutedForeground.copy(alpha = 0.8f)
-                                    )
+                                    if (classInfo.building.isNotBlank() || classInfo.roomNumber.isNotBlank()) {
+                                        Text(
+                                            text = "${classInfo.building} ${classInfo.roomNumber}".trim(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = ProfileTheme.MutedForeground
+                                        )
+                                    }
+                                    val hasDay = classInfo.dayOfWeek.trim().isNotBlank()
+                                    val hasTime = classInfo.startTime.trim().isNotBlank()
+                                    if (hasDay || hasTime) {
+                                        val timeText = buildString {
+                                            append(classInfo.dayOfWeek.trim())
+                                            if (hasDay && hasTime) {
+                                                append(" at ")
+                                            }
+                                            append(classInfo.startTime.trim())
+                                        }
+                                        if (timeText.isNotBlank()) {
+                                            Text(
+                                                text = timeText,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = ProfileTheme.MutedForeground.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
                                 }
+                            }
+                            if (index != activeClasses.lastIndex) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    color = ProfileTheme.Border
+                                )
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BookmarkedEventsSection(
+    events: List<Event>,
+    onRemoveBookmark: (Event) -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Bookmarked Events",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = ProfileTheme.Primary
+                )
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = Color.Gray
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            events.forEachIndexed { index, event ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = event.summary ?: "(No Title)",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ProfileTheme.Primary
+                        )
+                        val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
+                        if (dateText.isNotEmpty()) {
+                            Text(
+                                text = dateText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ProfileTheme.MutedForeground
+                            )
+                        }
+                        if (!event.location.isNullOrBlank()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = ProfileTheme.MutedForeground
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = event.location,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ProfileTheme.MutedForeground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    IconButton(onClick = { onRemoveBookmark(event) }) {
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = "Remove Bookmark",
+                            tint = Color(0xFFFFD700)
+                        )
+                    }
+                }
+                if (index != events.lastIndex) {
+                    HorizontalDivider(color = ProfileTheme.Border)
                 }
             }
         }

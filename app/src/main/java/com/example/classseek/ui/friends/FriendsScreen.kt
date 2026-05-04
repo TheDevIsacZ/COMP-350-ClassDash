@@ -117,7 +117,7 @@ fun FriendsScreen(
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null,
     onNavigateToProfile: ((String) -> Unit)? = null,
-    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
 ) {
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
     var activeChatId by remember { mutableStateOf<String?>(null) }
