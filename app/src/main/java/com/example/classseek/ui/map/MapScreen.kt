@@ -116,6 +116,7 @@ fun MapScreen(
     var isMapReady by remember { mutableStateOf(false) }
 
     var userMarkerIcon by remember { mutableStateOf<com.google.android.gms.maps.model.BitmapDescriptor?>(null) }
+    val sharedMarkerIcons = remember { mutableStateMapOf<String, com.google.android.gms.maps.model.BitmapDescriptor?>() }
 
     // State for local share picking
     var showShareDialog by remember { mutableStateOf(false) }
@@ -258,10 +259,17 @@ fun MapScreen(
         }
     }
 
-    LaunchedEffect(allMarkers) {
+    LaunchedEffect(allMarkers, userProfiles.toMap()) {
         allMarkers.forEach { place ->
             if (place.category == MarkerCategory.SHARED && place.senderId != null) {
                 fetchUserProfile(place.senderId)
+                val profile = userProfiles[place.senderId]
+                if (profile?.profilePictureUrl?.isNotBlank() == true && !sharedMarkerIcons.containsKey(place.senderId)) {
+                    scope.launch {
+                        val icon = loadMarkerBitmap(context, profile.profilePictureUrl)
+                        sharedMarkerIcons[place.senderId] = icon
+                    }
+                }
             }
         }
     }
@@ -475,55 +483,45 @@ fun MapScreen(
 
                     if (shouldShowBuildingIcon) {
                         key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
-                            MarkerComposable(
-                                state = rememberMarkerState(position = place.location),
-                                alpha = markerAlpha,
-                                anchor = Offset(0.5f, 1.0f),
-                                onClick = {
-                                    selectedPlace = place
-                                    true
-                                }
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    if (shouldShowName) {
-                                        Surface(
-                                            shape = RoundedCornerShape(3.3.dp),
-                                            color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                            modifier = Modifier.padding(bottom = 1.4.dp)
-                                        ) {
-                                            Text(
-                                                text = place.name,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                                modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
-                                                color = Color.Black
-                                            )
-                                        }
+                            if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                                val icon = sharedMarkerIcons[place.senderId]
+                                Marker(
+                                    state = rememberMarkerState(position = place.location),
+                                    icon = icon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
+                                    alpha = markerAlpha,
+                                    anchor = Offset(0.5f, 0.5f),
+                                    title = place.name,
+                                    onClick = {
+                                        selectedPlace = place
+                                        true
                                     }
-
-                                    if (place.category == MarkerCategory.SHARED && place.senderId != null) {
-                                        val senderProfile = userProfiles[place.senderId]
-                                        if (senderProfile?.profilePictureUrl?.isNotBlank() == true) {
-                                            AsyncImage(
-                                                model = ImageRequest.Builder(LocalContext.current)
-                                                    .data(senderProfile.profilePictureUrl)
-                                                    .allowHardware(false)
-                                                    .build(),
-                                                contentDescription = null,
-                                                modifier = Modifier
-                                                    .size(32.dp)
-                                                    .clip(CircleShape)
-                                                    .border(2.dp, place.category.color, CircleShape),
-                                                contentScale = ContentScale.Crop
-                                            )
-                                        } else {
-                                            Icon(
-                                                imageVector = Icons.Default.AccountCircle,
-                                                contentDescription = null,
-                                                tint = place.category.color,
-                                                modifier = Modifier.size(32.dp)
-                                            )
+                                )
+                            } else {
+                                MarkerComposable(
+                                    state = rememberMarkerState(position = place.location),
+                                    alpha = markerAlpha,
+                                    anchor = Offset(0.5f, 1.0f),
+                                    onClick = {
+                                        selectedPlace = place
+                                        true
+                                    }
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        if (shouldShowName) {
+                                            Surface(
+                                                shape = RoundedCornerShape(3.3.dp),
+                                                color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                                                modifier = Modifier.padding(bottom = 1.4.dp)
+                                            ) {
+                                                Text(
+                                                    text = place.name,
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                                    modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
+                                                    color = Color.Black
+                                                )
+                                            }
                                         }
-                                    } else {
+
                                         Icon(
                                             imageVector = place.category.icon,
                                             contentDescription = null,
@@ -899,7 +897,7 @@ suspend fun loadMarkerBitmap(context: Context, url: String?): com.google.android
             val bitmap = (result as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: return@withContext null
 
             // Manually draw the circular marker with white border
-            val size = 110
+            val size = 74
             val output = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
             val canvas = android.graphics.Canvas(output)
             val paint = android.graphics.Paint().apply { isAntiAlias = true }
@@ -911,8 +909,8 @@ suspend fun loadMarkerBitmap(context: Context, url: String?): com.google.android
             paint.xfermode = null
             paint.style = android.graphics.Paint.Style.STROKE
             paint.color = android.graphics.Color.WHITE
-            paint.strokeWidth = 6f
-            canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 3f, paint)
+            paint.strokeWidth = 4f
+            canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 2f, paint)
 
             com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(output)
         } catch (e: Exception) {
