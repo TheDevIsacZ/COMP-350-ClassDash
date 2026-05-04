@@ -140,7 +140,7 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            ScheduleSection(userProfile, onEditSchedule)
+            ScheduleSection(userProfile, isMyProfile, onEditSchedule)
 
             // Bookmarked events section at the bottom
             if (isMyProfile && bookmarkedEvents.isNotEmpty()) {
@@ -809,7 +809,7 @@ fun FriendItem(friend: Friend) {
 }
 
 @Composable
-fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
+fun ScheduleSection(userProfile: UserProfile, showEdit: Boolean, onEditClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -819,18 +819,20 @@ fun ScheduleSection(userProfile: UserProfile, onEditClick: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
-            IconButton(
-                onClick = onEditClick,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.05f), CircleShape)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "Edit Schedule",
-                    tint = ProfileTheme.MutedForeground
-                )
+            if (showEdit) {
+                IconButton(
+                    onClick = onEditClick,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.05f), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit Schedule",
+                        tint = ProfileTheme.MutedForeground
+                    )
+                }
             }
             Column(
                 modifier = Modifier
