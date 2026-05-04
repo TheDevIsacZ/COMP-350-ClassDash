@@ -29,7 +29,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -124,10 +123,10 @@ private fun GroupChatHeader(
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.White,
-            navigationIconContentColor = ChatHeaderAccent,
-            actionIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+            actionIconContentColor = MaterialTheme.colorScheme.onSurface
         ),
         title = {
             Row(
@@ -186,9 +185,9 @@ private fun DirectMessageHeader(
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             navigationIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
         ),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,7 +225,7 @@ fun ChatScreen(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    onLocationClick: (LatLng, String) -> Unit = { _, _ -> },
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> },
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() }
 ) {
@@ -244,7 +243,7 @@ fun ChatScreen(
 
     var initialReadMarked by remember(chatId) { mutableStateOf(false) }
     var initialScrollDone by remember(chatId) { mutableStateOf(false) }
-    var isChatVisible by remember(chatId) { mutableStateOf(false) }
+    var isChatVisible by remember { mutableStateOf(false) }
     var lastMarkedIncomingMessageId by remember(chatId) { mutableStateOf<String?>(null) }
 
     var myLastReadMessageId by remember(chatId) { mutableStateOf<String?>(null) }
@@ -1282,7 +1281,7 @@ private fun MessageRow(
     showReceipt: Boolean = false,
     receiptText: String? = null,
     seenByProfiles: List<ChatUserProfile> = emptyList(),
-    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
 ) {
     if (msg.type == "system") {
         Box(
@@ -1344,7 +1343,7 @@ private fun MessageRow(
                                         text = "Tap to view on map",
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.clickable {
-                                            onLocationClick(LatLng(msg.latitude, msg.longitude), msg.locationName ?: "Shared Location")
+                                            onLocationClick(LatLng(msg.latitude, msg.longitude), msg.locationName ?: "Shared Location", msg.senderId)
                                         }
                                     )
                                 }

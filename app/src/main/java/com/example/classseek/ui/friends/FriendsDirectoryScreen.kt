@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
 
 @Composable
 fun FriendsDirectoryScreen(
@@ -46,7 +47,10 @@ fun FriendsDirectoryScreen(
     var query by remember { mutableStateOf("") }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(16.dp)
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = onBack) {
@@ -129,7 +133,9 @@ private fun SectionCard(
     onItemClick: (UserSearchItem) -> Unit
 ) {
     Card(
-        colors = CardDefaults.cardColors(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -171,7 +177,8 @@ private fun SearchSectionCard(
     onActionClick: (UserSearchItem) -> Unit
 ) {
     Card(
-        colors = CardDefaults.cardColors(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {

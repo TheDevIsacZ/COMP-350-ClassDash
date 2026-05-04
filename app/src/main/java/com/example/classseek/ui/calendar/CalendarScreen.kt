@@ -3,10 +3,10 @@ package com.example.classseek.ui.calendar
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.widget.CalendarView
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,9 +19,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -59,12 +59,17 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
@@ -130,7 +135,10 @@ fun CalendarScreen(
 
     if (!hasCalendarPermission) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -148,7 +156,10 @@ fun CalendarScreen(
         }
     } else if (signedInAccount == null) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -161,7 +172,9 @@ fun CalendarScreen(
             }
         }
     } else {
-        Scaffold { paddingValues ->
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background
+        ) { paddingValues ->
             val now = System.currentTimeMillis()
             val todayCal = JavaCalendar.getInstance().apply {
                 timeInMillis = now
@@ -187,6 +200,7 @@ fun CalendarScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
                     .padding(paddingValues)
             ) {
                 Row(
@@ -203,12 +217,13 @@ fun CalendarScreen(
                         Text(
                             text = "Schedule",
                             style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
                             text = signedInAccount.email ?: "",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -216,31 +231,24 @@ fun CalendarScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
                         .padding(horizontal = 6.dp)
                 ) {
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        AndroidView(
-                            factory = { ctx ->
-                                CalendarView(ctx).apply {
-                                    setOnDateChangeListener { _, year, month, dayOfMonth ->
-                                        val cal = JavaCalendar.getInstance()
-                                        cal.set(year, month, dayOfMonth, 0, 0, 0)
-                                        cal.set(JavaCalendar.MILLISECOND, 0)
-                                        selectedDateMillis = cal.timeInMillis
-                                        showBottomSheet = true
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .wrapContentHeight()
+                        ClassSeekCalendarCard(
+                            events = calendarEvents,
+                            selectedDateMillis = selectedDateMillis,
+                            onDateSelected = { millis ->
+                                selectedDateMillis = millis
+                                showBottomSheet = true
+                            }
                         )
 
                         HorizontalDivider(
                             thickness = 0.5.dp,
-                            color = Color.LightGray,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
@@ -278,7 +286,7 @@ fun CalendarScreen(
                         if (groupedEvents[todayLabel] == null) {
                             Text(
                                 text = "No events scheduled for today.",
-                                color = Color.Gray,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
@@ -433,15 +441,29 @@ fun CalendarScreen(
                 if (chats.isEmpty()) {
                     Text("No chats available", modifier = Modifier.padding(vertical = 16.dp))
                 } else {
-                    LazyColumn {
+                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
                         items(chats) { chat ->
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
-                                    Icon(
-                                        if (chat.type == "group") Icons.Default.Group else Icons.Default.Person,
-                                        contentDescription = null
-                                    )
+                                    if (chat.type == "dm" && chat.profilePictureUrl.isNotBlank()) {
+                                        AsyncImage(
+                                            model = ImageRequest.Builder(LocalContext.current)
+                                                .data(chat.profilePictureUrl)
+                                                .build(),
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(CircleShape),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = if (chat.type == "group") Icons.Default.Group else Icons.Default.Person,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(40.dp)
+                                        )
+                                    }
                                 },
                                 modifier = Modifier.clickable {
                                     scope.launch {
@@ -470,10 +492,279 @@ fun CalendarScreen(
                         }
                     }
                 }
+                Spacer(Modifier.height(32.dp))
             }
         }
     }
 }
+
+
+@Composable
+private fun ClassSeekCalendarCard(
+    events: List<Event>,
+    selectedDateMillis: Long?,
+    onDateSelected: (Long) -> Unit
+) {
+    var visibleMonthMillis by remember {
+        mutableStateOf(
+            JavaCalendar.getInstance().apply {
+                set(JavaCalendar.DAY_OF_MONTH, 1)
+                set(JavaCalendar.HOUR_OF_DAY, 0)
+                set(JavaCalendar.MINUTE, 0)
+                set(JavaCalendar.SECOND, 0)
+                set(JavaCalendar.MILLISECOND, 0)
+            }.timeInMillis
+        )
+    }
+
+    val monthCalendar = remember(visibleMonthMillis) {
+        JavaCalendar.getInstance().apply {
+            timeInMillis = visibleMonthMillis
+            set(JavaCalendar.DAY_OF_MONTH, 1)
+            set(JavaCalendar.HOUR_OF_DAY, 0)
+            set(JavaCalendar.MINUTE, 0)
+            set(JavaCalendar.SECOND, 0)
+            set(JavaCalendar.MILLISECOND, 0)
+        }
+    }
+
+    val monthTitle = remember(visibleMonthMillis) {
+        SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(visibleMonthMillis))
+    }
+
+    val eventDayKeys = remember(events) {
+        events.mapNotNull { event ->
+            val millis = event.start?.dateTime?.value ?: event.start?.date?.value
+            millis?.let { dayKey(it) }
+        }.toSet()
+    }
+
+    val todayKey = dayKey(System.currentTimeMillis())
+    val selectedKey = selectedDateMillis?.let { dayKey(it) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = CalendarVisuals.containerColor()
+        ),
+        shape = RoundedCornerShape(22.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = {
+                        visibleMonthMillis = JavaCalendar.getInstance().apply {
+                            timeInMillis = visibleMonthMillis
+                            add(JavaCalendar.MONTH, -1)
+                        }.timeInMillis
+                    }
+                ) {
+                    Text("‹", style = MaterialTheme.typography.titleLarge)
+                }
+
+                Text(
+                    text = monthTitle,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = CalendarVisuals.primaryTextColor()
+                )
+
+                TextButton(
+                    onClick = {
+                        visibleMonthMillis = JavaCalendar.getInstance().apply {
+                            timeInMillis = visibleMonthMillis
+                            add(JavaCalendar.MONTH, 1)
+                        }.timeInMillis
+                    }
+                ) {
+                    Text("›", style = MaterialTheme.typography.titleLarge)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").forEach { day ->
+                    Text(
+                        text = day,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = CalendarVisuals.mutedTextColor()
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val dayCells = remember(visibleMonthMillis) {
+                buildCalendarCells(monthCalendar)
+            }
+
+            dayCells.chunked(7).forEach { week ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    week.forEach { dayMillis ->
+                        CalendarDayCell(
+                            dayMillis = dayMillis,
+                            eventDayKeys = eventDayKeys,
+                            todayKey = todayKey,
+                            selectedKey = selectedKey,
+                            onDateSelected = onDateSelected,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarDayCell(
+    dayMillis: Long?,
+    eventDayKeys: Set<String>,
+    todayKey: String,
+    selectedKey: String?,
+    onDateSelected: (Long) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (dayMillis == null) {
+        Box(
+            modifier = modifier
+                .height(44.dp)
+                .padding(2.dp)
+        )
+        return
+    }
+
+    val cal = remember(dayMillis) {
+        JavaCalendar.getInstance().apply { timeInMillis = dayMillis }
+    }
+
+    val key = remember(dayMillis) { dayKey(dayMillis) }
+    val isToday = key == todayKey
+    val isSelected = key == selectedKey
+    val hasEvent = key in eventDayKeys
+
+    val backgroundColor = when {
+        isSelected -> MaterialTheme.colorScheme.primary
+        hasEvent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+        else -> Color.Transparent
+    }
+
+    val textColor = when {
+        isSelected -> MaterialTheme.colorScheme.onPrimary
+        else -> CalendarVisuals.primaryTextColor()
+    }
+
+    Box(
+        modifier = modifier
+            .height(44.dp)
+            .padding(2.dp)
+            .clip(CircleShape)
+            .background(backgroundColor)
+            .border(
+                width = if (isToday && !isSelected) 1.dp else 0.dp,
+                color = if (isToday && !isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                shape = CircleShape
+            )
+            .clickable { onDateSelected(dayMillis) },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = cal.get(JavaCalendar.DAY_OF_MONTH).toString(),
+                color = textColor,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal
+            )
+
+            if (hasEvent) {
+                Box(
+                    modifier = Modifier
+                        .size(4.dp)
+                        .clip(CircleShape)
+                        .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary)
+                )
+            } else {
+                Spacer(modifier = Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
+private fun buildCalendarCells(monthCalendar: JavaCalendar): List<Long?> {
+    val cal = monthCalendar.clone() as JavaCalendar
+    val firstDayOfWeek = cal.get(JavaCalendar.DAY_OF_WEEK)
+    val daysInMonth = cal.getActualMaximum(JavaCalendar.DAY_OF_MONTH)
+
+    val cells = mutableListOf<Long?>()
+    repeat(firstDayOfWeek - JavaCalendar.SUNDAY) {
+        cells.add(null)
+    }
+
+    for (day in 1..daysInMonth) {
+        val dayCal = monthCalendar.clone() as JavaCalendar
+        dayCal.set(JavaCalendar.DAY_OF_MONTH, day)
+        dayCal.set(JavaCalendar.HOUR_OF_DAY, 0)
+        dayCal.set(JavaCalendar.MINUTE, 0)
+        dayCal.set(JavaCalendar.SECOND, 0)
+        dayCal.set(JavaCalendar.MILLISECOND, 0)
+        cells.add(dayCal.timeInMillis)
+    }
+
+    while (cells.size % 7 != 0) {
+        cells.add(null)
+    }
+
+    return cells
+}
+
+private fun dayKey(millis: Long): String {
+    val cal = JavaCalendar.getInstance().apply {
+        timeInMillis = millis
+        set(JavaCalendar.HOUR_OF_DAY, 0)
+        set(JavaCalendar.MINUTE, 0)
+        set(JavaCalendar.SECOND, 0)
+        set(JavaCalendar.MILLISECOND, 0)
+    }
+    return "${cal.get(JavaCalendar.YEAR)}-${cal.get(JavaCalendar.MONTH)}-${cal.get(JavaCalendar.DAY_OF_MONTH)}"
+}
+
+private object CalendarVisuals {
+    @Composable
+    fun containerColor(): Color {
+        return if (MaterialTheme.colorScheme.background.luminance() < 0.5f) {
+            Color(0xFF1E1E2A)
+        } else {
+            Color.White
+        }
+    }
+
+    @Composable
+    fun primaryTextColor(): Color {
+        return MaterialTheme.colorScheme.onSurface
+    }
+
+    @Composable
+    fun mutedTextColor(): Color {
+        return MaterialTheme.colorScheme.onSurfaceVariant
+    }
+}
+
 
 @Composable
 fun AgendaItem(
@@ -499,25 +790,46 @@ fun AgendaItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.width(60.dp), horizontalAlignment = Alignment.End) {
-                Text(text = startTime, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                Text(
+                    text = startTime,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
                 if (endTime.isNotEmpty()) {
-                    Text(text = endTime, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                    Text(
+                        text = endTime,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
             Spacer(modifier = Modifier.width(12.dp))
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .background(eventColor.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                    .background(
+                        if (MaterialTheme.colorScheme.background.luminance() < 0.5f) eventColor.copy(alpha = 0.22f) else eventColor.copy(alpha = 0.1f),
+                        RoundedCornerShape(8.dp)
+                    )
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.width(4.dp).height(24.dp).background(eventColor, RoundedCornerShape(2.dp)))
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = event.summary ?: "(No Title)",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                         if (!event.location.isNullOrEmpty()) {
-                            Text(text = event.location, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                            Text(
+                                text = event.location,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
 

@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun SettingsScreen(
     onEditProfile: () -> Unit,
-    onEditSchedule: () -> Unit,
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit
 ) {
@@ -35,14 +34,6 @@ fun SettingsScreen(
             title = "Edit Profile",
             subtitle = "Update your profile information",
             onClick = onEditProfile
-        )
-
-        HorizontalDivider()
-
-        SettingsRow(
-            title = "Edit Schedule",
-            subtitle = "Update your classes and semester",
-            onClick = onEditSchedule
         )
 
         HorizontalDivider()

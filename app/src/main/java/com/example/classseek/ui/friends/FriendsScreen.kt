@@ -117,7 +117,7 @@ fun FriendsScreen(
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null,
     onNavigateToProfile: ((String) -> Unit)? = null,
-    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
 ) {
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
     var activeChatId by remember { mutableStateOf<String?>(null) }
@@ -590,7 +590,9 @@ fun UserActionDialog(
                 .fillMaxWidth()
                 .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
@@ -728,7 +730,7 @@ fun MessagesMainScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FA))
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
             modifier = Modifier
@@ -749,6 +751,7 @@ fun MessagesMainScreen(
                 modifier = Modifier
                     .size(40.dp)
                     .border(1.dp, Color.LightGray, CircleShape)
+                    .background(MaterialTheme.colorScheme.secondary, CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.AddComment,
@@ -775,7 +778,9 @@ fun MessagesMainScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
                         shape = RoundedCornerShape(24.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -832,7 +837,9 @@ fun MessagesMainScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
                     shape = RoundedCornerShape(24.dp)
                 ) {
                     Column(modifier = Modifier.padding(vertical = 16.dp)) {
@@ -876,7 +883,8 @@ fun MessagesMainScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface),
                     shape = RoundedCornerShape(24.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -891,7 +899,7 @@ fun MessagesMainScreen(
                                 modifier = Modifier
                                     .padding(vertical = 20.dp)
                                     .align(Alignment.CenterHorizontally),
-                                color = Color.Gray
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
                             filteredChats.forEachIndexed { index, chat ->
@@ -903,7 +911,7 @@ fun MessagesMainScreen(
                                 if (index < filteredChats.size - 1) {
                                     HorizontalDivider(
                                         modifier = Modifier.padding(vertical = 8.dp),
-                                        color = Color.LightGray.copy(alpha = 0.3f)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -1020,14 +1028,19 @@ fun SearchBar(
         value = query,
         onValueChange = onQueryChange,
         placeholder = { Text(placeholder, color = Color.Gray) },
+        trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp),
         shape = RoundedCornerShape(26.dp),
         colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFFF1F3F4),
-            unfocusedContainerColor = Color(0xFFF1F3F4),
-            disabledContainerColor = Color(0xFFF1F3F4),
+            focusedTextColor = Color.Black,
+            unfocusedTextColor = Color.Black,
+
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White,
+            disabledContainerColor = Color.White,
+
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
         ),
@@ -1144,7 +1157,7 @@ fun NewMessageScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF8F9FA))
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Row(
             modifier = Modifier
@@ -1199,6 +1212,7 @@ fun NewMessageScreen(
                 placeholder = { Text("Group Title") },
                 shape = RoundedCornerShape(28.dp),
                 singleLine = true
+
             )
 
             if (selectedMembers.isNotEmpty()) {
@@ -1254,7 +1268,8 @@ fun NewMessageScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
@@ -1290,7 +1305,8 @@ fun NewMessageScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
@@ -1331,7 +1347,8 @@ fun NewMessageScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(24.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {

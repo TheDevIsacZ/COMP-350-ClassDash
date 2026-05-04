@@ -1,4 +1,3 @@
-
 package com.example.classseek.ui
 
 import android.Manifest
@@ -59,6 +58,7 @@ import com.example.classseek.ui.friends.FriendsScreen
 import com.example.classseek.ui.friends.UserSearchItem
 import com.example.classseek.ui.map.MapPlace
 import com.example.classseek.ui.map.MapScreen
+import com.example.classseek.ui.theme.AppThemeMode
 import com.example.classseek.ui.theme.ClassSeekTheme
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
@@ -92,6 +92,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.background
+import androidx.compose.material3.MaterialTheme
 
 private const val schoolCalendarID =
     "c_d51f6135decfa961f6e26e7b759dd6d102ec5eb050afb040b211b749b04c0084@group.calendar.google.com"
@@ -118,14 +120,37 @@ class ClassSeekActivity : ComponentActivity() {
             }
 
         setContent {
-            ClassSeekTheme {
+            val themePrefs = remember {
+                getSharedPreferences("classseek_settings", MODE_PRIVATE)
+            }
+
+            var themeMode by rememberSaveable {
+                mutableStateOf(
+                    runCatching {
+                        AppThemeMode.valueOf(
+                            themePrefs.getString("theme_mode", AppThemeMode.SYSTEM.name)
+                                ?: AppThemeMode.SYSTEM.name
+                        )
+                    }.getOrDefault(AppThemeMode.SYSTEM)
+                )
+            }
+
+            ClassSeekTheme(themeMode = themeMode) { isDarkTheme ->
                 ClassSeekApp(
                     initialChatId = launchChatIdState.value,
                     initialChatTitle = launchChatTitleState.value,
                     onNotificationChatConsumed = {
                         launchChatIdState.value = null
                         launchChatTitleState.value = null
-                    }
+                    },
+                    themeMode = themeMode,
+                    onThemeModeChange = { newThemeMode ->
+                        themeMode = newThemeMode
+                        themePrefs.edit()
+                            .putString("theme_mode", newThemeMode.name)
+                            .apply()
+                    },
+                    isDarkTheme = isDarkTheme
                 )
             }
         }
@@ -160,6 +185,7 @@ class ClassSeekActivity : ComponentActivity() {
                     credential
                 ).setApplicationName("ClassSeek").build()
 
+                // Fetch from the start of today to ensure all events for the day are shown
                 val todayStartCal = java.util.Calendar.getInstance().apply {
                     set(java.util.Calendar.HOUR_OF_DAY, 0)
                     set(java.util.Calendar.MINUTE, 0)
@@ -231,10 +257,7 @@ class ClassSeekActivity : ComponentActivity() {
                     .setDateTime(startDateTime)
                     .setTimeZone(timeZoneId)
 
-                val endDateTime = DateTime(
-                    java.util.Date(firstStartCal.timeInMillis + durationMs),
-                    TimeZone.getDefault()
-                )
+                val endDateTime = DateTime(java.util.Date(firstStartCal.timeInMillis + durationMs), TimeZone.getDefault())
                 event.end = EventDateTime()
                     .setDateTime(endDateTime)
                     .setTimeZone(timeZoneId)
@@ -439,7 +462,10 @@ private suspend fun deleteCurrentAccount(
 fun ClassSeekApp(
     initialChatId: String? = null,
     initialChatTitle: String? = null,
-    onNotificationChatConsumed: () -> Unit = {}
+    onNotificationChatConsumed: () -> Unit = {},
+    themeMode: AppThemeMode,
+    onThemeModeChange: (AppThemeMode) -> Unit,
+    isDarkTheme: Boolean
 ) {
     val auth = FirebaseAuth.getInstance()
     val db = FirebaseFirestore.getInstance()
@@ -456,7 +482,7 @@ fun ClassSeekApp(
     var viewOtherUserId by remember { mutableStateOf<String?>(null) }
     var otherUserProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isFriendWithOther by remember { mutableStateOf(false) }
-    var friendRequestStatus by remember { mutableStateOf<String?>(null) }
+    var friendRequestStatus by remember { mutableStateOf<String?>(null) } // null, "pending", "sent"
     var isEditingSchedule by remember { mutableStateOf(false) }
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
 
@@ -479,6 +505,7 @@ fun ClassSeekApp(
     val temporaryMarkers = remember { mutableStateListOf<MapPlace>() }
     var sharedLocationToView by remember { mutableStateOf<LatLng?>(null) }
     var sharedLocationNameToView by remember { mutableStateOf<String?>(null) }
+    var sharedLocationByUidToView by remember { mutableStateOf<String?>(null) }
 
     var isViewingAllFriends by remember { mutableStateOf(false) }
     var pendingFriendRequests by remember { mutableStateOf<List<UserSearchItem>>(emptyList()) }
@@ -513,6 +540,7 @@ fun ClassSeekApp(
         friendRequestStatus = null
         sharedLocationToView = null
         sharedLocationNameToView = null
+        sharedLocationByUidToView = null
         isViewingAllFriends = false
         pendingFriendRequests = emptyList()
         outgoingFriendRequests = emptyList()
@@ -578,8 +606,8 @@ fun ClassSeekApp(
                     val displayName = doc.getString("displayName")?.trim().orEmpty()
 
                     val matches = name.contains(query, ignoreCase = true) ||
-                        displayName.contains(query, ignoreCase = true) ||
-                        email.contains(query, ignoreCase = true)
+                            displayName.contains(query, ignoreCase = true) ||
+                            email.contains(query, ignoreCase = true)
 
                     if (!matches || email.isBlank()) return@mapNotNull null
 
@@ -618,12 +646,25 @@ fun ClassSeekApp(
         val uid = firebaseUser?.uid
         if (uid == null) return@DisposableEffect onDispose {}
 
-        updatePresenceSafely(scope = scope, db = db, uid = uid, isOnline = true)
+        fun updatePresence(isOnline: Boolean) {
+            db.collection("users")
+                .document(uid)
+                .set(
+                    mapOf(
+                        "uid" to uid,
+                        "isOnline" to isOnline,
+                        "lastPresenceUpdate" to FieldValue.serverTimestamp()
+                    ),
+                    SetOptions.merge()
+                )
+        }
+
+        updatePresence(true)
 
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> updatePresenceSafely(scope, db, uid, true)
-                Lifecycle.Event.ON_STOP -> updatePresenceSafely(scope, db, uid, false)
+                Lifecycle.Event.ON_START -> updatePresence(true)
+                Lifecycle.Event.ON_STOP -> updatePresence(false)
                 else -> Unit
             }
         }
@@ -632,7 +673,7 @@ fun ClassSeekApp(
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            updatePresenceSafely(scope, db, uid, false)
+            updatePresence(false)
         }
     }
 
@@ -644,7 +685,7 @@ fun ClassSeekApp(
         }
 
         val friendProfilesByUid = linkedMapOf<String, UserSearchItem>()
-        val friendProfileRegistrations = mutableListOf<ListenerRegistration>()
+        val friendProfileRegistrations = mutableListOf<com.google.firebase.firestore.ListenerRegistration>()
 
         val friendsRegistration = db.collection("users")
             .document(uid)
@@ -1103,6 +1144,8 @@ fun ClassSeekApp(
         calendarEvents + virtualEvents
     }
 
+    val myBookmarkedEvents = displayedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
+
     if (viewOtherUserId != null) {
         BackHandler {
             viewOtherUserId = null
@@ -1110,12 +1153,14 @@ fun ClassSeekApp(
         }
 
         if (otherUserProfile != null) {
+            val otherBookmarkedEvents = displayedEvents.filter { otherUserProfile?.bookmarkedEventIds?.contains(it.id) == true }
             ProfileScreen(
                 userProfile = otherUserProfile!!,
                 isMyProfile = false,
                 favoriteFriends = emptyList(),
                 isFriend = isFriendWithOther,
                 friendRequestStatus = friendRequestStatus,
+                bookmarkedEvents = otherBookmarkedEvents,
                 onSignOut = {},
                 onEditProfile = {},
                 onDeleteAccount = {},
@@ -1213,9 +1258,10 @@ fun ClassSeekApp(
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.FRIENDS
             },
-            onLocationClick = { latLng, name ->
+            onLocationClick = { latLng, name, senderId ->
                 sharedLocationToView = latLng
                 sharedLocationNameToView = name
+                sharedLocationByUidToView = senderId
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.MAP
             }
@@ -1280,27 +1326,34 @@ fun ClassSeekApp(
         BackHandler {
             isEditingSchedule = false
         }
-        ScheduleEditScreen(
-            userProfile = userProfile!!,
-            onSave = { updatedClasses, newSemester ->
-                scope.launch {
-                    try {
-                        val user = firebaseUser ?: throw Exception("No signed-in user")
-                        db.collection("users").document(user.uid)
-                            .update(
-                                mapOf(
-                                    "classes" to updatedClasses,
-                                    "semester" to newSemester
-                                )
-                            ).await()
-                        isEditingSchedule = false
-                    } catch (e: Exception) {
-                        Log.e("PROFILE_DEBUG", "Error saving schedule", e)
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            ScheduleEditScreen(
+                userProfile = userProfile!!,
+                onSave = { updatedClasses, newSemester ->
+                    scope.launch {
+                        try {
+                            val user = firebaseUser ?: throw Exception("No signed-in user")
+                            db.collection("users").document(user.uid)
+                                .update(
+                                    mapOf(
+                                        "classes" to updatedClasses,
+                                        "semester" to newSemester
+                                    )
+                                ).await()
+                            isEditingSchedule = false
+                        } catch (e: Exception) {
+                            Log.e("PROFILE_DEBUG", "Error saving schedule", e)
+                        }
                     }
-                }
-            },
-            onBack = { isEditingSchedule = false }
-        )
+                },
+                onBack = { isEditingSchedule = false }
+            )
+        }
     } else if (needsProfileSetup || isEditingProfile) {
         ProfileCreationScreen(
             initialProfile = userProfile,
@@ -1387,8 +1440,8 @@ fun ClassSeekApp(
                 }
             }
         ) {
-            Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                Box(modifier = Modifier.padding(innerPadding)) {
+            Scaffold( modifier = Modifier.fillMaxSize(),containerColor = MaterialTheme.colorScheme.background) { innerPadding ->
+                Box(modifier = Modifier.background(MaterialTheme.colorScheme.background).padding(innerPadding)) {
                     when (currentDestination) {
                         AppDestinations.CALENDAR -> {
                             CalendarScreen(
@@ -1420,6 +1473,7 @@ fun ClassSeekApp(
                             ProfileScreen(
                                 userProfile = userProfile!!,
                                 isMyProfile = true,
+                                bookmarkedEvents = myBookmarkedEvents,
                                 favoriteFriends = favoriteFriends,
                                 onTogglePinFriend = { friendUid ->
                                     scope.launch {
@@ -1434,7 +1488,7 @@ fun ClassSeekApp(
                                                 docRef.set(mapOf("pinnedAt" to FieldValue.serverTimestamp()))
                                             }
                                         } catch (e: Exception) {
-                                            Log.e("FRIEND_DEBUG", "Error toggling pin from profile", e)
+                                            Log.e("AUTH_DEBUG", "Error deleting account", e)
                                         }
                                     }
                                 },
@@ -1472,6 +1526,18 @@ fun ClassSeekApp(
                                         }
                                     }
                                 },
+                                onRemoveBookmark = { eventId ->
+                                    scope.launch {
+                                        try {
+                                            val uid = firebaseUser?.uid ?: return@launch
+                                            db.collection("users").document(uid)
+                                                .update("bookmarkedEventIds", FieldValue.arrayRemove(eventId))
+                                                .await()
+                                        } catch (e: Exception) {
+                                            Log.e("PROFILE_DEBUG", "Error removing bookmark", e)
+                                        }
+                                    }
+                                },
                                 onEditSchedule = {
                                     isEditingSchedule = true
                                 },
@@ -1492,9 +1558,10 @@ fun ClassSeekApp(
                                 onNavigateToProfile = { uid ->
                                     viewOtherUserId = uid
                                 },
-                                onLocationClick = { latLng, name ->
+                                onLocationClick = { latLng, name, senderId ->
                                     sharedLocationToView = latLng
                                     sharedLocationNameToView = name
+                                    sharedLocationByUidToView = senderId
                                     currentDestination = AppDestinations.MAP
                                 },
                                 auth = auth
@@ -1508,18 +1575,19 @@ fun ClassSeekApp(
                                 temporaryMarkers = temporaryMarkers,
                                 onAddTemporaryMarker = { temporaryMarkers.add(it) },
                                 sharedLocation = sharedLocationToView,
-                                sharedLocationName = sharedLocationNameToView
+                                sharedLocationName = sharedLocationNameToView,
+                                sharedByUid = sharedLocationByUidToView,
+                                isDarkTheme = isDarkTheme
                             )
                         }
 
                         AppDestinations.SETTINGS -> {
                             SettingsProfileScreen(
                                 userProfile = userProfile!!,
+                                themeMode = themeMode,
+                                onThemeModeChange = onThemeModeChange,
                                 onEditProfile = {
                                     isEditingProfile = true
-                                },
-                                onEditSchedule = {
-                                    isEditingSchedule = true
                                 },
                                 onSignOut = {
                                     auth.signOut()
