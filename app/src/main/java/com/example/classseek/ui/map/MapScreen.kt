@@ -522,12 +522,19 @@ fun MapScreen(
                                             }
                                         }
 
-                                        Icon(
-                                            imageVector = place.category.icon,
-                                            contentDescription = null,
-                                            tint = place.category.color,
-                                            modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color.White, CircleShape)
+                                                .border(2.dp, place.category.color, CircleShape)
+                                                .padding(3.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = place.category.icon,
+                                                contentDescription = null,
+                                                tint = place.category.color,
+                                                modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -740,12 +747,19 @@ fun MapScreen(
                                     isFilterMenuExpanded = false
                                 },
                                 leadingIcon = {
-                                    Icon(
-                                        imageVector = category.icon,
-                                        contentDescription = null,
-                                        tint = category.color,
-                                        modifier = Modifier.size(20.dp)
-                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .background(Color.White, CircleShape)
+                                            .border(2.dp, category.color, CircleShape)
+                                            .padding(3.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = category.icon,
+                                            contentDescription = null,
+                                            tint = category.color,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
                                 },
                                 trailingIcon = if (selectedCategory == category) {
                                     { Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.size(16.dp)) }
@@ -807,11 +821,19 @@ fun MapScreen(
                                         headlineContent = { Text(place.name) },
                                         supportingContent = { Text(place.category.label) },
                                         leadingContent = {
-                                            Icon(
-                                                imageVector = place.category.icon,
-                                                contentDescription = null,
-                                                tint = place.category.color
-                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color.White, CircleShape)
+                                                    .border(2.dp, place.category.color, CircleShape)
+                                                    .padding(3.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = place.category.icon,
+                                                    contentDescription = null,
+                                                    tint = place.category.color,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         },
                                         modifier = Modifier.clickable {
                                             scope.launch {
