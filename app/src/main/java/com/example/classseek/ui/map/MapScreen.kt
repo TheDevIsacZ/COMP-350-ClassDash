@@ -60,6 +60,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.firestore
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -113,6 +114,8 @@ fun MapScreen(
     var mapType by remember { mutableStateOf(MapType.NORMAL) }
     var isFilterMenuExpanded by remember { mutableStateOf(false) }
     var isMapReady by remember { mutableStateOf(false) }
+
+    var userMarkerIcon by remember { mutableStateOf<com.google.android.gms.maps.model.BitmapDescriptor?>(null) }
 
     // State for local share picking
     var showShareDialog by remember { mutableStateOf(false) }
@@ -416,66 +419,26 @@ fun MapScreen(
                 onMapClick = { selectedPlace = null }
             ) {
                 val profilePicUrl = currentUserProfile?.profilePictureUrl
-                val userMarkerState = rememberMarkerState(position = currentLatLng)
 
-                // Debug logs to track profile picture URL updates
+                // Fetch the bitmap whenever the profile picture URL changes
                 LaunchedEffect(profilePicUrl) {
                     Log.d("MapScreen", "User profilePicUrl updated in MapScreen: '$profilePicUrl'")
-                }
-
-                // Keep marker position synchronized with current location
-                LaunchedEffect(currentLatLng) {
-                    userMarkerState.position = currentLatLng
-                }
-
-                // Use key to force MarkerComposable refresh when profile picture changes
-                key(profilePicUrl) {
-                    MarkerComposable(
-                        state = userMarkerState,
-                        anchor = Offset(0.5f, 0.5f),
-                        onClick = {
-                            selectedPlace = MapPlace("My Location", currentLatLng, MarkerCategory.SHARED, "Share your live location")
-                            true
-                        }
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFFE9EBEF)) // Match ProfileTheme.Accent from ProfileScreen
-                                .border(2.dp, Color.White, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Default icon as fallback/background
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "User Location",
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(10.dp),
-                                tint = Color(0xFF717182) // Match ProfileTheme.MutedForeground from ProfileScreen
-                            )
-
-                            if (!profilePicUrl.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(profilePicUrl)
-                                        .allowHardware(false)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = "User Location",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop,
-                                    onState = { state ->
-                                        if (state is coil.compose.AsyncImagePainter.State.Error) {
-                                            Log.e("MapScreen", "AsyncImage failed to load: ${state.result.throwable.message}")
-                                        }
-                                    }
-                                )
-                            }
-                        }
+                    if (!profilePicUrl.isNullOrBlank()) {
+                        userMarkerIcon = loadMarkerBitmap(context, profilePicUrl)
                     }
                 }
+
+                // Only draw the marker once the icon is ready OR use a fallback
+                Marker(
+                    state = rememberMarkerState(position = currentLatLng),
+                    icon = userMarkerIcon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
+                    anchor = Offset(0.5f, 0.5f),
+                    title = "My Location",
+                    onClick = {
+                        selectedPlace = MapPlace("My Location", currentLatLng, MarkerCategory.SHARED, "Your live location")
+                        true
+                    }
+                )
 
                 allMarkers.forEach { place ->
                     val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
@@ -483,8 +446,8 @@ fun MapScreen(
 
                     // Logic to hide location markers if overlapped by specific categories (Bookmarks, Classes, Shared)
                     val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers, incomingSharedMarker) {
-                        if (place.category == MarkerCategory.BUILDING || 
-                            place.category == MarkerCategory.STUDENT_SERVICE || 
+                        if (place.category == MarkerCategory.BUILDING ||
+                            place.category == MarkerCategory.STUDENT_SERVICE ||
                             place.category == MarkerCategory.DINING) {
                             bookmarkMarkers.any { it.location == place.location } ||
                                     scheduleMarkers.any { it.location == place.location } ||
@@ -582,7 +545,12 @@ fun MapScreen(
 
         selectedPlace?.let { place ->
             Card(
-                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp).padding(bottom = 80.dp).fillMaxWidth().clickable { },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+                    .padding(bottom = 80.dp)
+                    .fillMaxWidth()
+                    .clickable { },
                 shape = RoundedCornerShape(16.dp),
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
@@ -599,7 +567,10 @@ fun MapScreen(
                                         .allowHardware(false)
                                         .build(),
                                     contentDescription = null,
-                                    modifier = Modifier.size(24.dp).clip(CircleShape).background(Color.LightGray)
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.LightGray)
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
@@ -691,7 +662,7 @@ fun MapScreen(
                                                         locationName = place.name
                                                     )
                                                 }
-                                                
+
                                                 if (place.name == "Current Location") {
                                                     onAddTemporaryMarker(place)
                                                 }
@@ -709,7 +680,10 @@ fun MapScreen(
             }
         }
 
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp).align(Alignment.TopCenter)) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp)
+            .align(Alignment.TopCenter)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextField(
                     value = searchQuery,
@@ -802,7 +776,9 @@ fun MapScreen(
             }
         }
 
-        Box(modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) {
+        Box(modifier = Modifier
+            .align(Alignment.BottomStart)
+            .padding(16.dp)) {
             Column(horizontalAlignment = Alignment.Start) {
                 if (isListVisible) {
                     Card(
@@ -907,4 +883,40 @@ private fun formatEventDateTime(dateTime: EventDateTime?): String {
         val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
         sdf.format(Date(dateTime.date.value))
     } else ""
+}
+
+suspend fun loadMarkerBitmap(context: Context, url: String?): com.google.android.gms.maps.model.BitmapDescriptor? {
+    if (url.isNullOrBlank()) return null
+    return withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val loader = coil.ImageLoader(context)
+            val request = ImageRequest.Builder(context)
+                .data(url)
+                .allowHardware(false) // CRITICAL: Map thread cannot read hardware bitmaps
+                .build()
+
+            val result = (loader.execute(request) as? coil.request.SuccessResult)?.drawable
+            val bitmap = (result as? android.graphics.drawable.BitmapDrawable)?.bitmap ?: return@withContext null
+
+            // Manually draw the circular marker with white border
+            val size = 110
+            val output = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(output)
+            val paint = android.graphics.Paint().apply { isAntiAlias = true }
+
+            canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+            paint.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
+            canvas.drawBitmap(bitmap, null, android.graphics.Rect(0, 0, size, size), paint)
+
+            paint.xfermode = null
+            paint.style = android.graphics.Paint.Style.STROKE
+            paint.color = android.graphics.Color.WHITE
+            paint.strokeWidth = 6f
+            canvas.drawCircle(size / 2f, size / 2f, (size / 2f) - 3f, paint)
+
+            com.google.android.gms.maps.model.BitmapDescriptorFactory.fromBitmap(output)
+        } catch (e: Exception) {
+            null
+        }
+    }
 }
