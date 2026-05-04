@@ -387,6 +387,7 @@ fun ClassSeekApp(
     val temporaryMarkers = remember { mutableStateListOf<MapPlace>() }
     var sharedLocationToView by remember { mutableStateOf<LatLng?>(null) }
     var sharedLocationNameToView by remember { mutableStateOf<String?>(null) }
+    var sharedLocationByUidToView by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(initialChatId, initialChatTitle) {
         pendingNotificationChatId = initialChatId
@@ -870,9 +871,10 @@ fun ClassSeekApp(
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.FRIENDS
             },
-            onLocationClick = { latLng, name ->
+            onLocationClick = { latLng, name, senderId ->
                 sharedLocationToView = latLng
                 sharedLocationNameToView = name
+                sharedLocationByUidToView = senderId
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.MAP
             }
@@ -1120,9 +1122,10 @@ fun ClassSeekApp(
                                 onNavigateToProfile = { uid ->
                                     viewOtherUserId = uid
                                 },
-                                onLocationClick = { latLng, name ->
+                                onLocationClick = { latLng, name, senderId ->
                                     sharedLocationToView = latLng
                                     sharedLocationNameToView = name
+                                    sharedLocationByUidToView = senderId
                                     currentDestination = AppDestinations.MAP
                                 },
                                 auth = auth
@@ -1135,7 +1138,8 @@ fun ClassSeekApp(
                                 temporaryMarkers = temporaryMarkers,
                                 onAddTemporaryMarker = { temporaryMarkers.add(it) },
                                 sharedLocation = sharedLocationToView,
-                                sharedLocationName = sharedLocationNameToView
+                                sharedLocationName = sharedLocationNameToView,
+                                sharedByUid = sharedLocationByUidToView
                             )
                         }
                     }

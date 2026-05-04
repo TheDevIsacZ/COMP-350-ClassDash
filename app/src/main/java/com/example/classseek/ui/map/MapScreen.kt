@@ -110,7 +110,7 @@ fun MapScreen(
     var selectedCategory by remember { mutableStateOf(MarkerCategory.ALL) }
     var isListVisible by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
-    var mapType by remember { mutableStateOf(MapType.SATELLITE) }
+    var mapType by remember { mutableStateOf(MapType.NORMAL) }
     var isFilterMenuExpanded by remember { mutableStateOf(false) }
     var isMapReady by remember { mutableStateOf(false) }
 
