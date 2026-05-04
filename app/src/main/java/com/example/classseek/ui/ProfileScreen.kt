@@ -153,6 +153,7 @@ fun ProfileScreen(
                     onFriendClick = { selectedFriend = it },
                     onViewAllClick = { onViewAllFriends?.invoke() }
                 )
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             // Bookmarked events section at the bottom
@@ -828,7 +829,7 @@ fun ScheduleSection(
                     Spacer(modifier = Modifier.height(4.dp))
                 }
 
-                if (userProfile.classes.isEmpty()) {
+                if (userProfile.classes.isEmpty() || userProfile.classes.all { it.className.isBlank() }) {
                     Text(
                         text = "Empty",
                         style = MaterialTheme.typography.bodyMedium,

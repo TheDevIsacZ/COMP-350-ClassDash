@@ -1470,6 +1470,7 @@ fun ClassSeekApp(
                         }
 
                         AppDestinations.PROFILE -> {
+                            val myBookmarkedEvents = displayedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
                             ProfileScreen(
                                 userProfile = userProfile!!,
                                 isMyProfile = true,
