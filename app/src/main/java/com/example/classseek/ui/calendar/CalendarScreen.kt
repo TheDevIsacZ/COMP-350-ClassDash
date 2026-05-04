@@ -508,6 +508,7 @@ fun AgendaItem(
     val eventColor = Color(0xFF4285F4)
     var showMenu by remember { mutableStateOf(false) }
     val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) ?: false
+    var optimisticIsBookmarked by remember(event.id, isBookmarked) { mutableStateOf(isBookmarked) }
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -545,7 +546,10 @@ fun AgendaItem(
                         val uid = FirebaseAuth.getInstance().currentUser?.uid
                         if (uid != null) {
                             val ref = FirebaseFirestore.getInstance().collection("users").document(uid)
-                            if (isBookmarked) {
+                            val wasBookmarked = optimisticIsBookmarked
+                            optimisticIsBookmarked = !wasBookmarked
+                            
+                            if (wasBookmarked) {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayRemove(event.id))
                             } else {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayUnion(event.id))
@@ -553,9 +557,9 @@ fun AgendaItem(
                         }
                     }) {
                         Icon(
-                            imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            imageVector = if (optimisticIsBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             contentDescription = "Bookmark",
-                            tint = if (isBookmarked) Color(0xFFFFD700) else Color.Gray
+                            tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray
                         )
                     }
 
