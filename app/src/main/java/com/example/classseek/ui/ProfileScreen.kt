@@ -20,8 +20,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material3.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -951,7 +951,7 @@ fun BookmarkedEventsSection(
                     color = ProfileTheme.Primary
                 )
                 Icon(
-                    imageVector = Icons.Default.Star,
+                    imageVector = Icons.Default.Bookmark,
                     contentDescription = null,
                     tint = Color.Gray
                 )
@@ -1003,7 +1003,7 @@ fun BookmarkedEventsSection(
                     }
                     IconButton(onClick = { onRemoveBookmark(event) }) {
                         Icon(
-                            imageVector = Icons.Default.Star,
+                            imageVector = Icons.Default.Bookmark,
                             contentDescription = "Remove Bookmark",
                             tint = Color(0xFFFFD700)
                         )

@@ -70,7 +70,7 @@ enum class MarkerCategory(val label: String, val icon: ImageVector, val color: C
     BUILDING("Building", Icons.Default.OtherHouses, Color(0xFF2596BE)), // Tealish
     STUDENT_SERVICE("Student Service", Icons.Default.School, Color(0xFFE580FF)),
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)), // Orange
-    BOOKMARK("Bookmark", Icons.Default.Star, Color(0xFFF8CF6B)),
+    BOOKMARK("Bookmark", Icons.Default.Bookmark, Color(0xFFF8CF6B)),
     SHARED("Shared", Icons.Default.ShareLocation, Color(0xFFC6BBE8)),
     CLASS("Class", Icons.Default.Explore, Color(0xFF6BD36E))
 }

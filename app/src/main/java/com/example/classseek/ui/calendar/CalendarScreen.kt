@@ -32,8 +32,8 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -262,7 +262,7 @@ fun CalendarScreen(
                                 modifier = Modifier.align(Alignment.CenterEnd).size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (showStarredOnly) Icons.Default.Star else Icons.Default.StarBorder,
+                                    imageVector = if (showStarredOnly) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                                     contentDescription = "Show Starred Only",
                                     tint = if (showStarredOnly) Color(0xFFFFD700) else Color.Gray,
                                     modifier = Modifier.size(24.dp)
@@ -553,7 +553,7 @@ fun AgendaItem(
                         }
                     }) {
                         Icon(
-                            imageVector = if (isBookmarked) Icons.Default.Star else Icons.Default.StarBorder,
+                            imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             contentDescription = "Bookmark",
                             tint = if (isBookmarked) Color(0xFFFFD700) else Color.Gray
                         )
