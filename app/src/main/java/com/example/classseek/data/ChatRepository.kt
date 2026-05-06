@@ -761,6 +761,7 @@ class ChatRepository(
         val now = FieldValue.serverTimestamp()
         val chat = getChatInfo(chatId)
 
+
         batch.set(
             msgRef,
             mapOf(

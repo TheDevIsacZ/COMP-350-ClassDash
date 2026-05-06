@@ -123,10 +123,10 @@ private fun GroupChatHeader(
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.White,
-            navigationIconContentColor = ChatHeaderAccent,
-            actionIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+            actionIconContentColor = MaterialTheme.colorScheme.onSurface
         ),
         title = {
             Row(
@@ -185,9 +185,9 @@ private fun DirectMessageHeader(
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             navigationIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
         ),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {

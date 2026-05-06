@@ -97,7 +97,8 @@ fun MapScreen(
     onAddTemporaryMarker: (MapPlace) -> Unit = {},
     sharedLocation: LatLng? = null,
     sharedLocationName: String? = null,
-    sharedByUid: String? = null
+    sharedByUid: String? = null,
+    isDarkTheme: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -414,13 +415,7 @@ fun MapScreen(
                     latLngBoundsForCameraTarget = bounds,
                     minZoomPreference = 14.5f,
                     mapStyleOptions = MapStyleOptions(
-                        """
-                        [
-                          { "elementType": "labels", "stylers": [ { "visibility": "off" } ] },
-                          { "featureType": "poi", "stylers": [ { "visibility": "off" } ] },
-                          { "featureType": "transit", "stylers": [ { "visibility": "off" } ] }
-                        ]
-                        """.trimIndent()
+                        if (isDarkTheme) darkMapStyleJson else lightMapStyleJson
                     )
                 ),
                 uiSettings = MapUiSettings(mapToolbarEnabled = false),
@@ -711,7 +706,17 @@ fun MapScreen(
                     trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = ""; selectedPlace = null }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
-                    colors = TextFieldDefaults.colors(focusedContainerColor = Color.White.copy(alpha = 0.9f), unfocusedContainerColor = Color.White.copy(alpha = 0.9f), focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                    colors = TextFieldDefaults.colors(
+                        focusedTextColor = Color.Black,
+                        unfocusedTextColor = Color.Black,
+
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color.White,
+                        disabledContainerColor = Color.White,
+
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    )
                 )
 
                 Spacer(modifier = Modifier.width(8.dp))
@@ -736,11 +741,16 @@ fun MapScreen(
                         expanded = isFilterMenuExpanded,
                         shape = RoundedCornerShape(18.dp),
                         onDismissRequest = { isFilterMenuExpanded = false },
-                        modifier = Modifier.background(Color.White.copy(alpha = 0.85f))
+                        containerColor = Color.White.copy(alpha = 0.85f)
                     ) {
                         MarkerCategory.entries.filter { it != MarkerCategory.SHARED }.forEach { category ->
                             DropdownMenuItem(
-                                text = { Text(category.label) },
+                                text = {
+                                    Text (
+                                         text = category.label,
+                                         color = Color.Black
+                                    )
+                                       },
                                 onClick = {
                                     selectedCategory = category
                                     selectedPlace = null
@@ -762,7 +772,7 @@ fun MapScreen(
                                     }
                                 },
                                 trailingIcon = if (selectedCategory == category) {
-                                    { Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.size(16.dp)) }
+                                    { Icon(Icons.Default.Check, contentDescription = "Selected", modifier = Modifier.size(16.dp), tint = Color.Black ) }
                                 } else null
                             )
                         }
@@ -871,9 +881,23 @@ fun MapScreen(
                     }
 
                     FloatingActionButton(
-                        onClick = { mapType = if (mapType == MapType.SATELLITE) MapType.NORMAL else MapType.SATELLITE },
-                        containerColor = Color.White,
-                        contentColor = Color.Black,
+                        onClick = {
+                            mapType = if (mapType == MapType.SATELLITE) {
+                                MapType.NORMAL
+                            } else {
+                                MapType.SATELLITE
+                            }
+                        },
+                        containerColor = if (mapType == MapType.SATELLITE) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.White
+                        },
+                        contentColor = if (mapType == MapType.SATELLITE) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            Color.Black
+                        },
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Icon(
@@ -939,4 +963,27 @@ suspend fun loadMarkerBitmap(context: Context, url: String?): com.google.android
             null
         }
     }
+
+
 }
+
+//Styling for dark and light mode
+private val lightMapStyleJson = """
+[
+  { "elementType": "labels", "stylers": [ { "visibility": "off" } ] },
+  { "featureType": "poi", "stylers": [ { "visibility": "off" } ] },
+  { "featureType": "transit", "stylers": [ { "visibility": "off" } ] }
+]
+""".trimIndent()
+
+private val darkMapStyleJson = """
+[
+  { "elementType": "geometry", "stylers": [ { "color": "#242f3e" } ] },
+  { "elementType": "labels", "stylers": [ { "visibility": "off" } ] },
+  { "featureType": "poi", "stylers": [ { "visibility": "off" } ] },
+  { "featureType": "transit", "stylers": [ { "visibility": "off" } ] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [ { "color": "#38414e" } ] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [ { "color": "#17263c" } ] },
+  { "featureType": "landscape", "elementType": "geometry", "stylers": [ { "color": "#1f2937" } ] }
+]
+""".trimIndent()
