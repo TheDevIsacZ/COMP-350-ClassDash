@@ -45,6 +45,21 @@ fun FriendsDirectoryScreen(
     onSendFriendRequest: (UserSearchItem) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
+    val normalizedQuery = query.trim()
+
+    fun matchesUser(user: UserSearchItem): Boolean {
+        if (normalizedQuery.isBlank()) return true
+
+        return user.displayName.contains(normalizedQuery, ignoreCase = true) ||
+            user.name.contains(normalizedQuery, ignoreCase = true) ||
+            user.email.contains(normalizedQuery, ignoreCase = true) ||
+            user.major.contains(normalizedQuery, ignoreCase = true)
+    }
+
+    val filteredFriends = if (normalizedQuery.isBlank()) friends else friends.filter(::matchesUser)
+    val filteredIncomingRequests = if (normalizedQuery.isBlank()) incomingRequests else incomingRequests.filter(::matchesUser)
+    val filteredOutgoingRequests = if (normalizedQuery.isBlank()) outgoingRequests else outgoingRequests.filter(::matchesUser)
+    val filteredSearchResults = if (normalizedQuery.isBlank()) emptyList() else searchResults.filter(::matchesUser)
 
     Column(
         modifier = Modifier
@@ -87,7 +102,7 @@ fun FriendsDirectoryScreen(
                 item {
                     SearchSectionCard(
                         title = "Add Friends",
-                        items = searchResults,
+                        items = filteredSearchResults,
                         emptyText = "No users found",
                         onItemClick = onFriendClick,
                         onActionClick = onSendFriendRequest
@@ -98,8 +113,8 @@ fun FriendsDirectoryScreen(
             item {
                 SectionCard(
                     title = "Incoming Requests",
-                    items = incomingRequests,
-                    emptyText = "No incoming friend requests",
+                    items = filteredIncomingRequests,
+                    emptyText = if (normalizedQuery.isBlank()) "No incoming friend requests" else "No matching incoming requests",
                     onItemClick = onIncomingClick
                 )
             }
@@ -107,8 +122,8 @@ fun FriendsDirectoryScreen(
             item {
                 SectionCard(
                     title = "Sent Requests",
-                    items = outgoingRequests,
-                    emptyText = "No sent friend requests",
+                    items = filteredOutgoingRequests,
+                    emptyText = if (normalizedQuery.isBlank()) "No sent friend requests" else "No matching sent requests",
                     onItemClick = onOutgoingClick
                 )
             }
@@ -116,8 +131,8 @@ fun FriendsDirectoryScreen(
             item {
                 SectionCard(
                     title = "All Friends",
-                    items = friends,
-                    emptyText = "No friends added yet",
+                    items = filteredFriends,
+                    emptyText = if (normalizedQuery.isBlank()) "No friends added yet" else "No matching friends",
                     onItemClick = onFriendClick
                 )
             }

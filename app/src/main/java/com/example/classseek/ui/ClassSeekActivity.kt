@@ -500,8 +500,6 @@ fun ClassSeekApp(
     var routedChatTitle by remember { mutableStateOf<String?>(null) }
 
     val profileFriends = remember { mutableStateListOf<UserSearchItem>() }
-    val favoriteFriends = remember { mutableStateListOf<UserSearchItem>() }
-
     val temporaryMarkers = remember { mutableStateListOf<MapPlace>() }
     var sharedLocationToView by remember { mutableStateOf<LatLng?>(null) }
     var sharedLocationNameToView by remember { mutableStateOf<String?>(null) }
@@ -545,7 +543,6 @@ fun ClassSeekApp(
         pendingFriendRequests = emptyList()
         outgoingFriendRequests = emptyList()
         friendSearchResults = emptyList()
-        favoriteFriends.clear()
         profileFriends.clear()
         consumeRoutedChat()
         consumePendingNotificationChat()
@@ -738,66 +735,6 @@ fun ClassSeekApp(
             friendsRegistration.remove()
             friendProfileRegistrations.forEach { it.remove() }
             profileFriends.clear()
-        }
-    }
-
-    DisposableEffect(firebaseUser?.uid) {
-        val uid = firebaseUser?.uid
-        if (uid == null) {
-            favoriteFriends.clear()
-            return@DisposableEffect onDispose {}
-        }
-
-        val favoriteProfilesByUid = linkedMapOf<String, UserSearchItem>()
-        val favoriteRegistrations = mutableListOf<ListenerRegistration>()
-
-        val favoritesRegistration = db.collection("users")
-            .document(uid)
-            .collection("favoriteFriends")
-            .addSnapshotListener { snapshot, _ ->
-                favoriteProfilesByUid.clear()
-                favoriteRegistrations.forEach { it.remove() }
-                favoriteRegistrations.clear()
-
-                val favoriteIds = snapshot?.documents?.map { it.id }.orEmpty()
-                if (favoriteIds.isEmpty()) {
-                    favoriteFriends.clear()
-                    return@addSnapshotListener
-                }
-
-                favoriteIds.forEach { favoriteUid ->
-                    val reg = db.collection("users")
-                        .document(favoriteUid)
-                        .addSnapshotListener { userSnap, _ ->
-                            if (userSnap != null && userSnap.exists()) {
-                                val email = userSnap.getString("email")?.trim().orEmpty()
-                                if (email.isNotBlank()) {
-                                    favoriteProfilesByUid[favoriteUid] = UserSearchItem(
-                                        uid = userSnap.id,
-                                        name = userSnap.getString("name")?.trim().orEmpty(),
-                                        displayName = userSnap.getString("displayName")?.trim().orEmpty(),
-                                        email = email,
-                                        major = userSnap.getString("major")?.trim().orEmpty(),
-                                        profilePictureUrl = userSnap.getString("profilePictureUrl")?.trim().orEmpty(),
-                                        isVerified = false,
-                                        isOnline = userSnap.getBoolean("isOnline") ?: false
-                                    )
-                                }
-                            } else {
-                                favoriteProfilesByUid.remove(favoriteUid)
-                            }
-
-                            favoriteFriends.clear()
-                            favoriteFriends.addAll(favoriteProfilesByUid.values)
-                        }
-                    favoriteRegistrations.add(reg)
-                }
-            }
-
-        onDispose {
-            favoritesRegistration.remove()
-            favoriteRegistrations.forEach { it.remove() }
-            favoriteFriends.clear()
         }
     }
 
@@ -1157,7 +1094,7 @@ fun ClassSeekApp(
             ProfileScreen(
                 userProfile = otherUserProfile!!,
                 isMyProfile = false,
-                favoriteFriends = emptyList(),
+                friends = emptyList(),
                 isFriend = isFriendWithOther,
                 friendRequestStatus = friendRequestStatus,
                 bookmarkedEvents = otherBookmarkedEvents,
@@ -1475,24 +1412,7 @@ fun ClassSeekApp(
                                 userProfile = userProfile!!,
                                 isMyProfile = true,
                                 bookmarkedEvents = myBookmarkedEvents,
-                                favoriteFriends = favoriteFriends,
-                                onTogglePinFriend = { friendUid ->
-                                    scope.launch {
-                                        try {
-                                            val currentUid = firebaseUser?.uid ?: return@launch
-                                            val isCurrentlyPinned = favoriteFriends.any { it.uid == friendUid }
-                                            val docRef = db.collection("users").document(currentUid)
-                                                .collection("favoriteFriends").document(friendUid)
-                                            if (isCurrentlyPinned) {
-                                                docRef.delete()
-                                            } else {
-                                                docRef.set(mapOf("pinnedAt" to FieldValue.serverTimestamp()))
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.e("AUTH_DEBUG", "Error deleting account", e)
-                                        }
-                                    }
-                                },
+                                friends = profileFriends,
                                 onSignOut = {},
                                 onEditProfile = {},
                                 onDeleteAccount = {},
@@ -1550,6 +1470,7 @@ fun ClassSeekApp(
 
                         AppDestinations.FRIENDS -> {
                             FriendsScreen(
+                                friends = profileFriends,
                                 initialChatId = routedChatId ?: pendingNotificationChatId,
                                 initialChatTitle = routedChatTitle ?: pendingNotificationChatTitle,
                                 onInitialChatConsumed = {

@@ -111,6 +111,7 @@ enum class FriendsNavigation {
 @Composable
 fun FriendsScreen(
     modifier: Modifier = Modifier,
+    friends: List<UserSearchItem> = emptyList(),
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() },
     initialChatId: String? = null,
@@ -125,7 +126,7 @@ fun FriendsScreen(
     var showNotFriendsDialog by remember { mutableStateOf(false) }
     var pendingFriendToAdd by remember { mutableStateOf<UserSearchItem?>(null) }
     val chats = remember { mutableStateListOf<ChatListItem>() }
-    val myUid = auth.currentUser?.uid ?: ""
+    var myUid by remember { mutableStateOf(auth.currentUser?.uid.orEmpty()) }
 
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
@@ -153,6 +154,16 @@ fun FriendsScreen(
 
     var status by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
+
+    DisposableEffect(auth) {
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            myUid = firebaseAuth.currentUser?.uid.orEmpty()
+        }
+        auth.addAuthStateListener(listener)
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
+    }
 
     LaunchedEffect(initialChatId) {
         if (initialChatId != null) {
@@ -222,53 +233,9 @@ fun FriendsScreen(
         onDispose { reg.remove() }
     }
 
-    val onlineFriends = remember { mutableStateListOf<UserSearchItem>() }
-    var onlineFriendsError by remember { mutableStateOf<String?>(null) }
-
-    DisposableEffect(myUid, friendUids) {
-        if (myUid.isBlank() || friendUids.isEmpty()) {
-            onlineFriends.clear()
-            onlineFriendsError = null
-            return@DisposableEffect onDispose {}
-        }
-
-        val onlineByUid = linkedMapOf<String, UserSearchItem>()
-        val registrations = friendUids
-            .toList()
-            .chunked(10)
-            .map { uidChunk ->
-                db.collection("users")
-                    .whereIn(FieldPath.documentId(), uidChunk)
-                    .whereEqualTo("isOnline", true)
-                    .addSnapshotListener { usersSnapshot, error ->
-                        if (error != null) {
-                            onlineFriendsError = error.message
-                            onlineFriends.clear()
-                            return@addSnapshotListener
-                        }
-
-                        onlineFriendsError = null
-                        val chunkIds = uidChunk.toSet()
-                        onlineByUid.keys.removeAll(chunkIds)
-                        usersSnapshot?.documents
-                            ?.mapNotNull { it.toUserSearchItem() }
-                            ?.forEach { user ->
-                                onlineByUid[user.uid] = user
-                            }
-
-                        onlineFriends.clear()
-                        onlineFriends.addAll(
-                            onlineByUid.values.sortedBy { user ->
-                                user.displayName.ifBlank { user.email }.lowercase()
-                            }
-                        )
-                    }
-            }
-
-        onDispose {
-            registrations.forEach { it.remove() }
-        }
-    }
+    val onlineFriends = friends
+        .filter { it.isOnline }
+        .sortedBy { friend -> friend.displayName.ifBlank { friend.email }.lowercase() }
 
     fun addFavorite(friendUid: String) {
         if (myUid.isBlank()) return
@@ -300,7 +267,7 @@ fun FriendsScreen(
             FriendsNavigation.MAIN -> {
                 MessagesMainScreen(
                     onlineFriends = onlineFriends,
-                    onlineFriendsError = onlineFriendsError,
+                    onlineFriendsError = null,
                     pendingRequests = pendingRequests,
                     chats = chats,
                     onChatClick = { chat ->
@@ -548,6 +515,7 @@ fun UserActionDialog(
     user: UserSearchItem,
     isFriend: Boolean = false,
     isPinned: Boolean = false,
+    showPinAction: Boolean = true,
     requestStatus: String? = null,
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
@@ -612,7 +580,7 @@ fun UserActionDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                if (isFriend) {
+                if (isFriend && showPinAction) {
                     IconButton(onClick = onTogglePin) {
                         Icon(
                             imageVector = Icons.Default.PushPin,
@@ -720,11 +688,35 @@ fun MessagesMainScreen(
     onDeclineFriend: (UserSearchItem) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    val normalizedQuery = searchQuery.trim()
 
-    val filteredChats = if (searchQuery.isBlank()) {
+    fun matchesUser(user: UserSearchItem): Boolean {
+        if (normalizedQuery.isBlank()) return true
+
+        return user.displayName.contains(normalizedQuery, ignoreCase = true) ||
+            user.name.contains(normalizedQuery, ignoreCase = true) ||
+            user.email.contains(normalizedQuery, ignoreCase = true)
+    }
+
+    val filteredPendingRequests = if (normalizedQuery.isBlank()) {
+        pendingRequests
+    } else {
+        pendingRequests.filter(::matchesUser)
+    }
+
+    val filteredOnlineFriends = if (normalizedQuery.isBlank()) {
+        onlineFriends
+    } else {
+        onlineFriends.filter(::matchesUser)
+    }
+
+    val filteredChats = if (normalizedQuery.isBlank()) {
         chats
     } else {
-        chats.filter { it.title.contains(searchQuery, ignoreCase = true) }
+        chats.filter { chat ->
+            chat.title.contains(normalizedQuery, ignoreCase = true) ||
+                chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
+        }
     }
 
     Column(
@@ -764,7 +756,7 @@ fun MessagesMainScreen(
         SearchBar(
             query = searchQuery,
             onQueryChange = { searchQuery = it },
-            placeholder = "Search name or username",
+            placeholder = "Search people or conversations",
             modifier = Modifier.padding(horizontal = 20.dp)
         )
 
@@ -772,7 +764,7 @@ fun MessagesMainScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp)
         ) {
-            if (pendingRequests.isNotEmpty() && searchQuery.isBlank()) {
+            if (filteredPendingRequests.isNotEmpty() || (normalizedQuery.isBlank() && pendingRequests.isNotEmpty())) {
                 item {
                     Card(
                         modifier = Modifier
@@ -785,11 +777,11 @@ fun MessagesMainScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "Friend Requests (${pendingRequests.size})",
+                                text = "Friend Requests (${filteredPendingRequests.size})",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            pendingRequests.forEach { request ->
+                            filteredPendingRequests.forEach { request ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -855,9 +847,9 @@ fun MessagesMainScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
-                        } else if (onlineFriends.isEmpty()) {
+                        } else if (filteredOnlineFriends.isEmpty()) {
                             Text(
-                                text = "No friends online",
+                                text = if (normalizedQuery.isBlank()) "No friends online" else "No matching friends",
                                 modifier = Modifier.padding(horizontal = 16.dp),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
@@ -867,7 +859,7 @@ fun MessagesMainScreen(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                items(onlineFriends) { friend ->
+                                items(filteredOnlineFriends) { friend ->
                                     OnlineFriendItem(friend, onClick = { onUserClick(friend) })
                                 }
                             }

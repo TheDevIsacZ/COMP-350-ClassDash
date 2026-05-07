@@ -72,7 +72,7 @@ object ProfileTheme {
 fun ProfileScreen(
     userProfile: UserProfile,
     isMyProfile: Boolean,
-    favoriteFriends: List<UserSearchItem> = emptyList(),
+    friends: List<UserSearchItem> = emptyList(),
     isFriend: Boolean = false,
     friendRequestStatus: String? = null, // null, "pending", "sent"
     bookmarkedEvents: List<Event> = emptyList(),
@@ -82,7 +82,6 @@ fun ProfileScreen(
     onFriendMessage: ((UserSearchItem) -> Unit)? = null,
     onViewFriendProfile: ((String) -> Unit)? = null,
     onRemoveFriendFromList: ((String) -> Unit)? = null,
-    onTogglePinFriend: ((String) -> Unit)? = null,
     onAddFriend: (() -> Unit)? = null,
     onAcceptFriend: (() -> Unit)? = null,
     onDeclineFriend: (() -> Unit)? = null,
@@ -95,7 +94,7 @@ fun ProfileScreen(
 ) {
     val scrollState = rememberScrollState()
     var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
-    val pinnedFriends = remember(favoriteFriends) { favoriteFriends.take(3) }
+    val previewFriends = friends.take(3)
 
     var eventToUnbookmark by remember { mutableStateOf<Event?>(null) }
 
@@ -149,7 +148,7 @@ fun ProfileScreen(
             item { Spacer(modifier = Modifier.height(16.dp)) }
             item {
                 FavoriteFriendsCard(
-                    friends = pinnedFriends,
+                    friends = previewFriends,
                     onFriendClick = { selectedFriend = it },
                     onViewAllClick = { onViewAllFriends?.invoke() }
                 )
@@ -177,12 +176,10 @@ fun ProfileScreen(
         UserActionDialog(
             user = friend,
             isFriend = true,
-            isPinned = true,
+            isPinned = false,
+            showPinAction = false,
             onDismiss = { selectedFriend = null },
-            onTogglePin = {
-                selectedFriend = null
-                onTogglePinFriend?.invoke(friend.uid)
-            },
+            onTogglePin = {},
             onMessage = {
                 selectedFriend = null
                 onFriendMessage?.invoke(friend)
@@ -648,12 +645,12 @@ fun FavoriteFriendsCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Favorited Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
+            Text("Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
             Spacer(modifier = Modifier.height(8.dp))
 
             if (friends.isEmpty()) {
                 Text(
-                    text = "No favorited friends yet.",
+                    text = "No friends added yet.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = ProfileTheme.MutedForeground,
                     modifier = Modifier.padding(vertical = 8.dp)
