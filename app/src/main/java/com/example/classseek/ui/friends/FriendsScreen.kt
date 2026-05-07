@@ -41,6 +41,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Locale
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.luminance
+
 
 data class UserSearchItem(
     val uid: String,
@@ -957,54 +962,93 @@ fun ChatListItemRow(
 ) {
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
-    Row(
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val lastMessageColor = if (isDarkTheme) {
+        Color(0xFFB8B8C8) // lighter grey for dark mode
+    } else {
+        Color(0xFF5F6368) // darker grey for light mode
+    }
+
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.22f)
+    } else {
+        Color.Black.copy(alpha = 0.14f)
+    }
+
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 6.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
     ) {
-        UserAvatar(
-            imageUrl = chat.profilePictureUrl,
-            label = chat.title,
-            modifier = Modifier.size(56.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            UserAvatar(
+                imageUrl = chat.profilePictureUrl,
+                label = chat.title,
+                modifier = Modifier.size(56.dp)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = chat.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    chat.lastMessageAt?.let {
+                        Text(
+                            text = timeFormatter.format(it.toDate()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = lastMessageColor,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
                 Text(
-                    text = chat.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    text = chat.lastMessageText ?: "No messages yet",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = lastMessageColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                chat.lastMessageAt?.let {
-                    Text(
-                        text = timeFormatter.format(it.toDate()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
-                    )
-                }
             }
-            Text(
-                text = chat.lastMessageText ?: "No messages yet",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (chat.lastMessageText == null) Color.Gray else Color.DarkGray,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        IconButton(onClick = onDelete) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Delete chat",
-                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
-                modifier = Modifier.size(20.dp)
-            )
+
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete chat",
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.75f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
