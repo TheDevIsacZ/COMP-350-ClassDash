@@ -128,13 +128,15 @@ fun ProfileScreen(
 
         item { Spacer(modifier = Modifier.height(16.dp)) }
 
-        if (!isMyProfile) {
-            item {
+        item {
+            if (isMyProfile) {
+                SettingsProfileInfoCard(userProfile)
+            } else {
                 PublicProfileInfoCard(userProfile)
             }
-
-            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
 
         item {
             ScheduleSection(
@@ -265,9 +267,6 @@ fun SettingsProfileScreen(
         modifier = Modifier.fillMaxSize().background(ProfileTheme.Background),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        item { Box { SettingsHeaderSection(userProfile); ProfileImageSection(userProfile.profilePictureUrl) } }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
-        item { SettingsProfileInfoCard(userProfile) }
         item { Spacer(modifier = Modifier.height(16.dp)) }
         item {
             Card(
@@ -514,7 +513,6 @@ fun SettingsProfileInfoCard(userProfile: UserProfile) {
             SettingsInfoRow("Location", userProfile.location.ifBlank { "" })
             SettingsInfoRow("Website URL", userProfile.githubUrl.ifBlank { "" })
             SettingsInfoRow("Bio", userProfile.bio.ifBlank { "No bio provided." })
-
         }
     }
 }
