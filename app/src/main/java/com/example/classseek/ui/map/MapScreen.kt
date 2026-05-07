@@ -388,6 +388,8 @@ fun MapScreen(
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
             val locationCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
+                    if (userProfile?.shareLocation == false) return
+
                     result.lastLocation?.let { newLoc ->
                         location = newLoc
                     }
