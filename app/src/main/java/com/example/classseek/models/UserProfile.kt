@@ -24,7 +24,13 @@ data class UserProfile(
     val followingCount: String = "0",
     val bookmarkedEventIds: List<String> = emptyList(),
     val semester: String = "",
-    val classes: List<ClassInfo> = emptyList()
+    val classes: List<ClassInfo> = emptyList(),
+    val chatNotificationsEnabled: Boolean = true,
+    val calendarRemindersEnabled: Boolean = true,
+    val eventNotificationsEnabled: Boolean = true,
+    val showOnlineStatus: Boolean = true,
+    val profileVisibility: String = "Public", // "Public" or "Friends Only"
+    val shareLocation: Boolean = true
 ) {
     val isProfileComplete: Boolean
         get() = name.isNotBlank() && major.isNotBlank()

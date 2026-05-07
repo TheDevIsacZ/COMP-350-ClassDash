@@ -92,6 +92,8 @@ import java.util.Calendar as JavaCalendar
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -547,6 +549,7 @@ fun CalendarScreen(
                                             chatSearchQuery = ""
                                             selectedEventForSharing = null
                                         } catch (e: Exception) {
+                                            // Optionally show error message
                                         }
                                     }
                                 }
@@ -652,13 +655,25 @@ private fun ClassSeekCalendarCard(
     val todayKey = dayKey(System.currentTimeMillis())
     val selectedKey = selectedDateMillis?.let { dayKey(it) }
 
-    Card(
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val calendarBorderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.22f)
+    } else {
+        Color.Black.copy(alpha = 0.14f)
+    }
+
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.background),
         shape = RoundedCornerShape(22.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = calendarBorderColor
+        ),
+        tonalElevation = 1.dp
     ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(14.dp)
@@ -834,6 +849,7 @@ fun AgendaItem(
                     IconButton(onClick = onShareClick) {
                         Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary)
                     }
+
                     if (canDelete) {
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "More options") }

@@ -388,6 +388,8 @@ fun MapScreen(
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
             val locationCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
+                    if (userProfile?.shareLocation == false) return
+
                     result.lastLocation?.let { newLoc ->
                         location = newLoc
                     }
@@ -447,14 +449,13 @@ fun MapScreen(
                     val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
                     val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
 
-                    // Logic to hide location markers if overlapped by specific categories (Bookmarks, Classes, Shared)
-                    val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers, incomingSharedMarker) {
+                    // Logic to hide location markers if overlapped by specific categories (Bookmarks, Classes)
+                    val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers) {
                         if (place.category == MarkerCategory.BUILDING ||
                             place.category == MarkerCategory.STUDENT_SERVICE ||
                             place.category == MarkerCategory.DINING) {
                             bookmarkMarkers.any { it.location == place.location } ||
-                                    scheduleMarkers.any { it.location == place.location } ||
-                                    incomingSharedMarker.any { it.location == place.location }
+                                    scheduleMarkers.any { it.location == place.location }
                         } else false
                     }
 

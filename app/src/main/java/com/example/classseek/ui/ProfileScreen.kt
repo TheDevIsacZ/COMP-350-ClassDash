@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.classseek.models.Friend
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.SearchBar
 import com.example.classseek.ui.friends.UserActionDialog
 import com.example.classseek.ui.friends.UserSearchItem
 import com.example.classseek.ui.theme.AppThemeMode
@@ -41,6 +43,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.luminance
 
 // Define colors based on the provided theme.css (Light mode mostly)
 object ProfileTheme {
@@ -72,7 +77,7 @@ object ProfileTheme {
 fun ProfileScreen(
     userProfile: UserProfile,
     isMyProfile: Boolean,
-    favoriteFriends: List<UserSearchItem> = emptyList(),
+    friends: List<UserSearchItem> = emptyList(),
     isFriend: Boolean = false,
     friendRequestStatus: String? = null, // null, "pending", "sent"
     bookmarkedEvents: List<Event> = emptyList(),
@@ -82,7 +87,6 @@ fun ProfileScreen(
     onFriendMessage: ((UserSearchItem) -> Unit)? = null,
     onViewFriendProfile: ((String) -> Unit)? = null,
     onRemoveFriendFromList: ((String) -> Unit)? = null,
-    onTogglePinFriend: ((String) -> Unit)? = null,
     onAddFriend: (() -> Unit)? = null,
     onAcceptFriend: (() -> Unit)? = null,
     onDeclineFriend: (() -> Unit)? = null,
@@ -90,12 +94,10 @@ fun ProfileScreen(
     onRemoveFriend: (() -> Unit)? = null,
     onRemoveBookmark: ((String) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
-    onEditSchedule: () -> Unit,
-    onViewAllFriends: (() -> Unit)? = null
+    onEditSchedule: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
-    val pinnedFriends = remember(favoriteFriends) { favoriteFriends.take(3) }
 
     var eventToUnbookmark by remember { mutableStateOf<Event?>(null) }
 
@@ -129,13 +131,15 @@ fun ProfileScreen(
 
         item { Spacer(modifier = Modifier.height(16.dp)) }
 
-        if (!isMyProfile) {
-            item {
+        item {
+            if (isMyProfile) {
+                SettingsProfileInfoCard(userProfile)
+            } else {
                 PublicProfileInfoCard(userProfile)
             }
-
-            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
 
         item {
             ScheduleSection(
@@ -149,10 +153,10 @@ fun ProfileScreen(
             item { Spacer(modifier = Modifier.height(16.dp)) }
             item {
                 FavoriteFriendsCard(
-                    friends = pinnedFriends,
-                    onFriendClick = { selectedFriend = it },
-                    onViewAllClick = { onViewAllFriends?.invoke() }
+                    friends = friends,
+                    onFriendClick = { selectedFriend = it }
                 )
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             // Bookmarked events section at the bottom
@@ -176,12 +180,10 @@ fun ProfileScreen(
         UserActionDialog(
             user = friend,
             isFriend = true,
-            isPinned = true,
+            isPinned = false,
+            showPinAction = false,
             onDismiss = { selectedFriend = null },
-            onTogglePin = {
-                selectedFriend = null
-                onTogglePinFriend?.invoke(friend.uid)
-            },
+            onTogglePin = {},
             onMessage = {
                 selectedFriend = null
                 onFriendMessage?.invoke(friend)
@@ -258,7 +260,8 @@ fun SettingsProfileScreen(
     onThemeModeChange: (AppThemeMode) -> Unit,
     onEditProfile: () -> Unit,
     onSignOut: () -> Unit,
-    onDeleteAccount: () -> Unit
+    onDeleteAccount: () -> Unit,
+    onUpdateSettings: (Map<String, Any>) -> Unit
 ) {
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var emailConfirmation by remember { mutableStateOf("") }
@@ -267,32 +270,91 @@ fun SettingsProfileScreen(
         modifier = Modifier.fillMaxSize().background(ProfileTheme.Background),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        item { Box { SettingsHeaderSection(userProfile); ProfileImageSection(userProfile.profilePictureUrl) } }
         item { Spacer(modifier = Modifier.height(16.dp)) }
-        item { SettingsProfileInfoCard(userProfile) }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // Theme Setting
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text("App Theme", style = MaterialTheme.typography.titleMedium, color = ProfileTheme.Primary, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        AppThemeMode.entries.forEach { mode ->
-                            FilterChip(
-                                selected = themeMode == mode,
-                                onClick = { onThemeModeChange(mode) },
-                                label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }
-                            )
+            SettingsSectionCard(title = "App Theme") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    AppThemeMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = themeMode == mode,
+                            onClick = { onThemeModeChange(mode) },
+                            label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                        )
+                    }
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // Notifications Settings
+        item {
+            SettingsSectionCard(title = "Notifications") {
+                Column {
+                    SettingsSwitchRow(
+                        title = "Chat Notifications",
+                        subtitle = "Receive alerts for new messages",
+                        checked = userProfile.chatNotificationsEnabled,
+                        onCheckedChange = { onUpdateSettings(mapOf("chatNotificationsEnabled" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    SettingsSwitchRow(
+                        title = "Calendar Reminders",
+                        subtitle = "Get notified about upcoming classes",
+                        checked = userProfile.calendarRemindersEnabled,
+                        onCheckedChange = { onUpdateSettings(mapOf("calendarRemindersEnabled" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    SettingsSwitchRow(
+                        title = "Shared Events",
+                        subtitle = "Alerts when friends share events",
+                        checked = userProfile.eventNotificationsEnabled,
+                        onCheckedChange = { onUpdateSettings(mapOf("eventNotificationsEnabled" to it)) }
+                    )
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // Privacy Settings
+        item {
+            SettingsSectionCard(title = "Privacy") {
+                Column {
+                    SettingsSwitchRow(
+                        title = "Show Online Status",
+                        subtitle = "Let friends see when you're active",
+                        checked = userProfile.showOnlineStatus,
+                        onCheckedChange = { onUpdateSettings(mapOf("showOnlineStatus" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    SettingsSwitchRow(
+                        title = "Location Sharing",
+                        subtitle = "Allow sharing location in chats",
+                        checked = userProfile.shareLocation,
+                        onCheckedChange = { onUpdateSettings(mapOf("shareLocation" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                        Text("Profile Visibility", style = MaterialTheme.typography.titleSmall, color = ProfileTheme.Primary)
+                        Text("Who can see your full profile and schedule", style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Public", "Friends Only").forEach { visibility ->
+                                FilterChip(
+                                    selected = userProfile.profileVisibility == visibility,
+                                    onClick = { onUpdateSettings(mapOf("profileVisibility" to visibility)) },
+                                    label = { Text(visibility) }
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+
         item { Spacer(modifier = Modifier.height(16.dp)) }
         item { SettingsActionsCard(onEditProfile, onSignOut) { showDeleteConfirmDialog = true } }
     }
@@ -339,6 +401,7 @@ fun SettingsProfileScreen(
             }
         )
     }
+
 }
 
 private fun formatEventDate(dateTime: com.google.api.client.util.DateTime?): String {
@@ -346,6 +409,76 @@ private fun formatEventDate(dateTime: com.google.api.client.util.DateTime?): Str
     val date = Date(dateTime.value)
     val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
     return sdf.format(date)
+}
+
+@Composable
+fun RestrictedProfileScreen(
+    userProfile: UserProfile,
+    friendRequestStatus: String?,
+    onAddFriend: () -> Unit,
+    onAcceptFriend: () -> Unit,
+    onDeclineFriend: () -> Unit,
+    onCancelFriend: () -> Unit,
+    onBack: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            HeaderSection(
+                userProfile = userProfile,
+                isMyProfile = false,
+                isFriend = false,
+                friendRequestStatus = friendRequestStatus,
+                onAddFriend = onAddFriend,
+                onAcceptFriend = onAcceptFriend,
+                onDeclineFriend = onDeclineFriend,
+                onCancelFriend = onCancelFriend,
+                onBack = onBack
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .background(ProfileTheme.Background),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            ProfileImageSection(userProfile.profilePictureUrl)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = userProfile.name,
+                style = MaterialTheme.typography.headlineSmall,
+                color = ProfileTheme.Primary,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = userProfile.major,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = ProfileTheme.MutedForeground,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "This profile is private",
+                style = MaterialTheme.typography.titleMedium,
+                color = ProfileTheme.Primary
+            )
+            Text(
+                text = "Add ${userProfile.name} as a friend to see their full profile.",
+                style = MaterialTheme.typography.bodySmall,
+                color = ProfileTheme.MutedForeground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+        }
+    }
 }
 
 @Composable
@@ -483,22 +616,11 @@ fun SettingsHeaderSection(userProfile: UserProfile) {
 
 @Composable
 fun SettingsProfileInfoCard(userProfile: UserProfile) {
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
+    ProfileModuleSurface {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-
             Text(
                 userProfile.name,
                 style = MaterialTheme.typography.titleLarge,
@@ -516,7 +638,6 @@ fun SettingsProfileInfoCard(userProfile: UserProfile) {
             SettingsInfoRow("Location", userProfile.location.ifBlank { "" })
             SettingsInfoRow("Website URL", userProfile.githubUrl.ifBlank { "" })
             SettingsInfoRow("Bio", userProfile.bio.ifBlank { "No bio provided." })
-
         }
     }
 }
@@ -525,54 +646,41 @@ fun SettingsProfileInfoCard(userProfile: UserProfile) {
 fun PublicProfileInfoCard(userProfile: UserProfile) {
     val clipboardManager = LocalClipboardManager.current
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            CopyableProfileInfoRow(
-                label = "Name",
-                value = userProfile.name.ifBlank { "Not provided" },
-                onCopy = {
-                    clipboardManager.setText(AnnotatedString(userProfile.name))
-                }
-            )
+    ProfileModuleSurface {
+        CopyableProfileInfoRow(
+            label = "Name",
+            value = userProfile.name.ifBlank { "Not provided" },
+            onCopy = {
+                clipboardManager.setText(AnnotatedString(userProfile.name))
+            }
+        )
 
-            SettingsInfoRow("Major", userProfile.major.ifBlank { "Not provided" })
-            SettingsInfoRow("Location", userProfile.location.ifBlank { "Not provided" })
+        SettingsInfoRow("Major", userProfile.major.ifBlank { "Not provided" })
+        SettingsInfoRow("Location", userProfile.location.ifBlank { "Not provided" })
 
-            CopyableProfileInfoRow(
-                label = "Website URL",
-                value = userProfile.githubUrl.ifBlank { "Not provided" },
-                onCopy = {
-                    clipboardManager.setText(AnnotatedString(userProfile.githubUrl))
-                }
-            )
+        CopyableProfileInfoRow(
+            label = "Website URL",
+            value = userProfile.githubUrl.ifBlank { "Not provided" },
+            onCopy = {
+                clipboardManager.setText(AnnotatedString(userProfile.githubUrl))
+            }
+        )
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            Text(
-                text = "Bio",
-                style = MaterialTheme.typography.labelMedium,
-                color = ProfileTheme.MutedForeground,
-                fontWeight = FontWeight.SemiBold
-            )
+        Text(
+            text = "Bio",
+            style = MaterialTheme.typography.labelMedium,
+            color = ProfileTheme.MutedForeground,
+            fontWeight = FontWeight.SemiBold
+        )
 
-            Text(
-                text = userProfile.bio.ifBlank { "No bio provided." },
-                style = MaterialTheme.typography.bodyMedium,
-                color = ProfileTheme.Primary,
-                lineHeight = 20.sp
-            )
-        }
+        Text(
+            text = userProfile.bio.ifBlank { "No bio provided." },
+            style = MaterialTheme.typography.bodyMedium,
+            color = ProfileTheme.Primary,
+            lineHeight = 20.sp
+        )
     }
 }
 
@@ -637,37 +745,88 @@ fun SettingsInfoRow(label: String, value: String) {
 @Composable
 fun FavoriteFriendsCard(
     friends: List<UserSearchItem>,
-    onFriendClick: (UserSearchItem) -> Unit,
-    onViewAllClick: () -> Unit
+    onFriendClick: (UserSearchItem) -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Favorited Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
-            Spacer(modifier = Modifier.height(8.dp))
+    var isExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
-            if (friends.isEmpty()) {
-                Text(
-                    text = "No favorited friends yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = ProfileTheme.MutedForeground,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            } else {
-                friends.forEachIndexed { index, friend ->
-                    ProfileFriendItem(user = friend, onClick = { onFriendClick(friend) })
-                    if (index != friends.lastIndex) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = ProfileTheme.Border)
-                    }
-                }
-            }
+    val normalizedQuery = searchQuery.trim()
+
+    val filteredFriends = if (normalizedQuery.isBlank()) {
+        friends
+    } else {
+        friends.filter { friend ->
+            friend.displayName.contains(normalizedQuery, ignoreCase = true) ||
+                    friend.name.contains(normalizedQuery, ignoreCase = true) ||
+                    friend.email.contains(normalizedQuery, ignoreCase = true)
+        }
+    }
+
+    val previewFriends = friends.take(3)
+
+    SettingsSectionCard(title = "Friends") {
+        if (isExpanded) {
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                placeholder = "Search friends"
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
-            TextButton(onClick = onViewAllClick, modifier = Modifier.align(Alignment.Start)) { Text("View all") }
+        }
+
+        if (friends.isEmpty()) {
+            Text(
+                text = "No friends added yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else if (isExpanded && filteredFriends.isEmpty()) {
+            Text(
+                text = "No matching friends.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else if (isExpanded) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+            ) {
+                items(filteredFriends) { friend ->
+                    ProfileFriendItem(
+                        user = friend,
+                        onClick = { onFriendClick(friend) }
+                    )
+                }
+            }
+        } else {
+            previewFriends.forEachIndexed { index, friend ->
+                ProfileFriendItem(
+                    user = friend,
+                    onClick = { onFriendClick(friend) }
+                )
+
+                if (index != previewFriends.lastIndex) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        TextButton(
+            onClick = {
+                isExpanded = !isExpanded
+                if (!isExpanded) {
+                    searchQuery = ""
+                }
+            },
+            modifier = Modifier.align(Alignment.Start)
+        ) {
+            Text(if (isExpanded) "Show less" else "View all")
         }
     }
 }
@@ -707,57 +866,174 @@ fun ProfileFriendItem(
     user: UserSearchItem,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.18f)
+    } else {
+        Color.Black.copy(alpha = 0.10f)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
     ) {
-        Box(modifier = Modifier.size(44.dp).clip(CircleShape).background(ProfileTheme.Accent)) {
-            if (user.profilePictureUrl.isNotBlank()) {
-                AsyncImage(
-                    model = user.profilePictureUrl,
-                    contentDescription = "${user.displayName} profile picture",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(ProfileTheme.Accent),
+                contentAlignment = Alignment.Center
+            ) {
+                if (user.profilePictureUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = user.profilePictureUrl,
+                        contentDescription = "${user.displayName} profile picture",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        tint = ProfileTheme.MutedForeground
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = user.displayName.ifBlank { user.name.ifBlank { user.email } },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = ProfileTheme.Primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-            } else {
-                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.fillMaxSize().padding(10.dp), tint = ProfileTheme.MutedForeground)
+
+                Text(
+                    text = user.major.ifBlank { user.email },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ProfileTheme.MutedForeground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(
+                            color = if (user.isOnline) {
+                                Color(0xFF22C55E)
+                            } else {
+                                ProfileTheme.MutedForeground.copy(alpha = 0.45f)
+                            },
+                            shape = CircleShape
+                        )
+                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Text(
+                    text = if (user.isOnline) "Online" else "Offline",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ProfileTheme.MutedForeground
+                )
             }
         }
+    }
+}
 
-        Spacer(modifier = Modifier.padding(6.dp))
+@Composable
+fun SettingsSectionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
 
-        Column(modifier = Modifier.weight(1f)) {
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.22f)
+    } else {
+        Color.Black.copy(alpha = 0.14f)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
             Text(
-                text = user.displayName.ifBlank { user.name.ifBlank { user.email } },
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
                 color = ProfileTheme.Primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                fontWeight = FontWeight.SemiBold
             )
-            Text(
-                text = user.major.ifBlank { user.email },
-                style = MaterialTheme.typography.bodySmall,
-                color = ProfileTheme.MutedForeground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier.size(8.dp).background(
-                    if (user.isOnline) Color(0xFF22C55E) else ProfileTheme.MutedForeground.copy(alpha = 0.45f),
-                    CircleShape
-                )
-            )
-            Spacer(modifier = Modifier.padding(3.dp))
-            Text(
-                text = if (user.isOnline) "Online" else "Offline",
-                style = MaterialTheme.typography.bodySmall,
-                color = ProfileTheme.MutedForeground
-            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            content()
         }
+    }
+}
+
+@Composable
+fun SettingsSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = ProfileTheme.Primary)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = ProfileTheme.Primary,
+                checkedTrackColor = ProfileTheme.Primary.copy(alpha = 0.5f)
+            )
+        )
     }
 }
 
@@ -767,19 +1043,35 @@ fun SettingsActionsCard(
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            SettingsActionRow("Edit Profile", "Update your profile information", onEditProfile)
-            HorizontalDivider(color = ProfileTheme.Border)
-            SettingsActionRow("Sign Out", "Sign out of your account", onSignOut)
-            HorizontalDivider(color = ProfileTheme.Border)
-            SettingsActionRow("Delete Account", "Permanently remove your account", onDeleteAccount, titleColor = Color.Red)
-        }
+    SettingsSectionCard(title = "Account") {
+        SettingsActionRow(
+            title = "Edit Profile",
+            subtitle = "Update your profile information",
+            onClick = onEditProfile
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 4.dp),
+            color = ProfileTheme.Border
+        )
+
+        SettingsActionRow(
+            title = "Sign Out",
+            subtitle = "Sign out of your account",
+            onClick = onSignOut
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 4.dp),
+            color = ProfileTheme.Border
+        )
+
+        SettingsActionRow(
+            title = "Delete Account",
+            subtitle = "Permanently remove your account",
+            onClick = onDeleteAccount,
+            titleColor = Color.Red
+        )
     }
 }
 
@@ -790,10 +1082,37 @@ fun SettingsActionRow(
     onClick: () -> Unit,
     titleColor: Color = ProfileTheme.Primary
 ) {
-    Column(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(16.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = titleColor, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = ProfileTheme.MutedForeground)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = titleColor,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground
+            )
+        }
+
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = ProfileTheme.MutedForeground,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
@@ -803,27 +1122,41 @@ fun ScheduleSection(
     onEditClick: () -> Unit,
     showEditButton: Boolean = true
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+    ProfileModuleSurface {
         Box(modifier = Modifier.fillMaxWidth()) {
             if (showEditButton) {
                 IconButton(
                     onClick = onEditClick,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant,
+                            CircleShape
+                        )
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit Schedule", tint = ProfileTheme.MutedForeground)
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit Schedule",
+                        tint = ProfileTheme.MutedForeground
+                    )
                 }
             }
 
-            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Current Schedule", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Current Schedule",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = ProfileTheme.Primary
+                )
 
                 if (userProfile.semester.isNotEmpty()) {
-                    Text(userProfile.semester, style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground, modifier = Modifier.padding(bottom = 6.dp))
+                    Text(
+                        userProfile.semester,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ProfileTheme.MutedForeground,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
                 } else {
                     Spacer(modifier = Modifier.height(4.dp))
                 }
@@ -836,6 +1169,7 @@ fun ScheduleSection(
                     )
                 } else {
                     val activeClasses = userProfile.classes.filter { it.className.isNotBlank() }
+
                     activeClasses.forEachIndexed { index, classInfo ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             Row(
@@ -850,6 +1184,7 @@ fun ScheduleSection(
                                     color = ProfileTheme.Primary,
                                     modifier = Modifier.weight(1f)
                                 )
+
                                 Column(horizontalAlignment = Alignment.End) {
                                     if (classInfo.building.isNotBlank() || classInfo.roomNumber.isNotBlank()) {
                                         Text(
@@ -858,8 +1193,10 @@ fun ScheduleSection(
                                             color = ProfileTheme.MutedForeground
                                         )
                                     }
+
                                     val hasDay = classInfo.dayOfWeek.trim().isNotBlank()
                                     val hasTime = classInfo.startTime.trim().isNotBlank()
+
                                     if (hasDay || hasTime) {
                                         val timeText = buildString {
                                             append(classInfo.dayOfWeek.trim())
@@ -868,6 +1205,7 @@ fun ScheduleSection(
                                             }
                                             append(classInfo.startTime.trim())
                                         }
+
                                         if (timeText.isNotBlank()) {
                                             Text(
                                                 text = timeText,
@@ -878,6 +1216,7 @@ fun ScheduleSection(
                                     }
                                 }
                             }
+
                             if (index != activeClasses.lastIndex) {
                                 HorizontalDivider(
                                     modifier = Modifier.padding(vertical = 8.dp),
@@ -897,92 +1236,87 @@ fun BookmarkedEventsSection(
     events: List<Event>,
     onRemoveBookmark: (Event) -> Unit
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+    ProfileModuleSurface {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Text(
+                text = "Bookmarked Events",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = ProfileTheme.Primary
+            )
+
+            Icon(
+                imageVector = Icons.Default.Star,
+                contentDescription = null,
+                tint = Color.Gray
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        events.forEachIndexed { index, event ->
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Bookmarked Events",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = ProfileTheme.Primary
-                )
-                Icon(
-                    imageVector = Icons.Default.Star,
-                    contentDescription = null,
-                    tint = Color.Gray
-                )
-            }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = event.summary ?: "(No Title)",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ProfileTheme.Primary
+                    )
 
-            Spacer(modifier = Modifier.height(8.dp))
+                    val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
 
-            events.forEachIndexed { index, event ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    if (dateText.isNotEmpty()) {
                         Text(
-                            text = event.summary ?: "(No Title)",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = ProfileTheme.Primary
+                            text = dateText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ProfileTheme.MutedForeground
                         )
-                        val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
-                        if (dateText.isNotEmpty()) {
+                    }
+
+                    if (!event.location.isNullOrBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.LocationOn,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = ProfileTheme.MutedForeground
+                            )
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
                             Text(
-                                text = dateText,
+                                text = event.location,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = ProfileTheme.MutedForeground
+                                color = ProfileTheme.MutedForeground,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
-                        if (!event.location.isNullOrBlank()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.LocationOn,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = ProfileTheme.MutedForeground
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = event.location,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = ProfileTheme.MutedForeground,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                    IconButton(onClick = { onRemoveBookmark(event) }) {
-                        Icon(
-                            imageVector = Icons.Default.Star,
-                            contentDescription = "Remove Bookmark",
-                            tint = Color(0xFFFFD700)
-                        )
                     }
                 }
-                if (index != events.lastIndex) {
-                    HorizontalDivider(color = ProfileTheme.Border)
+
+                IconButton(onClick = { onRemoveBookmark(event) }) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = "Remove Bookmark",
+                        tint = Color(0xFFFFD700)
+                    )
                 }
+            }
+
+            if (index != events.lastIndex) {
+                HorizontalDivider(color = ProfileTheme.Border)
             }
         }
     }
@@ -1011,5 +1345,39 @@ fun FriendItem(friend: Friend) {
         IconButton(onClick = {}) {
             Icon(Icons.Default.ChatBubbleOutline, contentDescription = "Message", modifier = Modifier.size(20.dp), tint = ProfileTheme.MutedForeground)
         }
+    }
+}
+
+@Composable
+fun ProfileModuleSurface(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.22f)
+    } else {
+        Color.Black.copy(alpha = 0.14f)
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            content = content
+        )
     }
 }
