@@ -180,8 +180,6 @@ fun ProfileScreen(
         UserActionDialog(
             user = friend,
             isFriend = true,
-            isPinned = false,
-            showPinAction = false,
             onDismiss = { selectedFriend = null },
             onTogglePin = {},
             onMessage = {
