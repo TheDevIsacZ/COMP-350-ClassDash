@@ -1133,7 +1133,6 @@ fun ScheduleSection(
                             MaterialTheme.colorScheme.surfaceVariant,
                             CircleShape
                         )
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.05f), CircleShape)
                 ) {
                     Icon(
                         Icons.Default.Edit,
@@ -1252,103 +1251,22 @@ fun BookmarkedEventsSection(
             )
 
             Icon(
-                imageVector = Icons.Default.Star,
+                imageVector = Icons.Default.Bookmark,
                 contentDescription = null,
                 tint = Color.Gray
             )
         }
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Bookmarked Events",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = ProfileTheme.Primary
-                )
-                Icon(
-                    imageVector = Icons.Default.Bookmark,
-                    contentDescription = null,
-                    tint = Color.Gray
-                )
-            }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        events.forEachIndexed { index, event ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = event.summary ?: "(No Title)",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = ProfileTheme.Primary
-                    )
-
-                    val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
-
-                    if (dateText.isNotEmpty()) {
-                        Text(
-                            text = dateText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ProfileTheme.MutedForeground
-                        )
-                    }
-
-                    if (!event.location.isNullOrBlank()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.LocationOn,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = ProfileTheme.MutedForeground
-                            )
-
-                            Spacer(modifier = Modifier.width(4.dp))
-
-                            Text(
-                                text = event.location,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ProfileTheme.MutedForeground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-
-                IconButton(onClick = { onRemoveBookmark(event) }) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = "Remove Bookmark",
-                        tint = Color(0xFFFFD700)
-                    )
-                }
-            }
-
-            if (index != events.lastIndex) {
-                HorizontalDivider(color = ProfileTheme.Border)
+        if (events.isEmpty()) {
+            Text(
+                text = "No bookmarked events",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else {
             events.forEachIndexed { index, event ->
                 Row(
                     modifier = Modifier
@@ -1364,6 +1282,7 @@ fun BookmarkedEventsSection(
                             fontWeight = FontWeight.SemiBold,
                             color = ProfileTheme.Primary
                         )
+
                         val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
                         if (dateText.isNotEmpty()) {
                             Text(
@@ -1372,6 +1291,7 @@ fun BookmarkedEventsSection(
                                 color = ProfileTheme.MutedForeground
                             )
                         }
+
                         if (!event.location.isNullOrBlank()) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
@@ -1391,6 +1311,7 @@ fun BookmarkedEventsSection(
                             }
                         }
                     }
+
                     IconButton(onClick = { onRemoveBookmark(event) }) {
                         Icon(
                             imageVector = Icons.Default.Bookmark,
@@ -1399,6 +1320,7 @@ fun BookmarkedEventsSection(
                         )
                     }
                 }
+
                 if (index != events.lastIndex) {
                     HorizontalDivider(color = ProfileTheme.Border)
                 }
