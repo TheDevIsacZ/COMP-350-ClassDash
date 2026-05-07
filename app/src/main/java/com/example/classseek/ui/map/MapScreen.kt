@@ -70,7 +70,7 @@ enum class MarkerCategory(val label: String, val icon: ImageVector, val color: C
     BUILDING("Building", Icons.Default.OtherHouses, Color(0xFF2596BE)), // Tealish
     STUDENT_SERVICE("Student Service", Icons.Default.School, Color(0xFFE580FF)),
     DINING("Dining", Icons.Default.Restaurant, Color(0xFFFFA500)), // Orange
-    BOOKMARK("Bookmark", Icons.Default.Star, Color(0xFFF8CF6B)),
+    BOOKMARK("Bookmark", Icons.Default.Bookmark, Color(0xFFF8CF6B)),
     SHARED("Shared", Icons.Default.ShareLocation, Color(0xFFC6BBE8)),
     CLASS("Class", Icons.Default.Explore, Color(0xFF6BD36E))
 }
@@ -122,6 +122,7 @@ fun MapScreen(
     // State for local share picking
     var showShareDialog by remember { mutableStateOf(false) }
     var myChats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
+    var selectedChatFilter by remember { mutableStateOf("All") }
 
     // State for compass heading
     var heading by remember { mutableStateOf(0f) }
@@ -610,11 +611,51 @@ fun MapScreen(
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
 
-                    if (myChats.isEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedChatFilter == "All",
+                            onClick = { selectedChatFilter = "All" },
+                            label = { Text("All") },
+                            leadingIcon = if (selectedChatFilter == "All") {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                        FilterChip(
+                            selected = selectedChatFilter == "DMs",
+                            onClick = { selectedChatFilter = "DMs" },
+                            label = { Text("DMs") },
+                            leadingIcon = if (selectedChatFilter == "DMs") {
+                                { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                        FilterChip(
+                            selected = selectedChatFilter == "Groups",
+                            onClick = { selectedChatFilter = "Groups" },
+                            label = { Text("Groups") },
+                            leadingIcon = if (selectedChatFilter == "Groups") {
+                                { Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null
+                        )
+                    }
+
+                    val filteredChats = remember(myChats, selectedChatFilter) {
+                        when (selectedChatFilter) {
+                            "DMs" -> myChats.filter { it.type == "dm" }
+                            "Groups" -> myChats.filter { it.type == "group" }
+                            else -> myChats
+                        }
+                    }
+
+                    if (filteredChats.isEmpty()) {
                         Text("No chats available", modifier = Modifier.padding(vertical = 16.dp))
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                            items(myChats) { chat ->
+                            items(filteredChats) { chat ->
                                 ListItem(
                                     headlineContent = { Text(chat.title) },
                                     leadingContent = {

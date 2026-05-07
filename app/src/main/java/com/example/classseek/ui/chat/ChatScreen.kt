@@ -21,7 +21,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Map
+import com.google.firebase.firestore.FieldValue
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
@@ -1201,7 +1203,27 @@ fun ChatScreen(
                             null
                         },
                         seenByProfiles = if (isMine) seenByProfiles else emptyList(),
-                        onLocationClick = onLocationClick
+                        onLocationClick = onLocationClick,
+                        onAddEventToCalendar = { eventMsg ->
+                            if (myUid != null && eventMsg.eventId != null) {
+                                val eventData = hashMapOf(
+                                    "eventId" to eventMsg.eventId,
+                                    "title" to (eventMsg.eventTitle ?: "Event"),
+                                    "start" to (eventMsg.eventStart ?: ""),
+                                    "end" to (eventMsg.eventEnd ?: ""),
+                                    "location" to (eventMsg.eventLocation ?: ""),
+                                    "savedAt" to FieldValue.serverTimestamp()
+                                )
+
+                                db.collection("users").document(myUid)
+                                    .collection("sharedEvents")
+                                    .document(eventMsg.eventId)
+                                    .set(eventData)
+
+                                db.collection("users").document(myUid)
+                                    .update("bookmarkedEventIds", FieldValue.arrayUnion(eventMsg.eventId))
+                            }
+                        }
                     )
                 }
             }
@@ -1281,7 +1303,8 @@ private fun MessageRow(
     showReceipt: Boolean = false,
     receiptText: String? = null,
     seenByProfiles: List<ChatUserProfile> = emptyList(),
-    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> },
+    onAddEventToCalendar: (Message) -> Unit = {}
 ) {
     if (msg.type == "system") {
         Box(
@@ -1349,17 +1372,31 @@ private fun MessageRow(
                                 }
                             }
                         } else if (msg.type == "event") {
-                            Column {
-                                Text(
-                                    text = "📅 ${msg.eventTitle ?: "Event"}",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (!msg.eventStart.isNullOrBlank()) {
-                                    Text("🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}", style = MaterialTheme.typography.bodySmall)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "📅 ${msg.eventTitle ?: "Event"}",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (!msg.eventStart.isNullOrBlank()) {
+                                        Text(
+                                            "🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    if (!msg.eventLocation.isNullOrBlank()) {
+                                        Text("📍 ${msg.eventLocation}", style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
-                                if (!msg.eventLocation.isNullOrBlank()) {
-                                    Text("📍 ${msg.eventLocation}", style = MaterialTheme.typography.bodySmall)
+                                if (!isMine && msg.eventId != null) {
+                                    IconButton(onClick = { onAddEventToCalendar(msg) }) {
+                                        Icon(
+                                            imageVector = Icons.Default.BookmarkAdd,
+                                            contentDescription = "Add to Calendar",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                 }
                             }
                         } else {

@@ -32,8 +32,9 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -41,6 +42,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -296,7 +298,7 @@ fun CalendarScreen(
                                 modifier = Modifier.align(Alignment.CenterEnd).size(32.dp)
                             ) {
                                 Icon(
-                                    imageVector = if (showStarredOnly) Icons.Default.Star else Icons.Default.StarBorder,
+                                    imageVector = if (showStarredOnly) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                                     contentDescription = "Show Starred Only",
                                     tint = if (showStarredOnly) Color(0xFFFFD700) else Color.Gray,
                                     modifier = Modifier.size(24.dp)
@@ -457,19 +459,11 @@ fun CalendarScreen(
     if (showChatPicker && selectedEventForSharing != null && myUid.isNotBlank()) {
         var chats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
         var chatSearchQuery by remember(selectedEventForSharing?.id) { mutableStateOf("") }
+        var selectedChatFilter by remember { mutableStateOf("All") }
         LaunchedEffect(Unit) {
             try {
                 chats = chatRepository.getMyChats(myUid)
             } catch (e: Exception) {
-            }
-        }
-        val filteredChats = if (chatSearchQuery.isBlank()) {
-            chats
-        } else {
-            val normalizedQuery = chatSearchQuery.trim()
-            chats.filter { chat ->
-                chat.title.contains(normalizedQuery, ignoreCase = true) ||
-                    chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
             }
         }
 
@@ -500,14 +494,64 @@ fun CalendarScreen(
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
-                if (filteredChats.isEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedChatFilter == "All",
+                        onClick = { selectedChatFilter = "All" },
+                        label = { Text("All") },
+                        leadingIcon = if (selectedChatFilter == "All") {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                    FilterChip(
+                        selected = selectedChatFilter == "DMs",
+                        onClick = { selectedChatFilter = "DMs" },
+                        label = { Text("DMs") },
+                        leadingIcon = if (selectedChatFilter == "DMs") {
+                            { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                    FilterChip(
+                        selected = selectedChatFilter == "Groups",
+                        onClick = { selectedChatFilter = "Groups" },
+                        label = { Text("Groups") },
+                        leadingIcon = if (selectedChatFilter == "Groups") {
+                            { Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                }
+
+                val finalFilteredChats = remember(chats, chatSearchQuery, selectedChatFilter) {
+                    var filtered = if (chatSearchQuery.isBlank()) {
+                        chats
+                    } else {
+                        val normalizedQuery = chatSearchQuery.trim()
+                        chats.filter { chat ->
+                            chat.title.contains(normalizedQuery, ignoreCase = true) ||
+                                    chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
+                        }
+                    }
+
+                    when (selectedChatFilter) {
+                        "DMs" -> filtered.filter { it.type == "dm" }
+                        "Groups" -> filtered.filter { it.type == "group" }
+                        else -> filtered
+                    }
+                }
+
+                if (finalFilteredChats.isEmpty()) {
                     Text(
                         text = if (chatSearchQuery.isBlank()) "No chats available" else "No matching chats",
                         modifier = Modifier.padding(vertical = 16.dp)
                     )
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(filteredChats) { chat ->
+                        items(finalFilteredChats) { chat ->
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
@@ -809,6 +853,7 @@ fun AgendaItem(
     val eventColor = Color(0xFF4285F4)
     var showMenu by remember { mutableStateOf(false) }
     val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) ?: false
+    var optimisticIsBookmarked by remember(event.id, isBookmarked) { mutableStateOf(isBookmarked) }
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -833,7 +878,10 @@ fun AgendaItem(
                         val uid = FirebaseAuth.getInstance().currentUser?.uid
                         if (uid != null) {
                             val ref = FirebaseFirestore.getInstance().collection("users").document(uid)
-                            if (isBookmarked) {
+                            val wasBookmarked = optimisticIsBookmarked
+                            optimisticIsBookmarked = !wasBookmarked
+
+                            if (wasBookmarked) {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayRemove(event.id))
                                 FirebaseFirestore.getInstance().collection("users").document(uid).collection("reminders").document(event.id ?: "").delete()
                             } else {
@@ -841,7 +889,11 @@ fun AgendaItem(
                             }
                         }
                     }) {
-                        Icon(if (isBookmarked) Icons.Default.Star else Icons.Default.StarBorder, "Bookmark", tint = if (isBookmarked) Color(0xFFFFD700) else Color.Gray)
+                        Icon(
+                            imageVector = if (optimisticIsBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = "Bookmark",
+                            tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray
+                        )
                     }
                     IconButton(onClick = { onSetReminder(event) }) {
                         Icon(Icons.Default.Notifications, "Set Reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))

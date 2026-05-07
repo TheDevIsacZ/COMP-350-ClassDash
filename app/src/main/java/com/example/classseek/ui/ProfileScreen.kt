@@ -1231,6 +1231,7 @@ fun ScheduleSection(
     }
 }
 
+
 @Composable
 fun BookmarkedEventsSection(
     events: List<Event>,
@@ -1250,7 +1251,7 @@ fun BookmarkedEventsSection(
             )
 
             Icon(
-                imageVector = Icons.Default.Star,
+                imageVector = Icons.Default.Bookmark,
                 contentDescription = null,
                 tint = Color.Gray
             )
@@ -1258,65 +1259,71 @@ fun BookmarkedEventsSection(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        events.forEachIndexed { index, event ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = event.summary ?: "(No Title)",
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = ProfileTheme.Primary
-                    )
-
-                    val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
-
-                    if (dateText.isNotEmpty()) {
+        if (events.isEmpty()) {
+            Text(
+                text = "No bookmarked events",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else {
+            events.forEachIndexed { index, event ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = dateText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ProfileTheme.MutedForeground
+                            text = event.summary ?: "(No Title)",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ProfileTheme.Primary
                         )
-                    }
 
-                    if (!event.location.isNullOrBlank()) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.LocationOn,
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp),
-                                tint = ProfileTheme.MutedForeground
-                            )
-
-                            Spacer(modifier = Modifier.width(4.dp))
-
+                        val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
+                        if (dateText.isNotEmpty()) {
                             Text(
-                                text = event.location,
+                                text = dateText,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = ProfileTheme.MutedForeground,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                color = ProfileTheme.MutedForeground
                             )
                         }
+
+                        if (!event.location.isNullOrBlank()) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(14.dp),
+                                    tint = ProfileTheme.MutedForeground
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = event.location,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = ProfileTheme.MutedForeground,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(onClick = { onRemoveBookmark(event) }) {
+                        Icon(
+                            imageVector = Icons.Default.Bookmark,
+                            contentDescription = "Remove Bookmark",
+                            tint = Color(0xFFFFD700)
+                        )
                     }
                 }
 
-                IconButton(onClick = { onRemoveBookmark(event) }) {
-                    Icon(
-                        imageVector = Icons.Default.Star,
-                        contentDescription = "Remove Bookmark",
-                        tint = Color(0xFFFFD700)
-                    )
+                if (index != events.lastIndex) {
+                    HorizontalDivider(color = ProfileTheme.Border)
                 }
-            }
-
-            if (index != events.lastIndex) {
-                HorizontalDivider(color = ProfileTheme.Border)
             }
         }
     }

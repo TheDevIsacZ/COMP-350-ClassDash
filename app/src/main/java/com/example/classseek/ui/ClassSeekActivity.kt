@@ -490,6 +490,7 @@ fun ClassSeekApp(
     val activity = remember(context) { context as? ClassSeekActivity }
 
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
+    var sharedEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
     var pendingNotificationChatId by remember { mutableStateOf<String?>(null) }
@@ -536,6 +537,7 @@ fun ClassSeekApp(
         profileFriends.clear()
         consumeRoutedChat()
         consumePendingNotificationChat()
+        sharedEvents = emptyList()
         currentDestination = AppDestinations.PROFILE
     }
 
@@ -717,6 +719,74 @@ fun ClassSeekApp(
         }
     }
 
+    DisposableEffect(firebaseUser?.uid) {
+        val uid = firebaseUser?.uid
+        if (uid == null) {
+            sharedEvents = emptyList()
+            return@DisposableEffect onDispose {}
+        }
+
+        val registration = db.collection("users")
+            .document(uid)
+            .collection("sharedEvents")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("CALENDAR_DEBUG", "Shared events listener error", error)
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    val events = snapshot.documents.mapNotNull { doc ->
+                        try {
+                            Event().apply {
+                                id = doc.getString("eventId")
+                                summary = doc.getString("title")
+                                location = doc.getString("location")
+
+                                val startStr = doc.getString("start")
+                                val endStr = doc.getString("end")
+
+                                val fullSdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+                                val dateSdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+
+                                start = EventDateTime().apply {
+                                    val date = try {
+                                        fullSdf.parse(startStr ?: "")
+                                    } catch (e: Exception) {
+                                        try {
+                                            dateSdf.parse(startStr ?: "")
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                    }
+                                    if (date != null) dateTime = DateTime(date)
+                                }
+                                end = EventDateTime().apply {
+                                    val date = try {
+                                        fullSdf.parse(endStr ?: "")
+                                    } catch (e: Exception) {
+                                        try {
+                                            dateSdf.parse(endStr ?: "")
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                    }
+                                    if (date != null) dateTime = DateTime(date)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                    sharedEvents = events
+                }
+            }
+
+        onDispose {
+            registration.remove()
+        }
+    }
+
     val gso = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestIdToken(context.getString(R.string.default_web_client_id))
@@ -827,7 +897,7 @@ fun ClassSeekApp(
         }
     }
 
-    val displayedEvents = remember(calendarEvents, userProfile?.classes) {
+    val displayedEvents = remember(calendarEvents, userProfile?.classes, sharedEvents) {
         val virtualEvents = userProfile?.classes?.flatMap { classInfo: ClassInfo ->
             val daysMap = mapOf(
                 "Monday" to java.util.Calendar.MONDAY,
@@ -905,7 +975,9 @@ fun ClassSeekApp(
             }
         } ?: emptyList()
 
-        calendarEvents + virtualEvents
+        val bookmarkedSharedEvents = sharedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
+
+        calendarEvents + virtualEvents + bookmarkedSharedEvents
     }
 
     val myBookmarkedEvents = displayedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
