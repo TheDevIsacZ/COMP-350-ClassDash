@@ -11,19 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarToday
-import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.DeleteForever
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material.icons.filled.PersonRemove
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material3.*
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
@@ -56,6 +43,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.luminance
 
 // Define colors based on the provided theme.css (Light mode mostly)
 object ProfileTheme {
@@ -626,22 +616,11 @@ fun SettingsHeaderSection(userProfile: UserProfile) {
 
 @Composable
 fun SettingsProfileInfoCard(userProfile: UserProfile) {
-
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
+    ProfileModuleSurface {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(10.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
-
             Text(
                 userProfile.name,
                 style = MaterialTheme.typography.titleLarge,
@@ -667,54 +646,41 @@ fun SettingsProfileInfoCard(userProfile: UserProfile) {
 fun PublicProfileInfoCard(userProfile: UserProfile) {
     val clipboardManager = LocalClipboardManager.current
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-        ) {
-            CopyableProfileInfoRow(
-                label = "Name",
-                value = userProfile.name.ifBlank { "Not provided" },
-                onCopy = {
-                    clipboardManager.setText(AnnotatedString(userProfile.name))
-                }
-            )
+    ProfileModuleSurface {
+        CopyableProfileInfoRow(
+            label = "Name",
+            value = userProfile.name.ifBlank { "Not provided" },
+            onCopy = {
+                clipboardManager.setText(AnnotatedString(userProfile.name))
+            }
+        )
 
-            SettingsInfoRow("Major", userProfile.major.ifBlank { "Not provided" })
-            SettingsInfoRow("Location", userProfile.location.ifBlank { "Not provided" })
+        SettingsInfoRow("Major", userProfile.major.ifBlank { "Not provided" })
+        SettingsInfoRow("Location", userProfile.location.ifBlank { "Not provided" })
 
-            CopyableProfileInfoRow(
-                label = "Website URL",
-                value = userProfile.githubUrl.ifBlank { "Not provided" },
-                onCopy = {
-                    clipboardManager.setText(AnnotatedString(userProfile.githubUrl))
-                }
-            )
+        CopyableProfileInfoRow(
+            label = "Website URL",
+            value = userProfile.githubUrl.ifBlank { "Not provided" },
+            onCopy = {
+                clipboardManager.setText(AnnotatedString(userProfile.githubUrl))
+            }
+        )
 
-            Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(12.dp))
 
-            Text(
-                text = "Bio",
-                style = MaterialTheme.typography.labelMedium,
-                color = ProfileTheme.MutedForeground,
-                fontWeight = FontWeight.SemiBold
-            )
+        Text(
+            text = "Bio",
+            style = MaterialTheme.typography.labelMedium,
+            color = ProfileTheme.MutedForeground,
+            fontWeight = FontWeight.SemiBold
+        )
 
-            Text(
-                text = userProfile.bio.ifBlank { "No bio provided." },
-                style = MaterialTheme.typography.bodyMedium,
-                color = ProfileTheme.Primary,
-                lineHeight = 20.sp
-            )
-        }
+        Text(
+            text = userProfile.bio.ifBlank { "No bio provided." },
+            style = MaterialTheme.typography.bodyMedium,
+            color = ProfileTheme.Primary,
+            lineHeight = 20.sp
+        )
     }
 }
 
@@ -783,85 +749,84 @@ fun FavoriteFriendsCard(
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
+
     val normalizedQuery = searchQuery.trim()
+
     val filteredFriends = if (normalizedQuery.isBlank()) {
         friends
     } else {
         friends.filter { friend ->
             friend.displayName.contains(normalizedQuery, ignoreCase = true) ||
-                friend.name.contains(normalizedQuery, ignoreCase = true) ||
-                friend.email.contains(normalizedQuery, ignoreCase = true)
+                    friend.name.contains(normalizedQuery, ignoreCase = true) ||
+                    friend.email.contains(normalizedQuery, ignoreCase = true)
         }
     }
+
     val previewFriends = friends.take(3)
 
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (isExpanded) {
-                SearchBar(
-                    query = searchQuery,
-                    onQueryChange = { searchQuery = it },
-                    placeholder = "Search friends"
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            if (friends.isEmpty()) {
-                Text(
-                    text = "No friends added yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = ProfileTheme.MutedForeground,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            } else if (isExpanded && filteredFriends.isEmpty()) {
-                Text(
-                    text = "No matching friends.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = ProfileTheme.MutedForeground,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-            } else if (isExpanded) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 320.dp)
-                ) {
-                    items(filteredFriends) { friend ->
-                        ProfileFriendItem(
-                            user = friend,
-                            onClick = { onFriendClick(friend) }
-                        )
-                    }
-                }
-            } else {
-                previewFriends.forEachIndexed { index, friend ->
-                    ProfileFriendItem(user = friend, onClick = { onFriendClick(friend) })
-                    if (index != previewFriends.lastIndex) {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = ProfileTheme.Border)
-                    }
-                }
-            }
+    SettingsSectionCard(title = "Friends") {
+        if (isExpanded) {
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                placeholder = "Search friends"
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
-            TextButton(
-                onClick = {
-                    isExpanded = !isExpanded
-                    if (!isExpanded) {
-                        searchQuery = ""
-                    }
-                },
-                modifier = Modifier.align(Alignment.Start)
+        }
+
+        if (friends.isEmpty()) {
+            Text(
+                text = "No friends added yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else if (isExpanded && filteredFriends.isEmpty()) {
+            Text(
+                text = "No matching friends.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else if (isExpanded) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
             ) {
-                Text(if (isExpanded) "Show less" else "View all")
+                items(filteredFriends) { friend ->
+                    ProfileFriendItem(
+                        user = friend,
+                        onClick = { onFriendClick(friend) }
+                    )
+                }
             }
+        } else {
+            previewFriends.forEachIndexed { index, friend ->
+                ProfileFriendItem(
+                    user = friend,
+                    onClick = { onFriendClick(friend) }
+                )
+
+                if (index != previewFriends.lastIndex) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        TextButton(
+            onClick = {
+                isExpanded = !isExpanded
+                if (!isExpanded) {
+                    searchQuery = ""
+                }
+            },
+            modifier = Modifier.align(Alignment.Start)
+        ) {
+            Text(if (isExpanded) "Show less" else "View all")
         }
     }
 }
@@ -901,56 +866,102 @@ fun ProfileFriendItem(
     user: UserSearchItem,
     onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.18f)
+    } else {
+        Color.Black.copy(alpha = 0.10f)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
     ) {
-        Box(modifier = Modifier.size(44.dp).clip(CircleShape).background(ProfileTheme.Accent)) {
-            if (user.profilePictureUrl.isNotBlank()) {
-                AsyncImage(
-                    model = user.profilePictureUrl,
-                    contentDescription = "${user.displayName} profile picture",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            } else {
-                Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.fillMaxSize().padding(10.dp), tint = ProfileTheme.MutedForeground)
-            }
-        }
-
-        Spacer(modifier = Modifier.padding(6.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = user.displayName.ifBlank { user.name.ifBlank { user.email } },
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                color = ProfileTheme.Primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = user.major.ifBlank { user.email },
-                style = MaterialTheme.typography.bodySmall,
-                color = ProfileTheme.MutedForeground,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
-                modifier = Modifier.size(8.dp).background(
-                    if (user.isOnline) Color(0xFF22C55E) else ProfileTheme.MutedForeground.copy(alpha = 0.45f),
-                    CircleShape
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(ProfileTheme.Accent),
+                contentAlignment = Alignment.Center
+            ) {
+                if (user.profilePictureUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = user.profilePictureUrl,
+                        contentDescription = "${user.displayName} profile picture",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(10.dp),
+                        tint = ProfileTheme.MutedForeground
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = user.displayName.ifBlank { user.name.ifBlank { user.email } },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = ProfileTheme.Primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
-            )
-            Spacer(modifier = Modifier.padding(3.dp))
-            Text(
-                text = if (user.isOnline) "Online" else "Offline",
-                style = MaterialTheme.typography.bodySmall,
-                color = ProfileTheme.MutedForeground
-            )
+
+                Text(
+                    text = user.major.ifBlank { user.email },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ProfileTheme.MutedForeground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .background(
+                            color = if (user.isOnline) {
+                                Color(0xFF22C55E)
+                            } else {
+                                ProfileTheme.MutedForeground.copy(alpha = 0.45f)
+                            },
+                            shape = CircleShape
+                        )
+                )
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                Text(
+                    text = if (user.isOnline) "Online" else "Offline",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ProfileTheme.MutedForeground
+                )
+            }
         }
     }
 }
@@ -960,15 +971,40 @@ fun SettingsSectionCard(
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.22f)
+    } else {
+        Color.Black.copy(alpha = 0.14f)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium, color = ProfileTheme.Primary, fontWeight = FontWeight.SemiBold)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = ProfileTheme.Primary,
+                fontWeight = FontWeight.SemiBold
+            )
+
             Spacer(modifier = Modifier.height(8.dp))
+
             content()
         }
     }
@@ -1007,19 +1043,35 @@ fun SettingsActionsCard(
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            SettingsActionRow("Edit Profile", "Update your profile information", onEditProfile)
-            HorizontalDivider(color = ProfileTheme.Border)
-            SettingsActionRow("Sign Out", "Sign out of your account", onSignOut)
-            HorizontalDivider(color = ProfileTheme.Border)
-            SettingsActionRow("Delete Account", "Permanently remove your account", onDeleteAccount, titleColor = Color.Red)
-        }
+    SettingsSectionCard(title = "Account") {
+        SettingsActionRow(
+            title = "Edit Profile",
+            subtitle = "Update your profile information",
+            onClick = onEditProfile
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 4.dp),
+            color = ProfileTheme.Border
+        )
+
+        SettingsActionRow(
+            title = "Sign Out",
+            subtitle = "Sign out of your account",
+            onClick = onSignOut
+        )
+
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 4.dp),
+            color = ProfileTheme.Border
+        )
+
+        SettingsActionRow(
+            title = "Delete Account",
+            subtitle = "Permanently remove your account",
+            onClick = onDeleteAccount,
+            titleColor = Color.Red
+        )
     }
 }
 
@@ -1030,10 +1082,37 @@ fun SettingsActionRow(
     onClick: () -> Unit,
     titleColor: Color = ProfileTheme.Primary
 ) {
-    Column(modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(16.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = titleColor, fontWeight = FontWeight.SemiBold)
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = ProfileTheme.MutedForeground)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = titleColor,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(modifier = Modifier.height(2.dp))
+
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground
+            )
+        }
+
+        Icon(
+            imageVector = Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = ProfileTheme.MutedForeground,
+            modifier = Modifier.size(20.dp)
+        )
     }
 }
 
@@ -1043,32 +1122,47 @@ fun ScheduleSection(
     onEditClick: () -> Unit,
     showEditButton: Boolean = true
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-        shape = RoundedCornerShape(16.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
+    ProfileModuleSurface {
         Box(modifier = Modifier.fillMaxWidth()) {
             if (showEditButton) {
                 IconButton(
                     onClick = onEditClick,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant,
+                            CircleShape
+                        )
                     modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.05f), CircleShape)
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit Schedule", tint = ProfileTheme.MutedForeground)
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit Schedule",
+                        tint = ProfileTheme.MutedForeground
+                    )
                 }
             }
 
-            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Current Schedule", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Current Schedule",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = ProfileTheme.Primary
+                )
 
                 if (userProfile.semester.isNotEmpty()) {
-                    Text(userProfile.semester, style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground, modifier = Modifier.padding(bottom = 6.dp))
+                    Text(
+                        userProfile.semester,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ProfileTheme.MutedForeground,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
                 } else {
                     Spacer(modifier = Modifier.height(4.dp))
                 }
 
-                if (userProfile.classes.isEmpty() || userProfile.classes.all { it.className.isBlank() }) {
+                if (userProfile.classes.isEmpty()) {
                     Text(
                         text = "Empty",
                         style = MaterialTheme.typography.bodyMedium,
@@ -1076,6 +1170,7 @@ fun ScheduleSection(
                     )
                 } else {
                     val activeClasses = userProfile.classes.filter { it.className.isNotBlank() }
+
                     activeClasses.forEachIndexed { index, classInfo ->
                         Column(modifier = Modifier.padding(vertical = 4.dp)) {
                             Row(
@@ -1090,6 +1185,7 @@ fun ScheduleSection(
                                     color = ProfileTheme.Primary,
                                     modifier = Modifier.weight(1f)
                                 )
+
                                 Column(horizontalAlignment = Alignment.End) {
                                     if (classInfo.building.isNotBlank() || classInfo.roomNumber.isNotBlank()) {
                                         Text(
@@ -1098,8 +1194,10 @@ fun ScheduleSection(
                                             color = ProfileTheme.MutedForeground
                                         )
                                     }
+
                                     val hasDay = classInfo.dayOfWeek.trim().isNotBlank()
                                     val hasTime = classInfo.startTime.trim().isNotBlank()
+
                                     if (hasDay || hasTime) {
                                         val timeText = buildString {
                                             append(classInfo.dayOfWeek.trim())
@@ -1108,6 +1206,7 @@ fun ScheduleSection(
                                             }
                                             append(classInfo.startTime.trim())
                                         }
+
                                         if (timeText.isNotBlank()) {
                                             Text(
                                                 text = timeText,
@@ -1118,6 +1217,7 @@ fun ScheduleSection(
                                     }
                                 }
                             }
+
                             if (index != activeClasses.lastIndex) {
                                 HorizontalDivider(
                                     modifier = Modifier.padding(vertical = 8.dp),
@@ -1138,6 +1238,25 @@ fun BookmarkedEventsSection(
     events: List<Event>,
     onRemoveBookmark: (Event) -> Unit
 ) {
+    ProfileModuleSurface {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Bookmarked Events",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = ProfileTheme.Primary
+            )
+
+            Icon(
+                imageVector = Icons.Default.Star,
+                contentDescription = null,
+                tint = Color.Gray
+            )
+        }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -1169,8 +1288,67 @@ fun BookmarkedEventsSection(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
+        events.forEachIndexed { index, event ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = event.summary ?: "(No Title)",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ProfileTheme.Primary
+                    )
+
+                    val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
+
+                    if (dateText.isNotEmpty()) {
+                        Text(
+                            text = dateText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ProfileTheme.MutedForeground
+                        )
+                    }
+
+                    if (!event.location.isNullOrBlank()) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.LocationOn,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = ProfileTheme.MutedForeground
+                            )
+
+                            Spacer(modifier = Modifier.width(4.dp))
+
+                            Text(
+                                text = event.location,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ProfileTheme.MutedForeground,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                IconButton(onClick = { onRemoveBookmark(event) }) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = "Remove Bookmark",
+                        tint = Color(0xFFFFD700)
+                    )
+                }
+            }
+
+            if (index != events.lastIndex) {
+                HorizontalDivider(color = ProfileTheme.Border)
             events.forEachIndexed { index, event ->
                 Row(
                     modifier = Modifier
@@ -1252,5 +1430,39 @@ fun FriendItem(friend: Friend) {
         IconButton(onClick = {}) {
             Icon(Icons.Default.ChatBubbleOutline, contentDescription = "Message", modifier = Modifier.size(20.dp), tint = ProfileTheme.MutedForeground)
         }
+    }
+}
+
+@Composable
+fun ProfileModuleSurface(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.22f)
+    } else {
+        Color.Black.copy(alpha = 0.14f)
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            content = content
+        )
     }
 }
