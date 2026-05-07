@@ -71,7 +71,7 @@ fun ScheduleEditScreen(
     }
 
     Scaffold(
-        containerColor = Color(0xFFF3F4F6),
+        containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
             TopAppBar(
                 title = { Text("Edit Schedule") },
@@ -122,7 +122,9 @@ fun ScheduleEditScreen(
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {

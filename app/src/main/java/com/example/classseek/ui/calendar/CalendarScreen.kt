@@ -3,7 +3,7 @@ package com.example.classseek.ui.calendar
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.widget.CalendarView
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -30,10 +29,14 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -47,6 +50,7 @@ import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,17 +66,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.SearchBar
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -110,6 +116,9 @@ fun CalendarScreen(
     var showStarredOnly by remember { mutableStateOf(false) }
     var showChatPicker by remember { mutableStateOf(false) }
     var selectedEventForSharing by remember { mutableStateOf<Event?>(null) }
+    var showReminderDialog by remember { mutableStateOf(false) }
+    var selectedEventForReminder by remember { mutableStateOf<Event?>(null) }
+    var userReminders by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
 
     var hasCalendarPermission by remember {
         mutableStateOf(
@@ -133,9 +142,34 @@ fun CalendarScreen(
         GoogleSignIn.getClient(context, gso)
     }
 
+    LaunchedEffect(signedInAccount?.email) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .collection("reminders")
+                .addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null) {
+                        val reminders = mutableMapOf<String, Boolean>()
+                        snapshot.documents.forEach { doc ->
+                            val eventId = doc.getString("eventId")
+                            if (eventId != null) {
+                                reminders[eventId] = true
+                            }
+                        }
+                        userReminders = reminders
+                    }
+                }
+        }
+    }
+
     if (!hasCalendarPermission) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -153,7 +187,10 @@ fun CalendarScreen(
         }
     } else if (signedInAccount == null) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -166,7 +203,9 @@ fun CalendarScreen(
             }
         }
     } else {
-        Scaffold { paddingValues ->
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background
+        ) { paddingValues ->
             val now = System.currentTimeMillis()
             val todayCal = JavaCalendar.getInstance().apply {
                 timeInMillis = now
@@ -192,6 +231,7 @@ fun CalendarScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
                     .padding(paddingValues)
             ) {
                 Row(
@@ -208,12 +248,13 @@ fun CalendarScreen(
                         Text(
                             text = "Schedule",
                             style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
                             text = signedInAccount.email ?: "",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color.Gray
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -221,31 +262,24 @@ fun CalendarScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.background)
                         .padding(horizontal = 6.dp)
                 ) {
                     item {
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        AndroidView(
-                            factory = { ctx ->
-                                CalendarView(ctx).apply {
-                                    setOnDateChangeListener { _, year, month, dayOfMonth ->
-                                        val cal = JavaCalendar.getInstance()
-                                        cal.set(year, month, dayOfMonth, 0, 0, 0)
-                                        cal.set(JavaCalendar.MILLISECOND, 0)
-                                        selectedDateMillis = cal.timeInMillis
-                                        showBottomSheet = true
-                                    }
-                                }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .wrapContentHeight()
+                        ClassSeekCalendarCard(
+                            events = calendarEvents,
+                            selectedDateMillis = selectedDateMillis,
+                            onDateSelected = { millis ->
+                                selectedDateMillis = millis
+                                showBottomSheet = true
+                            }
                         )
 
                         HorizontalDivider(
                             thickness = 0.5.dp,
-                            color = Color.LightGray,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
 
@@ -283,7 +317,7 @@ fun CalendarScreen(
                         if (groupedEvents[todayLabel] == null) {
                             Text(
                                 text = "No events scheduled for today.",
-                                color = Color.Gray,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
@@ -301,6 +335,10 @@ fun CalendarScreen(
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
+                                },
+                                onSetReminder = {
+                                    selectedEventForReminder = event
+                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -332,6 +370,10 @@ fun CalendarScreen(
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
+                                },
+                                onSetReminder = {
+                                    selectedEventForReminder = event
+                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -399,6 +441,10 @@ fun CalendarScreen(
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
+                                },
+                                onSetReminder = {
+                                    selectedEventForReminder = event
+                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -410,17 +456,29 @@ fun CalendarScreen(
 
     if (showChatPicker && selectedEventForSharing != null && myUid.isNotBlank()) {
         var chats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
+        var chatSearchQuery by remember(selectedEventForSharing?.id) { mutableStateOf("") }
         LaunchedEffect(Unit) {
             try {
                 chats = chatRepository.getMyChats(myUid)
             } catch (e: Exception) {
-                // Optionally show error message
+            }
+        }
+        val filteredChats = if (chatSearchQuery.isBlank()) {
+            chats
+        } else {
+            val normalizedQuery = chatSearchQuery.trim()
+            chats.filter { chat ->
+                chat.title.contains(normalizedQuery, ignoreCase = true) ||
+                    chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
             }
         }
 
         val pickerSheetState = rememberModalBottomSheetState()
         ModalBottomSheet(
-            onDismissRequest = { showChatPicker = false },
+            onDismissRequest = {
+                showChatPicker = false
+                chatSearchQuery = ""
+            },
             sheetState = pickerSheetState
         ) {
             Column(
@@ -435,11 +493,21 @@ fun CalendarScreen(
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
-                if (chats.isEmpty()) {
-                    Text("No chats available", modifier = Modifier.padding(vertical = 16.dp))
+                SearchBar(
+                    query = chatSearchQuery,
+                    onQueryChange = { chatSearchQuery = it },
+                    placeholder = "Search chats or people",
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                if (filteredChats.isEmpty()) {
+                    Text(
+                        text = if (chatSearchQuery.isBlank()) "No chats available" else "No matching chats",
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(chats) { chat ->
+                        items(filteredChats) { chat ->
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
@@ -478,9 +546,9 @@ fun CalendarScreen(
                                                 eventId = event.id
                                             )
                                             showChatPicker = false
+                                            chatSearchQuery = ""
                                             selectedEventForSharing = null
                                         } catch (e: Exception) {
-                                            // Optionally show error message
                                         }
                                     }
                                 }
@@ -493,15 +561,235 @@ fun CalendarScreen(
             }
         }
     }
+
+    if (showReminderDialog && selectedEventForReminder != null) {
+        ReminderDialog(
+            eventTitle = selectedEventForReminder?.summary ?: "Untitled Event",
+            onDismiss = {
+                showReminderDialog = false
+                selectedEventForReminder = null
+            },
+            onSetReminder = { minutes ->
+                val uid = FirebaseAuth.getInstance().currentUser?.uid
+                val event = selectedEventForReminder
+                if (uid != null && event != null) {
+                    val eventTimeMillis = event.start?.dateTime?.value
+                        ?: event.start?.date?.value
+                        ?: System.currentTimeMillis()
+
+                    // For testing: set reminder to NOW so it triggers immediately
+                    val testReminderTime = System.currentTimeMillis() - 60000  // 1 minute ago
+
+                    val reminderData = hashMapOf(
+                        "eventId" to (event.id ?: "test"),
+                        "eventTitle" to (event.summary ?: "Test Event"),
+                        "eventTime" to eventTimeMillis,
+                        "reminderMinutes" to minutes,
+                        "reminderTime" to testReminderTime,
+                        "notificationSent" to false,
+                    )
+
+                    Log.d("REMINDER_DEBUG", "Saving reminder: $reminderData")
+
+                    FirebaseFirestore.getInstance()
+                        .collection("users")
+                        .document(uid)
+                        .collection("reminders")
+                        .document(event.id ?: "test")
+                        .set(reminderData)
+                        .addOnSuccessListener {
+                            Log.d("REMINDER_DEBUG", "✅ Reminder saved successfully!")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e("REMINDER_DEBUG", "❌ Failed to save reminder: ${e.message}", e)
+                        }
+                }
+                showReminderDialog = false
+                selectedEventForReminder = null
+            }
+        )
+    }
+}
+
+@Composable
+private fun ClassSeekCalendarCard(
+    events: List<Event>,
+    selectedDateMillis: Long?,
+    onDateSelected: (Long) -> Unit
+) {
+    var visibleMonthMillis by remember {
+        mutableStateOf(
+            JavaCalendar.getInstance().apply {
+                set(JavaCalendar.DAY_OF_MONTH, 1)
+                set(JavaCalendar.HOUR_OF_DAY, 0)
+                set(JavaCalendar.MINUTE, 0)
+                set(JavaCalendar.SECOND, 0)
+                set(JavaCalendar.MILLISECOND, 0)
+            }.timeInMillis
+        )
+    }
+
+    val monthCalendar = remember(visibleMonthMillis) {
+        JavaCalendar.getInstance().apply {
+            timeInMillis = visibleMonthMillis
+            set(JavaCalendar.DAY_OF_MONTH, 1)
+            set(JavaCalendar.HOUR_OF_DAY, 0)
+            set(JavaCalendar.MINUTE, 0)
+            set(JavaCalendar.SECOND, 0)
+            set(JavaCalendar.MILLISECOND, 0)
+        }
+    }
+
+    val monthTitle = remember(visibleMonthMillis) {
+        SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(Date(visibleMonthMillis))
+    }
+
+    val eventDayKeys = remember(events) {
+        events.mapNotNull { event ->
+            val millis = event.start?.dateTime?.value ?: event.start?.date?.value
+            millis?.let { dayKey(it) }
+        }.toSet()
+    }
+
+    val todayKey = dayKey(System.currentTimeMillis())
+    val selectedKey = selectedDateMillis?.let { dayKey(it) }
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        shape = RoundedCornerShape(22.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(14.dp)
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = {
+                    visibleMonthMillis = JavaCalendar.getInstance().apply {
+                        timeInMillis = visibleMonthMillis
+                        add(JavaCalendar.MONTH, -1)
+                    }.timeInMillis
+                }) { Text("‹", style = MaterialTheme.typography.titleLarge) }
+
+                Text(text = monthTitle, modifier = Modifier.weight(1f), textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+                TextButton(onClick = {
+                    visibleMonthMillis = JavaCalendar.getInstance().apply {
+                        timeInMillis = visibleMonthMillis
+                        add(JavaCalendar.MONTH, 1)
+                    }.timeInMillis
+                }) { Text("›", style = MaterialTheme.typography.titleLarge) }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").forEach { day ->
+                    Text(text = day, modifier = Modifier.weight(1f), textAlign = TextAlign.Center,
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = Color.Gray)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val dayCells = remember(visibleMonthMillis) { buildCalendarCells(monthCalendar) }
+
+            dayCells.chunked(7).forEach { week ->
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    week.forEach { dayMillis ->
+                        CalendarDayCell(dayMillis, eventDayKeys, todayKey, selectedKey, onDateSelected, Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarDayCell(
+    dayMillis: Long?, eventDayKeys: Set<String>, todayKey: String,
+    selectedKey: String?, onDateSelected: (Long) -> Unit, modifier: Modifier = Modifier
+) {
+    if (dayMillis == null) { Box(modifier = modifier.height(44.dp).padding(2.dp)); return }
+    val cal = remember(dayMillis) { JavaCalendar.getInstance().apply { timeInMillis = dayMillis } }
+    val key = dayKey(dayMillis)
+    val isToday = key == todayKey
+    val isSelected = key == selectedKey
+    val hasEvent = key in eventDayKeys
+
+    Box(
+        modifier = modifier.height(44.dp).padding(2.dp).clip(CircleShape)
+            .background(when { isSelected -> MaterialTheme.colorScheme.primary; hasEvent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f); else -> Color.Transparent })
+            .clickable { onDateSelected(dayMillis) },
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = cal.get(JavaCalendar.DAY_OF_MONTH).toString(),
+                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color.Black,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal)
+            if (hasEvent) Box(modifier = Modifier.size(4.dp).clip(CircleShape)
+                .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
+            else Spacer(modifier = Modifier.height(4.dp))
+        }
+    }
+}
+
+private fun buildCalendarCells(monthCalendar: JavaCalendar): List<Long?> {
+    val cal = monthCalendar.clone() as JavaCalendar
+    val cells = mutableListOf<Long?>()
+    repeat(cal.get(JavaCalendar.DAY_OF_WEEK) - JavaCalendar.SUNDAY) { cells.add(null) }
+    for (day in 1..cal.getActualMaximum(JavaCalendar.DAY_OF_MONTH)) {
+        val dayCal = monthCalendar.clone() as JavaCalendar
+        dayCal.set(JavaCalendar.DAY_OF_MONTH, day)
+        cells.add(dayCal.timeInMillis)
+    }
+    while (cells.size % 7 != 0) cells.add(null)
+    return cells
+}
+
+private fun dayKey(millis: Long): String {
+    val cal = JavaCalendar.getInstance().apply { timeInMillis = millis }
+    return "${cal.get(JavaCalendar.YEAR)}-${cal.get(JavaCalendar.MONTH)}-${cal.get(JavaCalendar.DAY_OF_MONTH)}"
+}
+
+@Composable
+fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (Int) -> Unit) {
+    var selectedMinutes by remember { mutableStateOf(15) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Set Reminder for") },
+        text = {
+            Column {
+                Text(eventTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Remind me:", style = MaterialTheme.typography.labelLarge)
+                Spacer(modifier = Modifier.height(8.dp))
+                listOf(0 to "At time of event", 5 to "5 minutes before", 15 to "15 minutes before",
+                    30 to "30 minutes before", 60 to "1 hour before", 120 to "2 hours before", 1440 to "1 day before"
+                ).forEach { (minutes, label) ->
+                    Row(modifier = Modifier.fillMaxWidth().clickable { selectedMinutes = minutes }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selectedMinutes == minutes, onClick = { selectedMinutes = minutes })
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(label, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSetReminder(selectedMinutes) }) { Text("Set Reminder") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 @Composable
 fun AgendaItem(
-    event: Event,
-    userProfile: UserProfile?,
-    canDelete: Boolean = false,
-    onDeleteClick: () -> Unit = {},
-    onShareClick: () -> Unit = {}
+    event: Event, userProfile: UserProfile?, canDelete: Boolean = false,
+    onDeleteClick: () -> Unit = {}, onShareClick: () -> Unit = {}, onSetReminder: (Event) -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
@@ -515,42 +803,30 @@ fun AgendaItem(
         colors = CardDefaults.cardColors(containerColor = Color.Transparent),
         shape = RoundedCornerShape(8.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.width(60.dp), horizontalAlignment = Alignment.End) {
-                Text(text = startTime, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                if (endTime.isNotEmpty()) {
-                    Text(text = endTime, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                }
+                Text(startTime, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
+                if (endTime.isNotEmpty()) Text(endTime, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .background(eventColor.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
+            Box(modifier = Modifier.weight(1f).background(eventColor.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.width(4.dp).height(24.dp).background(eventColor, RoundedCornerShape(2.dp)))
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                        if (!event.location.isNullOrEmpty()) {
-                            Text(text = event.location, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                        }
+                        Text(event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        if (!event.location.isNullOrEmpty()) Text(event.location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-
                     IconButton(onClick = {
                         val uid = FirebaseAuth.getInstance().currentUser?.uid
                         if (uid != null) {
                             val ref = FirebaseFirestore.getInstance().collection("users").document(uid)
                             val wasBookmarked = optimisticIsBookmarked
                             optimisticIsBookmarked = !wasBookmarked
-                            
+
                             if (wasBookmarked) {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayRemove(event.id))
+                                FirebaseFirestore.getInstance().collection("users").document(uid).collection("reminders").document(event.id ?: "").delete()
                             } else {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayUnion(event.id))
                             }
@@ -561,32 +837,19 @@ fun AgendaItem(
                             contentDescription = "Bookmark",
                             tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray
                         )
+                        Icon(if (isBookmarked) Icons.Default.Star else Icons.Default.StarBorder, "Bookmark", tint = if (isBookmarked) Color(0xFFFFD700) else Color.Gray)
                     }
-
+                    IconButton(onClick = { onSetReminder(event) }) {
+                        Icon(Icons.Default.Notifications, "Set Reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                    }
                     IconButton(onClick = onShareClick) {
-                        Icon(
-                            imageVector = Icons.Default.Share,
-                            contentDescription = "Share event",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary)
                     }
-
                     if (canDelete) {
                         Box {
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "More options")
-                            }
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Delete") },
-                                    onClick = {
-                                        showMenu = false
-                                        onDeleteClick()
-                                    }
-                                )
+                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "More options") }
+                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                                DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDeleteClick() })
                             }
                         }
                     }
@@ -598,25 +861,19 @@ fun AgendaItem(
 
 private fun formatDate(dateTime: DateTime?): String {
     if (dateTime == null) return "Unknown Date"
-    val date = Date(dateTime.value)
-    val sdf = SimpleDateFormat("EEEE, MMMM d", Locale.getDefault())
-    return sdf.format(date)
+    return SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(Date(dateTime.value))
 }
 
 private fun formatTime(dateTime: DateTime?): String {
     if (dateTime == null) return ""
-    val date = Date(dateTime.value)
-    val sdf = SimpleDateFormat("h:mm a", Locale.getDefault())
-    return sdf.format(date)
+    return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(dateTime.value))
 }
 
 private fun formatEventDateTime(dateTime: EventDateTime?): String {
     if (dateTime == null) return ""
     return if (dateTime.dateTime != null) {
-        val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
-        sdf.format(Date(dateTime.dateTime.value))
+        SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(dateTime.dateTime.value))
     } else if (dateTime.date != null) {
-        val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-        sdf.format(Date(dateTime.date.value))
+        SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(Date(dateTime.date.value))
     } else ""
 }
