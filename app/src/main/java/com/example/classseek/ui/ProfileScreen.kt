@@ -169,8 +169,6 @@ fun ProfileScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            ScheduleSection(userProfile, isMyProfile, onEditSchedule)
-
             // Bookmarked events section at the bottom
             if (bookmarkedEvents.isNotEmpty()) {
                 item { Spacer(modifier = Modifier.height(16.dp)) }
@@ -1045,7 +1043,6 @@ fun ScheduleSection(
     onEditClick: () -> Unit,
     showEditButton: Boolean = true
 ) {
-fun ScheduleSection(userProfile: UserProfile, showEdit: Boolean, onEditClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
@@ -1056,23 +1053,9 @@ fun ScheduleSection(userProfile: UserProfile, showEdit: Boolean, onEditClick: ()
             if (showEditButton) {
                 IconButton(
                     onClick = onEditClick,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(MaterialTheme.colorScheme.secondary, CircleShape)
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp).background(Color.Black.copy(alpha = 0.05f), CircleShape)
                 ) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit Schedule", tint = ProfileTheme.MutedForeground)
-                }
-            if (showEdit) {
-                IconButton(
-                    onClick = onEditClick,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp)
-                        .background(Color.Black.copy(alpha = 0.05f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = "Edit Schedule",
-                        tint = ProfileTheme.MutedForeground
-                    )
                 }
             }
 
@@ -1148,6 +1131,7 @@ fun ScheduleSection(userProfile: UserProfile, showEdit: Boolean, onEditClick: ()
         }
     }
 }
+
 
 @Composable
 fun BookmarkedEventsSection(

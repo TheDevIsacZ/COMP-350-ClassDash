@@ -34,8 +34,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -837,7 +835,6 @@ fun AgendaItem(
                             contentDescription = "Bookmark",
                             tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray
                         )
-                        Icon(if (isBookmarked) Icons.Default.Star else Icons.Default.StarBorder, "Bookmark", tint = if (isBookmarked) Color(0xFFFFD700) else Color.Gray)
                     }
                     IconButton(onClick = { onSetReminder(event) }) {
                         Icon(Icons.Default.Notifications, "Set Reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
