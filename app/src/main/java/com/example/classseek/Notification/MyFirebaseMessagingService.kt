@@ -34,27 +34,49 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val data = remoteMessage.data
 
-        val chatId = data["chatId"]
-        val title = data["title"]
-            ?: remoteMessage.notification?.title
-            ?: "ClassSeek"
-        val body = data["body"]
-            ?: remoteMessage.notification?.body
-            ?: ""
-        val chatTitle = data["chatTitle"] ?: title
+        // Handle different notification types
+        when (data["type"]) {
+            "event_reminder" -> {
+                val eventId = data["eventId"]
+                val title = data["title"] ?: remoteMessage.notification?.title ?: "Event Reminder"
+                val body = data["body"] ?: remoteMessage.notification?.body ?: ""
 
-        if (!chatId.isNullOrBlank()) {
-            sendChatNotification(
-                chatId = chatId,
-                chatTitle = chatTitle,
-                title = title,
-                messageBody = body
-            )
-        } else if (body.isNotBlank()) {
-            sendNotification(
-                title = title,
-                messageBody = body
-            )
+                sendReminderNotification(
+                    eventId = eventId ?: "",
+                    title = title,
+                    messageBody = body
+                )
+            }
+            "event_shared" -> {
+                val eventTitle = data["eventTitle"] ?: "Event"
+                val senderName = data["senderName"] ?: "Someone"
+
+                sendEventSharedNotification(
+                    title = "📅 Event Shared",
+                    messageBody = "$senderName shared an event: $eventTitle"
+                )
+            }
+            else -> {
+                // Existing notification handling
+                val chatId = data["chatId"]
+                val title = data["title"] ?: remoteMessage.notification?.title ?: "ClassSeek"
+                val body = data["body"] ?: remoteMessage.notification?.body ?: ""
+                val chatTitle = data["chatTitle"] ?: title
+
+                if (!chatId.isNullOrBlank()) {
+                    sendChatNotification(
+                        chatId = chatId,
+                        chatTitle = chatTitle,
+                        title = title,
+                        messageBody = body
+                    )
+                } else if (body.isNotBlank()) {
+                    sendNotification(
+                        title = title,
+                        messageBody = body
+                    )
+                }
+            }
         }
     }
 
@@ -149,6 +171,102 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
+            intent,
+            pendingIntentFlags
+        )
+
+        val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(messageBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(messageBody))
+            .setAutoCancel(true)
+            .setSound(defaultSoundUri)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        createNotificationChannelIfNeeded(notificationManager)
+
+        notificationManager.notify(System.currentTimeMillis().toInt(), notificationBuilder.build())
+    }
+
+    private fun sendReminderNotification(
+        eventId: String,
+        title: String,
+        messageBody: String
+    ) {
+        val intent = Intent(this, ClassSeekActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra("event_id", eventId)
+            putExtra("navigate_to", "calendar")
+        }
+
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            eventId.hashCode(),
+            intent,
+            pendingIntentFlags
+        )
+
+        val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(messageBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(messageBody))
+            .setAutoCancel(true)
+            .setSound(defaultSoundUri)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .addAction(
+                R.drawable.ic_notification,
+                "Dismiss",
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, ClassSeekActivity::class.java),
+                    pendingIntentFlags
+                )
+            )
+
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        createNotificationChannelIfNeeded(notificationManager)
+
+        notificationManager.notify(eventId.hashCode(), notificationBuilder.build())
+    }
+
+    private fun sendEventSharedNotification(
+        title: String,
+        messageBody: String
+    ) {
+        val intent = Intent(this, ClassSeekActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra("navigate_to", "calendar")
+        }
+
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            System.currentTimeMillis().toInt(),
             intent,
             pendingIntentFlags
         )

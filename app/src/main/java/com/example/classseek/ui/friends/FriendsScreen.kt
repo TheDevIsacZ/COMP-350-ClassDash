@@ -41,6 +41,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import java.text.SimpleDateFormat
 import java.util.Locale
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.Surface
+import androidx.compose.ui.graphics.luminance
+
 
 data class UserSearchItem(
     val uid: String,
@@ -68,7 +73,7 @@ private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
         email = email,
         major = getString("major")?.trim().orEmpty(),
         profilePictureUrl = getString("profilePictureUrl")?.trim().orEmpty(),
-        isVerified = false, // Default for now
+        isVerified = false,
         isOnline = isOnline
     )
 }
@@ -111,13 +116,14 @@ enum class FriendsNavigation {
 @Composable
 fun FriendsScreen(
     modifier: Modifier = Modifier,
+    friends: List<UserSearchItem> = emptyList(),
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() },
     initialChatId: String? = null,
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null,
     onNavigateToProfile: ((String) -> Unit)? = null,
-    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
 ) {
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
     var activeChatId by remember { mutableStateOf<String?>(null) }
@@ -125,7 +131,7 @@ fun FriendsScreen(
     var showNotFriendsDialog by remember { mutableStateOf(false) }
     var pendingFriendToAdd by remember { mutableStateOf<UserSearchItem?>(null) }
     val chats = remember { mutableStateListOf<ChatListItem>() }
-    val myUid = auth.currentUser?.uid ?: ""
+    var myUid by remember { mutableStateOf(auth.currentUser?.uid.orEmpty()) }
 
     val scope = rememberCoroutineScope()
     val db = remember { FirebaseFirestore.getInstance() }
@@ -134,6 +140,7 @@ fun FriendsScreen(
     var friendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var pendingRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var sentRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var favoriteFriendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
 
     BackHandler(enabled = currentScreen != FriendsNavigation.MAIN) {
@@ -152,7 +159,17 @@ fun FriendsScreen(
 
     var status by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
-    // Handle initial chat for deep linking or returning from other screens
+
+    DisposableEffect(auth) {
+        val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            myUid = firebaseAuth.currentUser?.uid.orEmpty()
+        }
+        auth.addAuthStateListener(listener)
+        onDispose {
+            auth.removeAuthStateListener(listener)
+        }
+    }
+
     LaunchedEffect(initialChatId) {
         if (initialChatId != null) {
             activeChatId = initialChatId
@@ -162,8 +179,8 @@ fun FriendsScreen(
         }
     }
 
-    // Listen for friends and requests
     val pendingRequests = remember { mutableStateListOf<UserSearchItem>() }
+
     DisposableEffect(myUid) {
         if (myUid.isBlank()) return@DisposableEffect onDispose {}
 
@@ -178,13 +195,15 @@ fun FriendsScreen(
                 pendingRequests.clear()
                 snapshot?.documents?.forEach { doc ->
                     val uid = doc.getString("uid") ?: doc.id
-                    pendingRequests.add(UserSearchItem(
-                        uid = uid,
-                        name = doc.getString("displayName") ?: "User",
-                        displayName = doc.getString("displayName") ?: "User",
-                        email = doc.getString("email") ?: "",
-                        profilePictureUrl = doc.getString("profilePictureUrl") ?: ""
-                    ))
+                    pendingRequests.add(
+                        UserSearchItem(
+                            uid = uid,
+                            name = doc.getString("displayName") ?: "User",
+                            displayName = doc.getString("displayName") ?: "User",
+                            email = doc.getString("email") ?: "",
+                            profilePictureUrl = doc.getString("profilePictureUrl") ?: ""
+                        )
+                    )
                 }
             }
 
@@ -193,14 +212,19 @@ fun FriendsScreen(
                 sentRequestUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
             }
 
+        val favoritesReg = db.collection("users").document(myUid).collection("favoriteFriends")
+            .addSnapshotListener { snapshot, _ ->
+                favoriteFriendUids = snapshot?.documents?.map { it.id }?.toSet() ?: emptySet()
+            }
+
         onDispose {
             friendsReg.remove()
             incomingReg.remove()
             outgoingReg.remove()
+            favoritesReg.remove()
         }
     }
 
-    // Listen for chats
     DisposableEffect(myUid) {
         if (myUid.isBlank()) return@DisposableEffect onDispose {}
         val reg = repo.listenToMyChats(
@@ -209,57 +233,38 @@ fun FriendsScreen(
                 chats.clear()
                 chats.addAll(updatedChats)
             },
-            onError = { /* Log error */ }
+            onError = { }
         )
         onDispose { reg.remove() }
     }
 
-    // Listen for Online Friends (Real friends from Firestore)
-    val onlineFriends = remember { mutableStateListOf<UserSearchItem>() }
-    var onlineFriendsError by remember { mutableStateOf<String?>(null) }
-    DisposableEffect(myUid, friendUids) {
-        if (myUid.isBlank() || friendUids.isEmpty()) {
-            onlineFriends.clear()
-            onlineFriendsError = null
-            return@DisposableEffect onDispose {}
-        }
+    val onlineFriends = friends
+        .filter { it.isOnline }
+        .sortedBy { friend -> friend.displayName.ifBlank { friend.email }.lowercase() }
 
-        val onlineByUid = linkedMapOf<String, UserSearchItem>()
-        val registrations = friendUids
-            .toList()
-            .chunked(10)
-            .map { uidChunk ->
-                db.collection("users")
-                    .whereIn(FieldPath.documentId(), uidChunk)
-                    .whereEqualTo("isOnline", true)
-                    .addSnapshotListener { usersSnapshot, error ->
-                        if (error != null) {
-                            onlineFriendsError = error.message
-                            onlineFriends.clear()
-                            return@addSnapshotListener
-                        }
+    fun addFavorite(friendUid: String) {
+        if (myUid.isBlank()) return
 
-                        onlineFriendsError = null
-                        val chunkIds = uidChunk.toSet()
-                        onlineByUid.keys.removeAll(chunkIds)
-                        usersSnapshot?.documents
-                            ?.mapNotNull { it.toUserSearchItem() }
-                            ?.forEach { user ->
-                                onlineByUid[user.uid] = user
-                            }
+        db.collection("users")
+            .document(myUid)
+            .collection("favoriteFriends")
+            .document(friendUid)
+            .set(
+                mapOf(
+                    "uid" to friendUid,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            )
+    }
 
-                        onlineFriends.clear()
-                        onlineFriends.addAll(
-                            onlineByUid.values.sortedBy { user ->
-                                user.displayName.ifBlank { user.email }.lowercase()
-                            }
-                        )
-                    }
-            }
+    fun removeFavorite(friendUid: String) {
+        if (myUid.isBlank()) return
 
-        onDispose {
-            registrations.forEach { it.remove() }
-        }
+        db.collection("users")
+            .document(myUid)
+            .collection("favoriteFriends")
+            .document(friendUid)
+            .delete()
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -267,7 +272,7 @@ fun FriendsScreen(
             FriendsNavigation.MAIN -> {
                 MessagesMainScreen(
                     onlineFriends = onlineFriends,
-                    onlineFriendsError = onlineFriendsError,
+                    onlineFriendsError = null,
                     pendingRequests = pendingRequests,
                     chats = chats,
                     onChatClick = { chat ->
@@ -286,16 +291,23 @@ fun FriendsScreen(
                     },
                     onAcceptFriend = { user ->
                         scope.launch {
-                            try { repo.acceptFriendRequest(myUid, user.uid) } catch (e: Exception) {}
+                            try {
+                                repo.acceptFriendRequest(myUid, user.uid)
+                            } catch (_: Exception) {
+                            }
                         }
                     },
                     onDeclineFriend = { user ->
                         scope.launch {
-                            try { repo.declineFriendRequest(myUid, user.uid) } catch (e: Exception) {}
+                            try {
+                                repo.declineFriendRequest(myUid, user.uid)
+                            } catch (_: Exception) {
+                            }
                         }
                     }
                 )
             }
+
             FriendsNavigation.NEW_MESSAGE -> {
                 NewMessageScreen(
                     onBack = { currentScreen = FriendsNavigation.MAIN },
@@ -312,6 +324,7 @@ fun FriendsScreen(
                     db = db
                 )
             }
+
             FriendsNavigation.CHAT -> {
                 if (activeChatId != null) {
                     ChatScreen(
@@ -340,11 +353,21 @@ fun FriendsScreen(
                     else -> null
                 },
                 onDismiss = { selectedUserForAction = null },
+                onTogglePin = {
+                    val targetUser = selectedUserForAction ?: return@UserActionDialog
+                    val isPinned = favoriteFriendUids.contains(targetUser.uid)
+
+                    if (isPinned) {
+                        removeFavorite(targetUser.uid)
+                    } else {
+                        addFavorite(targetUser.uid)
+                    }
+                },
                 onMessage = {
                     val targetUser = selectedUserForAction!!
-                    val isFriend = friendUids.contains(targetUser.uid)
+                    val isFriendNow = friendUids.contains(targetUser.uid)
 
-                    if (isFriend) {
+                    if (isFriendNow) {
                         selectedUserForAction = null
                         scope.launch {
                             try {
@@ -352,12 +375,10 @@ fun FriendsScreen(
                                 activeChatId = chatId
                                 activeChatTitle = targetUser.displayName
                                 currentScreen = FriendsNavigation.CHAT
-                            } catch (e: Exception) {
-                                // Handle error
+                            } catch (_: Exception) {
                             }
                         }
                     } else {
-                        // Not friends, show the dialog
                         pendingFriendToAdd = targetUser
                         selectedUserForAction = null
                         showNotFriendsDialog = true
@@ -369,8 +390,7 @@ fun FriendsScreen(
                     scope.launch {
                         try {
                             repo.sendFriendRequest(myUid, targetUser.uid)
-                        } catch (e: Exception) {
-                            // Error
+                        } catch (_: Exception) {
                         }
                     }
                 },
@@ -380,8 +400,7 @@ fun FriendsScreen(
                     scope.launch {
                         try {
                             repo.acceptFriendRequest(myUid, targetUser.uid)
-                        } catch (e: Exception) {
-                            // Error
+                        } catch (_: Exception) {
                         }
                     }
                 },
@@ -391,8 +410,7 @@ fun FriendsScreen(
                     scope.launch {
                         try {
                             repo.declineFriendRequest(myUid, targetUser.uid)
-                        } catch (e: Exception) {
-                            // Error
+                        } catch (_: Exception) {
                         }
                     }
                 },
@@ -402,8 +420,7 @@ fun FriendsScreen(
                     scope.launch {
                         try {
                             repo.cancelFriendRequest(myUid, targetUser.uid)
-                        } catch (e: Exception) {
-                            // Error
+                        } catch (_: Exception) {
                         }
                     }
                 },
@@ -413,8 +430,8 @@ fun FriendsScreen(
                     scope.launch {
                         try {
                             repo.removeFriend(myUid, targetUser.uid)
-                        } catch (e: Exception) {
-                            // Error
+                            removeFavorite(targetUser.uid)
+                        } catch (_: Exception) {
                         }
                     }
                 },
@@ -444,7 +461,8 @@ fun FriendsScreen(
                                 scope.launch {
                                     try {
                                         repo.sendFriendRequest(myUid, user.uid)
-                                    } catch (e: Exception) {}
+                                    } catch (_: Exception) {
+                                    }
                                 }
                             }
                         }
@@ -453,10 +471,12 @@ fun FriendsScreen(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = {
-                        showNotFriendsDialog = false
-                        pendingFriendToAdd = null
-                    }) {
+                    TextButton(
+                        onClick = {
+                            showNotFriendsDialog = false
+                            pendingFriendToAdd = null
+                        }
+                    ) {
                         Text("Cancel")
                     }
                 }
@@ -476,8 +496,7 @@ fun FriendsScreen(
                             scope.launch {
                                 try {
                                     repo.deleteChatListItem(myUid, targetChatId)
-                                } catch (e: Exception) {
-                                    // Handle error
+                                } catch (_: Exception) {
                                 }
                             }
                         }
@@ -499,8 +518,9 @@ fun FriendsScreen(
 fun UserActionDialog(
     user: UserSearchItem,
     isFriend: Boolean = false,
-    requestStatus: String? = null, // null, "pending", "sent"
+    requestStatus: String? = null,
     onDismiss: () -> Unit,
+    onTogglePin: () -> Unit,
     onMessage: () -> Unit,
     onAddFriend: () -> Unit,
     onAcceptFriend: () -> Unit = {},
@@ -540,7 +560,9 @@ fun UserActionDialog(
                 .fillMaxWidth()
                 .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color.White)
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            )
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
@@ -552,9 +574,14 @@ fun UserActionDialog(
                     user.displayName,
                     style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold)
                 )
-                Text(user.email, style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+                Text(
+                    user.email,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray
+                )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
+
 
                 Button(
                     onClick = onMessage,
@@ -590,6 +617,7 @@ fun UserActionDialog(
                                 Text("Cancel Request")
                             }
                         }
+
                         "pending" -> {
                             Row(modifier = Modifier.fillMaxWidth()) {
                                 Button(
@@ -609,6 +637,7 @@ fun UserActionDialog(
                                 }
                             }
                         }
+
                         else -> {
                             OutlinedButton(
                                 onClick = onAddFriend,
@@ -650,13 +679,42 @@ fun MessagesMainScreen(
     onDeclineFriend: (UserSearchItem) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    val normalizedQuery = searchQuery.trim()
 
-    val filteredChats = if (searchQuery.isBlank()) chats else {
-        chats.filter { it.title.contains(searchQuery, ignoreCase = true) }
+    fun matchesUser(user: UserSearchItem): Boolean {
+        if (normalizedQuery.isBlank()) return true
+
+        return user.displayName.contains(normalizedQuery, ignoreCase = true) ||
+            user.name.contains(normalizedQuery, ignoreCase = true) ||
+            user.email.contains(normalizedQuery, ignoreCase = true)
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
-        // Header
+    val filteredPendingRequests = if (normalizedQuery.isBlank()) {
+        pendingRequests
+    } else {
+        pendingRequests.filter(::matchesUser)
+    }
+
+    val filteredOnlineFriends = if (normalizedQuery.isBlank()) {
+        onlineFriends
+    } else {
+        onlineFriends.filter(::matchesUser)
+    }
+
+    val filteredChats = if (normalizedQuery.isBlank()) {
+        chats
+    } else {
+        chats.filter { chat ->
+            chat.title.contains(normalizedQuery, ignoreCase = true) ||
+                chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -676,6 +734,7 @@ fun MessagesMainScreen(
                 modifier = Modifier
                     .size(40.dp)
                     .border(1.dp, Color.LightGray, CircleShape)
+                    .background(MaterialTheme.colorScheme.secondary, CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.AddComment,
@@ -685,11 +744,10 @@ fun MessagesMainScreen(
             }
         }
 
-        // Search Bar
         SearchBar(
             query = searchQuery,
             onQueryChange = { searchQuery = it },
-            placeholder = "Search name or username",
+            placeholder = "Search people or conversations",
             modifier = Modifier.padding(horizontal = 20.dp)
         )
 
@@ -697,41 +755,58 @@ fun MessagesMainScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp)
         ) {
-            // Friend Requests Section
-            if (pendingRequests.isNotEmpty() && searchQuery.isBlank()) {
+            if (filteredPendingRequests.isNotEmpty() || (normalizedQuery.isBlank() && pendingRequests.isNotEmpty())) {
                 item {
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 8.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
                         shape = RoundedCornerShape(24.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "Friend Requests (${pendingRequests.size})",
+                                text = "Friend Requests (${filteredPendingRequests.size})",
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                 modifier = Modifier.padding(bottom = 12.dp)
                             )
-                            pendingRequests.forEach { request ->
+                            filteredPendingRequests.forEach { request ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(vertical = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    UserAvatar(request.profilePictureUrl, request.displayName, Modifier.size(40.dp).clickable { onUserClick(request) })
+                                    UserAvatar(
+                                        request.profilePictureUrl,
+                                        request.displayName,
+                                        Modifier
+                                            .size(40.dp)
+                                            .clickable { onUserClick(request) }
+                                    )
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(
                                         request.displayName,
-                                        modifier = Modifier.weight(1f).clickable { onUserClick(request) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { onUserClick(request) },
                                         style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold)
                                     )
                                     IconButton(onClick = { onAcceptFriend(request) }) {
-                                        Icon(Icons.Default.Check, contentDescription = "Accept", tint = Color(0xFF4CAF50))
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = "Accept",
+                                            tint = Color(0xFF4CAF50)
+                                        )
                                     }
                                     IconButton(onClick = { onDeclineFriend(request) }) {
-                                        Icon(Icons.Default.Close, contentDescription = "Decline", tint = Color.Red)
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Decline",
+                                            tint = Color.Red
+                                        )
                                     }
                                 }
                             }
@@ -740,13 +815,14 @@ fun MessagesMainScreen(
                 }
             }
 
-            // Online Friends Section
             item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
                     shape = RoundedCornerShape(24.dp)
                 ) {
                     Column(modifier = Modifier.padding(vertical = 16.dp)) {
@@ -762,9 +838,9 @@ fun MessagesMainScreen(
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
-                        } else if (onlineFriends.isEmpty()) {
+                        } else if (filteredOnlineFriends.isEmpty()) {
                             Text(
-                                text = "No friends online",
+                                text = if (normalizedQuery.isBlank()) "No friends online" else "No matching friends",
                                 modifier = Modifier.padding(horizontal = 16.dp),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
@@ -774,7 +850,7 @@ fun MessagesMainScreen(
                                 contentPadding = PaddingValues(horizontal = 16.dp),
                                 horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                items(onlineFriends) { friend ->
+                                items(filteredOnlineFriends) { friend ->
                                     OnlineFriendItem(friend, onClick = { onUserClick(friend) })
                                 }
                             }
@@ -785,13 +861,13 @@ fun MessagesMainScreen(
 
             item { Spacer(modifier = Modifier.height(16.dp)) }
 
-            // Recent Messages Section
             item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface),
                     shape = RoundedCornerShape(24.dp)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
@@ -803,8 +879,10 @@ fun MessagesMainScreen(
                         if (filteredChats.isEmpty()) {
                             Text(
                                 if (searchQuery.isBlank()) "No messages yet" else "No results found",
-                                modifier = Modifier.padding(vertical = 20.dp).align(Alignment.CenterHorizontally),
-                                color = Color.Gray
+                                modifier = Modifier
+                                    .padding(vertical = 20.dp)
+                                    .align(Alignment.CenterHorizontally),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
                             filteredChats.forEachIndexed { index, chat ->
@@ -816,7 +894,7 @@ fun MessagesMainScreen(
                                 if (index < filteredChats.size - 1) {
                                     HorizontalDivider(
                                         modifier = Modifier.padding(vertical = 8.dp),
-                                        color = Color.LightGray.copy(alpha = 0.3f)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -832,7 +910,9 @@ fun MessagesMainScreen(
 fun OnlineFriendItem(user: UserSearchItem, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(70.dp).clickable(onClick = onClick)
+        modifier = Modifier
+            .width(70.dp)
+            .clickable(onClick = onClick)
     ) {
         Box {
             UserAvatar(
@@ -868,54 +948,93 @@ fun ChatListItemRow(
 ) {
     val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
-    Row(
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+    val lastMessageColor = if (isDarkTheme) {
+        Color(0xFFB8B8C8) // lighter grey for dark mode
+    } else {
+        Color(0xFF5F6368) // darker grey for light mode
+    }
+
+    val borderColor = if (isDarkTheme) {
+        Color.White.copy(alpha = 0.22f)
+    } else {
+        Color.Black.copy(alpha = 0.14f)
+    }
+
+    Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 6.dp)
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            width = 1.dp,
+            color = borderColor
+        ),
+        tonalElevation = 1.dp
     ) {
-        UserAvatar(
-            imageUrl = chat.profilePictureUrl,
-            label = chat.title,
-            modifier = Modifier.size(56.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            UserAvatar(
+                imageUrl = chat.profilePictureUrl,
+                label = chat.title,
+                modifier = Modifier.size(56.dp)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = chat.title,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    chat.lastMessageAt?.let {
+                        Text(
+                            text = timeFormatter.format(it.toDate()),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = lastMessageColor,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(2.dp))
+
                 Text(
-                    text = chat.title,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                    text = chat.lastMessageText ?: "No messages yet",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = lastMessageColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                chat.lastMessageAt?.let {
-                    Text(
-                        text = timeFormatter.format(it.toDate()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.Gray
-                    )
-                }
             }
-            Text(
-                text = chat.lastMessageText ?: "No messages yet",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (chat.lastMessageText == null) Color.Gray else Color.DarkGray,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        IconButton(onClick = onDelete) {
-            Icon(
-                imageVector = Icons.Default.Delete,
-                contentDescription = "Delete chat",
-                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
-                modifier = Modifier.size(20.dp)
-            )
+
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete chat",
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.75f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }
@@ -931,14 +1050,19 @@ fun SearchBar(
         value = query,
         onValueChange = onQueryChange,
         placeholder = { Text(placeholder, color = Color.Gray) },
+        trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 52.dp),
         shape = RoundedCornerShape(26.dp),
         colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color(0xFFF1F3F4),
-            unfocusedContainerColor = Color(0xFFF1F3F4),
-            disabledContainerColor = Color(0xFFF1F3F4),
+            focusedTextColor = Color.Black,
+            unfocusedTextColor = Color.Black,
+
+            focusedContainerColor = Color.White,
+            unfocusedContainerColor = Color.White,
+            disabledContainerColor = Color.White,
+
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
         ),
@@ -953,7 +1077,7 @@ fun SearchBar(
 fun NewMessageScreen(
     onBack: () -> Unit,
     onUserSelected: (UserSearchItem) -> Unit,
-    onGroupCreated: (String, String) -> Unit, // title, chatId
+    onGroupCreated: (String, String) -> Unit,
     repo: ChatRepository,
     auth: FirebaseAuth,
     db: FirebaseFirestore
@@ -961,7 +1085,6 @@ fun NewMessageScreen(
     var searchQuery by remember { mutableStateOf("") }
     val searchResults = remember { mutableStateListOf<UserSearchItem>() }
 
-    // Group creation state
     var isCreatingGroup by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isCreatingGroup) {
@@ -1002,8 +1125,7 @@ fun NewMessageScreen(
 
                 allFriends.addAll(users)
             }
-        } catch (e: Exception) {
-            // Log error
+        } catch (_: Exception) {
         }
     }
 
@@ -1018,7 +1140,6 @@ fun NewMessageScreen(
             return@LaunchedEffect
         }
         delay(300)
-        // Search logic
         val normalized = query.lowercase()
         try {
             val docs = db.collection("users")
@@ -1026,10 +1147,17 @@ fun NewMessageScreen(
                 .get().await().documents
 
             searchResults.clear()
-            searchResults.addAll(docs.mapNotNull { it.toUserSearchItem() }
-                .filter { it.uid != myUid && (it.email.lowercase().contains(normalized) || it.name.lowercase().contains(normalized) || it.displayName.lowercase().contains(normalized)) })
-        } catch (e: Exception) {
-            // Log error
+            searchResults.addAll(
+                docs.mapNotNull { it.toUserSearchItem() }
+                    .filter {
+                        it.uid != myUid && (
+                                it.email.lowercase().contains(normalized) ||
+                                        it.name.lowercase().contains(normalized) ||
+                                        it.displayName.lowercase().contains(normalized)
+                                )
+                    }
+            )
+        } catch (_: Exception) {
         }
     }
 
@@ -1039,8 +1167,8 @@ fun NewMessageScreen(
         val normalized = searchQuery.trim().lowercase()
         allFriends.filter { user ->
             user.email.lowercase().contains(normalized) ||
-                user.name.lowercase().contains(normalized) ||
-                user.displayName.lowercase().contains(normalized)
+                    user.name.lowercase().contains(normalized) ||
+                    user.displayName.lowercase().contains(normalized)
         }
     }
 
@@ -1048,8 +1176,11 @@ fun NewMessageScreen(
 
     val scope = rememberCoroutineScope()
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF8F9FA))) {
-        // Header
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1058,8 +1189,7 @@ fun NewMessageScreen(
         ) {
             IconButton(
                 onClick = {
-                    if (isCreatingGroup) isCreatingGroup = false
-                    else onBack()
+                    if (isCreatingGroup) isCreatingGroup = false else onBack()
                 },
                 modifier = Modifier
                     .size(40.dp)
@@ -1082,8 +1212,7 @@ fun NewMessageScreen(
                                     val memberIds = selectedMembers.map { it.uid } + myUid
                                     val chatId = repo.openOrCreateGroupChat(myUid, memberIds, groupTitle)
                                     onGroupCreated(groupTitle, chatId)
-                                } catch (e: Exception) {
-                                    // Handle error
+                                } catch (_: Exception) {
                                 }
                             }
                         }
@@ -1099,15 +1228,20 @@ fun NewMessageScreen(
             OutlinedTextField(
                 value = groupTitle,
                 onValueChange = { groupTitle = it },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp),
                 placeholder = { Text("Group Title") },
                 shape = RoundedCornerShape(28.dp),
                 singleLine = true
+
             )
 
             if (selectedMembers.isNotEmpty()) {
                 LazyRow(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -1125,7 +1259,12 @@ fun NewMessageScreen(
                                     .clickable { selectedMembers.remove(user) },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(12.dp)
+                                )
                             }
                         }
                     }
@@ -1146,11 +1285,13 @@ fun NewMessageScreen(
         ) {
             if (searchQuery.isEmpty()) {
                 if (!isCreatingGroup) {
-                    // Create Group Section
                     item {
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
@@ -1167,7 +1308,9 @@ fun NewMessageScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Box(
-                                        modifier = Modifier.size(48.dp).background(Color(0xFFF5F5F5), CircleShape),
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .background(Color(0xFFF5F5F5), CircleShape),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(Icons.Default.Groups, contentDescription = null, tint = Color.Gray)
@@ -1178,13 +1321,14 @@ fun NewMessageScreen(
                             }
                         }
                     }
-
                 } else {
-                    // Selection for group
                     item {
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color.White),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surface),
                             shape = RoundedCornerShape(24.dp)
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
@@ -1220,11 +1364,13 @@ fun NewMessageScreen(
                     }
                 }
             } else {
-                // Search Results
                 item {
                     Card(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(24.dp)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
@@ -1320,8 +1466,6 @@ fun UserSearchRow(
                 color = Color.Gray
             )
         }
-        if (trailing != null) {
-            trailing()
-        }
+        trailing?.invoke()
     }
 }

@@ -21,14 +21,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Map
+import com.google.firebase.firestore.FieldValue
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -124,10 +125,10 @@ private fun GroupChatHeader(
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.White,
-            navigationIconContentColor = ChatHeaderAccent,
-            actionIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+            actionIconContentColor = MaterialTheme.colorScheme.onSurface
         ),
         title = {
             Row(
@@ -186,9 +187,9 @@ private fun DirectMessageHeader(
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.surface,
             navigationIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
         ),
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,7 +227,7 @@ fun ChatScreen(
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    onLocationClick: (LatLng, String) -> Unit = { _, _ -> },
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> },
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() }
 ) {
@@ -244,7 +245,7 @@ fun ChatScreen(
 
     var initialReadMarked by remember(chatId) { mutableStateOf(false) }
     var initialScrollDone by remember(chatId) { mutableStateOf(false) }
-    var isChatVisible by remember(chatId) { mutableStateOf(false) }
+    var isChatVisible by remember { mutableStateOf(false) }
     var lastMarkedIncomingMessageId by remember(chatId) { mutableStateOf<String?>(null) }
 
     var myLastReadMessageId by remember(chatId) { mutableStateOf<String?>(null) }
@@ -1202,7 +1203,27 @@ fun ChatScreen(
                             null
                         },
                         seenByProfiles = if (isMine) seenByProfiles else emptyList(),
-                        onLocationClick = onLocationClick
+                        onLocationClick = onLocationClick,
+                        onAddEventToCalendar = { eventMsg ->
+                            if (myUid != null && eventMsg.eventId != null) {
+                                val eventData = hashMapOf(
+                                    "eventId" to eventMsg.eventId,
+                                    "title" to (eventMsg.eventTitle ?: "Event"),
+                                    "start" to (eventMsg.eventStart ?: ""),
+                                    "end" to (eventMsg.eventEnd ?: ""),
+                                    "location" to (eventMsg.eventLocation ?: ""),
+                                    "savedAt" to FieldValue.serverTimestamp()
+                                )
+
+                                db.collection("users").document(myUid)
+                                    .collection("sharedEvents")
+                                    .document(eventMsg.eventId)
+                                    .set(eventData)
+
+                                db.collection("users").document(myUid)
+                                    .update("bookmarkedEventIds", FieldValue.arrayUnion(eventMsg.eventId))
+                            }
+                        }
                     )
                 }
             }
@@ -1282,7 +1303,8 @@ private fun MessageRow(
     showReceipt: Boolean = false,
     receiptText: String? = null,
     seenByProfiles: List<ChatUserProfile> = emptyList(),
-    onLocationClick: (LatLng, String) -> Unit = { _, _ -> }
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> },
+    onAddEventToCalendar: (Message) -> Unit = {}
 ) {
     if (msg.type == "system") {
         Box(
@@ -1344,23 +1366,37 @@ private fun MessageRow(
                                         text = "Tap to view on map",
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.clickable {
-                                            onLocationClick(LatLng(msg.latitude, msg.longitude), msg.locationName ?: "Shared Location")
+                                            onLocationClick(LatLng(msg.latitude, msg.longitude), msg.locationName ?: "Shared Location", msg.senderId)
                                         }
                                     )
                                 }
                             }
                         } else if (msg.type == "event") {
-                            Column {
-                                Text(
-                                    text = "📅 ${msg.eventTitle ?: "Event"}",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (!msg.eventStart.isNullOrBlank()) {
-                                    Text("🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}", style = MaterialTheme.typography.bodySmall)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "📅 ${msg.eventTitle ?: "Event"}",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (!msg.eventStart.isNullOrBlank()) {
+                                        Text(
+                                            "🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    if (!msg.eventLocation.isNullOrBlank()) {
+                                        Text("📍 ${msg.eventLocation}", style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
-                                if (!msg.eventLocation.isNullOrBlank()) {
-                                    Text("📍 ${msg.eventLocation}", style = MaterialTheme.typography.bodySmall)
+                                if (!isMine && msg.eventId != null) {
+                                    IconButton(onClick = { onAddEventToCalendar(msg) }) {
+                                        Icon(
+                                            imageVector = Icons.Default.BookmarkAdd,
+                                            contentDescription = "Add to Calendar",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
                                 }
                             }
                         } else {
