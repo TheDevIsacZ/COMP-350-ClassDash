@@ -180,8 +180,6 @@ fun ProfileScreen(
         UserActionDialog(
             user = friend,
             isFriend = true,
-            isPinned = false,
-            showPinAction = false,
             onDismiss = { selectedFriend = null },
             onTogglePin = {},
             onMessage = {
@@ -330,12 +328,15 @@ fun SettingsProfileScreen(
                         onCheckedChange = { onUpdateSettings(mapOf("showOnlineStatus" to it)) }
                     )
                     HorizontalDivider(color = ProfileTheme.Border)
+                    /*
                     SettingsSwitchRow(
                         title = "Location Sharing",
                         subtitle = "Allow sharing location in chats",
                         checked = userProfile.shareLocation,
                         onCheckedChange = { onUpdateSettings(mapOf("shareLocation" to it)) }
                     )
+
+                     */
                     HorizontalDivider(color = ProfileTheme.Border)
                     Column(modifier = Modifier.padding(vertical = 12.dp)) {
                         Text("Profile Visibility", style = MaterialTheme.typography.titleSmall, color = ProfileTheme.Primary)

@@ -347,7 +347,6 @@ fun FriendsScreen(
             UserActionDialog(
                 user = user,
                 isFriend = friendUids.contains(user.uid),
-                isPinned = favoriteFriendUids.contains(user.uid),
                 requestStatus = when {
                     pendingRequestUids.contains(user.uid) -> "pending"
                     sentRequestUids.contains(user.uid) -> "sent"
@@ -519,8 +518,6 @@ fun FriendsScreen(
 fun UserActionDialog(
     user: UserSearchItem,
     isFriend: Boolean = false,
-    isPinned: Boolean = false,
-    showPinAction: Boolean = true,
     requestStatus: String? = null,
     onDismiss: () -> Unit,
     onTogglePin: () -> Unit,
@@ -585,17 +582,6 @@ fun UserActionDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                if (isFriend && showPinAction) {
-                    IconButton(onClick = onTogglePin) {
-                        Icon(
-                            imageVector = Icons.Default.PushPin,
-                            contentDescription = if (isPinned) "Unpin friend" else "Pin friend",
-                            tint = if (isPinned) Color.Red else Color.Gray
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
 
                 Button(
                     onClick = onMessage,
