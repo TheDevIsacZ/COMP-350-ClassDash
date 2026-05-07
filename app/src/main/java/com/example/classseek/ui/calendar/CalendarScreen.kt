@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -41,6 +42,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -455,19 +457,11 @@ fun CalendarScreen(
     if (showChatPicker && selectedEventForSharing != null && myUid.isNotBlank()) {
         var chats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
         var chatSearchQuery by remember(selectedEventForSharing?.id) { mutableStateOf("") }
+        var selectedChatFilter by remember { mutableStateOf("All") }
         LaunchedEffect(Unit) {
             try {
                 chats = chatRepository.getMyChats(myUid)
             } catch (e: Exception) {
-            }
-        }
-        val filteredChats = if (chatSearchQuery.isBlank()) {
-            chats
-        } else {
-            val normalizedQuery = chatSearchQuery.trim()
-            chats.filter { chat ->
-                chat.title.contains(normalizedQuery, ignoreCase = true) ||
-                    chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
             }
         }
 
@@ -498,14 +492,64 @@ fun CalendarScreen(
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
-                if (filteredChats.isEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = selectedChatFilter == "All",
+                        onClick = { selectedChatFilter = "All" },
+                        label = { Text("All") },
+                        leadingIcon = if (selectedChatFilter == "All") {
+                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                    FilterChip(
+                        selected = selectedChatFilter == "DMs",
+                        onClick = { selectedChatFilter = "DMs" },
+                        label = { Text("DMs") },
+                        leadingIcon = if (selectedChatFilter == "DMs") {
+                            { Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                    FilterChip(
+                        selected = selectedChatFilter == "Groups",
+                        onClick = { selectedChatFilter = "Groups" },
+                        label = { Text("Groups") },
+                        leadingIcon = if (selectedChatFilter == "Groups") {
+                            { Icon(Icons.Default.Group, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                        } else null
+                    )
+                }
+
+                val finalFilteredChats = remember(chats, chatSearchQuery, selectedChatFilter) {
+                    var filtered = if (chatSearchQuery.isBlank()) {
+                        chats
+                    } else {
+                        val normalizedQuery = chatSearchQuery.trim()
+                        chats.filter { chat ->
+                            chat.title.contains(normalizedQuery, ignoreCase = true) ||
+                                    chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
+                        }
+                    }
+
+                    when (selectedChatFilter) {
+                        "DMs" -> filtered.filter { it.type == "dm" }
+                        "Groups" -> filtered.filter { it.type == "group" }
+                        else -> filtered
+                    }
+                }
+
+                if (finalFilteredChats.isEmpty()) {
                     Text(
                         text = if (chatSearchQuery.isBlank()) "No chats available" else "No matching chats",
                         modifier = Modifier.padding(vertical = 16.dp)
                     )
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(filteredChats) { chat ->
+                        items(finalFilteredChats) { chat ->
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
