@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.classseek.models.Friend
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.SearchBar
 import com.example.classseek.ui.friends.UserActionDialog
 import com.example.classseek.ui.friends.UserSearchItem
 import com.example.classseek.ui.theme.AppThemeMode
@@ -72,7 +74,7 @@ object ProfileTheme {
 fun ProfileScreen(
     userProfile: UserProfile,
     isMyProfile: Boolean,
-    favoriteFriends: List<UserSearchItem> = emptyList(),
+    friends: List<UserSearchItem> = emptyList(),
     isFriend: Boolean = false,
     friendRequestStatus: String? = null, // null, "pending", "sent"
     bookmarkedEvents: List<Event> = emptyList(),
@@ -82,7 +84,6 @@ fun ProfileScreen(
     onFriendMessage: ((UserSearchItem) -> Unit)? = null,
     onViewFriendProfile: ((String) -> Unit)? = null,
     onRemoveFriendFromList: ((String) -> Unit)? = null,
-    onTogglePinFriend: ((String) -> Unit)? = null,
     onAddFriend: (() -> Unit)? = null,
     onAcceptFriend: (() -> Unit)? = null,
     onDeclineFriend: (() -> Unit)? = null,
@@ -90,12 +91,10 @@ fun ProfileScreen(
     onRemoveFriend: (() -> Unit)? = null,
     onRemoveBookmark: ((String) -> Unit)? = null,
     onBack: (() -> Unit)? = null,
-    onEditSchedule: () -> Unit,
-    onViewAllFriends: (() -> Unit)? = null
+    onEditSchedule: () -> Unit
 ) {
     val scrollState = rememberScrollState()
     var selectedFriend by remember { mutableStateOf<UserSearchItem?>(null) }
-    val pinnedFriends = remember(favoriteFriends) { favoriteFriends.take(3) }
 
     var eventToUnbookmark by remember { mutableStateOf<Event?>(null) }
 
@@ -129,13 +128,15 @@ fun ProfileScreen(
 
         item { Spacer(modifier = Modifier.height(16.dp)) }
 
-        if (!isMyProfile) {
-            item {
+        item {
+            if (isMyProfile) {
+                SettingsProfileInfoCard(userProfile)
+            } else {
                 PublicProfileInfoCard(userProfile)
             }
-
-            item { Spacer(modifier = Modifier.height(16.dp)) }
         }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
 
         item {
             ScheduleSection(
@@ -149,9 +150,8 @@ fun ProfileScreen(
             item { Spacer(modifier = Modifier.height(16.dp)) }
             item {
                 FavoriteFriendsCard(
-                    friends = pinnedFriends,
-                    onFriendClick = { selectedFriend = it },
-                    onViewAllClick = { onViewAllFriends?.invoke() }
+                    friends = friends,
+                    onFriendClick = { selectedFriend = it }
                 )
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -177,12 +177,10 @@ fun ProfileScreen(
         UserActionDialog(
             user = friend,
             isFriend = true,
-            isPinned = true,
+            isPinned = false,
+            showPinAction = false,
             onDismiss = { selectedFriend = null },
-            onTogglePin = {
-                selectedFriend = null
-                onTogglePinFriend?.invoke(friend.uid)
-            },
+            onTogglePin = {},
             onMessage = {
                 selectedFriend = null
                 onFriendMessage?.invoke(friend)
@@ -259,7 +257,8 @@ fun SettingsProfileScreen(
     onThemeModeChange: (AppThemeMode) -> Unit,
     onEditProfile: () -> Unit,
     onSignOut: () -> Unit,
-    onDeleteAccount: () -> Unit
+    onDeleteAccount: () -> Unit,
+    onUpdateSettings: (Map<String, Any>) -> Unit
 ) {
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var emailConfirmation by remember { mutableStateOf("") }
@@ -268,32 +267,91 @@ fun SettingsProfileScreen(
         modifier = Modifier.fillMaxSize().background(ProfileTheme.Background),
         contentPadding = PaddingValues(bottom = 32.dp)
     ) {
-        item { Box { SettingsHeaderSection(userProfile); ProfileImageSection(userProfile.profilePictureUrl) } }
         item { Spacer(modifier = Modifier.height(16.dp)) }
-        item { SettingsProfileInfoCard(userProfile) }
-        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // Theme Setting
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
-                shape = RoundedCornerShape(16.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                    Text("App Theme", style = MaterialTheme.typography.titleMedium, color = ProfileTheme.Primary, fontWeight = FontWeight.SemiBold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        AppThemeMode.entries.forEach { mode ->
-                            FilterChip(
-                                selected = themeMode == mode,
-                                onClick = { onThemeModeChange(mode) },
-                                label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }
-                            )
+            SettingsSectionCard(title = "App Theme") {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    AppThemeMode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = themeMode == mode,
+                            onClick = { onThemeModeChange(mode) },
+                            label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }
+                        )
+                    }
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // Notifications Settings
+        item {
+            SettingsSectionCard(title = "Notifications") {
+                Column {
+                    SettingsSwitchRow(
+                        title = "Chat Notifications",
+                        subtitle = "Receive alerts for new messages",
+                        checked = userProfile.chatNotificationsEnabled,
+                        onCheckedChange = { onUpdateSettings(mapOf("chatNotificationsEnabled" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    SettingsSwitchRow(
+                        title = "Calendar Reminders",
+                        subtitle = "Get notified about upcoming classes",
+                        checked = userProfile.calendarRemindersEnabled,
+                        onCheckedChange = { onUpdateSettings(mapOf("calendarRemindersEnabled" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    SettingsSwitchRow(
+                        title = "Shared Events",
+                        subtitle = "Alerts when friends share events",
+                        checked = userProfile.eventNotificationsEnabled,
+                        onCheckedChange = { onUpdateSettings(mapOf("eventNotificationsEnabled" to it)) }
+                    )
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // Privacy Settings
+        item {
+            SettingsSectionCard(title = "Privacy") {
+                Column {
+                    SettingsSwitchRow(
+                        title = "Show Online Status",
+                        subtitle = "Let friends see when you're active",
+                        checked = userProfile.showOnlineStatus,
+                        onCheckedChange = { onUpdateSettings(mapOf("showOnlineStatus" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    SettingsSwitchRow(
+                        title = "Location Sharing",
+                        subtitle = "Allow sharing location in chats",
+                        checked = userProfile.shareLocation,
+                        onCheckedChange = { onUpdateSettings(mapOf("shareLocation" to it)) }
+                    )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                        Text("Profile Visibility", style = MaterialTheme.typography.titleSmall, color = ProfileTheme.Primary)
+                        Text("Who can see your full profile and schedule", style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("Public", "Friends Only").forEach { visibility ->
+                                FilterChip(
+                                    selected = userProfile.profileVisibility == visibility,
+                                    onClick = { onUpdateSettings(mapOf("profileVisibility" to visibility)) },
+                                    label = { Text(visibility) }
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+
         item { Spacer(modifier = Modifier.height(16.dp)) }
         item { SettingsActionsCard(onEditProfile, onSignOut) { showDeleteConfirmDialog = true } }
     }
@@ -340,6 +398,7 @@ fun SettingsProfileScreen(
             }
         )
     }
+
 }
 
 private fun formatEventDate(dateTime: com.google.api.client.util.DateTime?): String {
@@ -347,6 +406,76 @@ private fun formatEventDate(dateTime: com.google.api.client.util.DateTime?): Str
     val date = Date(dateTime.value)
     val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
     return sdf.format(date)
+}
+
+@Composable
+fun RestrictedProfileScreen(
+    userProfile: UserProfile,
+    friendRequestStatus: String?,
+    onAddFriend: () -> Unit,
+    onAcceptFriend: () -> Unit,
+    onDeclineFriend: () -> Unit,
+    onCancelFriend: () -> Unit,
+    onBack: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            HeaderSection(
+                userProfile = userProfile,
+                isMyProfile = false,
+                isFriend = false,
+                friendRequestStatus = friendRequestStatus,
+                onAddFriend = onAddFriend,
+                onAcceptFriend = onAcceptFriend,
+                onDeclineFriend = onDeclineFriend,
+                onCancelFriend = onCancelFriend,
+                onBack = onBack
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .background(ProfileTheme.Background),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            ProfileImageSection(userProfile.profilePictureUrl)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = userProfile.name,
+                style = MaterialTheme.typography.headlineSmall,
+                color = ProfileTheme.Primary,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = userProfile.major,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground
+            )
+            Spacer(modifier = Modifier.height(32.dp))
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = ProfileTheme.MutedForeground,
+                modifier = Modifier.size(48.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "This profile is private",
+                style = MaterialTheme.typography.titleMedium,
+                color = ProfileTheme.Primary
+            )
+            Text(
+                text = "Add ${userProfile.name} as a friend to see their full profile.",
+                style = MaterialTheme.typography.bodySmall,
+                color = ProfileTheme.MutedForeground,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+        }
+    }
 }
 
 @Composable
@@ -517,7 +646,6 @@ fun SettingsProfileInfoCard(userProfile: UserProfile) {
             SettingsInfoRow("Location", userProfile.location.ifBlank { "" })
             SettingsInfoRow("Website URL", userProfile.githubUrl.ifBlank { "" })
             SettingsInfoRow("Bio", userProfile.bio.ifBlank { "No bio provided." })
-
         }
     }
 }
@@ -638,9 +766,22 @@ fun SettingsInfoRow(label: String, value: String) {
 @Composable
 fun FavoriteFriendsCard(
     friends: List<UserSearchItem>,
-    onFriendClick: (UserSearchItem) -> Unit,
-    onViewAllClick: () -> Unit
+    onFriendClick: (UserSearchItem) -> Unit
 ) {
+    var isExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    val normalizedQuery = searchQuery.trim()
+    val filteredFriends = if (normalizedQuery.isBlank()) {
+        friends
+    } else {
+        friends.filter { friend ->
+            friend.displayName.contains(normalizedQuery, ignoreCase = true) ||
+                friend.name.contains(normalizedQuery, ignoreCase = true) ||
+                friend.email.contains(normalizedQuery, ignoreCase = true)
+        }
+    }
+    val previewFriends = friends.take(3)
+
     Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
@@ -648,27 +789,66 @@ fun FavoriteFriendsCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            Text("Favorited Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
+            Text("Friends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = ProfileTheme.Primary)
             Spacer(modifier = Modifier.height(8.dp))
+
+            if (isExpanded) {
+                SearchBar(
+                    query = searchQuery,
+                    onQueryChange = { searchQuery = it },
+                    placeholder = "Search friends"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
 
             if (friends.isEmpty()) {
                 Text(
-                    text = "No favorited friends yet.",
+                    text = "No friends added yet.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = ProfileTheme.MutedForeground,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
+            } else if (isExpanded && filteredFriends.isEmpty()) {
+                Text(
+                    text = "No matching friends.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ProfileTheme.MutedForeground,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            } else if (isExpanded) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                ) {
+                    items(filteredFriends) { friend ->
+                        ProfileFriendItem(
+                            user = friend,
+                            onClick = { onFriendClick(friend) }
+                        )
+                    }
+                }
             } else {
-                friends.forEachIndexed { index, friend ->
+                previewFriends.forEachIndexed { index, friend ->
                     ProfileFriendItem(user = friend, onClick = { onFriendClick(friend) })
-                    if (index != friends.lastIndex) {
+                    if (index != previewFriends.lastIndex) {
                         HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = ProfileTheme.Border)
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
-            TextButton(onClick = onViewAllClick, modifier = Modifier.align(Alignment.Start)) { Text("View all") }
+            TextButton(
+                onClick = {
+                    isExpanded = !isExpanded
+                    if (!isExpanded) {
+                        searchQuery = ""
+                    }
+                },
+                modifier = Modifier.align(Alignment.Start)
+            ) {
+                Text(if (isExpanded) "Show less" else "View all")
+            }
         }
     }
 }
@@ -759,6 +939,52 @@ fun ProfileFriendItem(
                 color = ProfileTheme.MutedForeground
             )
         }
+    }
+}
+
+@Composable
+fun SettingsSectionCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = ProfileTheme.CardBackground),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = ProfileTheme.Primary, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(8.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+fun SettingsSwitchRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = ProfileTheme.Primary)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = ProfileTheme.MutedForeground)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = ProfileTheme.Primary,
+                checkedTrackColor = ProfileTheme.Primary.copy(alpha = 0.5f)
+            )
+        )
     }
 }
 

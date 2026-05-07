@@ -53,7 +53,6 @@ import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.calendar.AddEventScreen
 import com.example.classseek.ui.calendar.CalendarScreen
 import com.example.classseek.ui.chat.ChatScreen
-import com.example.classseek.ui.friends.FriendsDirectoryScreen
 import com.example.classseek.ui.friends.FriendsScreen
 import com.example.classseek.ui.friends.UserSearchItem
 import com.example.classseek.ui.map.MapPlace
@@ -500,17 +499,10 @@ fun ClassSeekApp(
     var routedChatTitle by remember { mutableStateOf<String?>(null) }
 
     val profileFriends = remember { mutableStateListOf<UserSearchItem>() }
-    val favoriteFriends = remember { mutableStateListOf<UserSearchItem>() }
-
     val temporaryMarkers = remember { mutableStateListOf<MapPlace>() }
     var sharedLocationToView by remember { mutableStateOf<LatLng?>(null) }
     var sharedLocationNameToView by remember { mutableStateOf<String?>(null) }
     var sharedLocationByUidToView by remember { mutableStateOf<String?>(null) }
-
-    var isViewingAllFriends by remember { mutableStateOf(false) }
-    var pendingFriendRequests by remember { mutableStateOf<List<UserSearchItem>>(emptyList()) }
-    var outgoingFriendRequests by remember { mutableStateOf<List<UserSearchItem>>(emptyList()) }
-    var friendSearchResults by remember { mutableStateOf<List<UserSearchItem>>(emptyList()) }
 
     LaunchedEffect(initialChatId, initialChatTitle) {
         pendingNotificationChatId = initialChatId
@@ -541,11 +533,6 @@ fun ClassSeekApp(
         sharedLocationToView = null
         sharedLocationNameToView = null
         sharedLocationByUidToView = null
-        isViewingAllFriends = false
-        pendingFriendRequests = emptyList()
-        outgoingFriendRequests = emptyList()
-        friendSearchResults = emptyList()
-        favoriteFriends.clear()
         profileFriends.clear()
         consumeRoutedChat()
         consumePendingNotificationChat()
@@ -580,56 +567,6 @@ fun ClassSeekApp(
             }
     }
 
-    fun searchUsers(query: String) {
-        val currentUid = firebaseUser?.uid
-        if (currentUid == null || query.isBlank()) {
-            friendSearchResults = emptyList()
-            return
-        }
-
-        db.collection("users")
-            .get()
-            .addOnSuccessListener { snapshot ->
-                val currentFriendIds = profileFriends.map { it.uid }.toSet()
-                val currentIncomingIds = pendingFriendRequests.map { it.uid }.toSet()
-                val currentOutgoingIds = outgoingFriendRequests.map { it.uid }.toSet()
-
-                val results = snapshot.documents.mapNotNull { doc ->
-                    val uid = doc.id
-                    if (uid == currentUid) return@mapNotNull null
-                    if (uid in currentFriendIds) return@mapNotNull null
-                    if (uid in currentIncomingIds) return@mapNotNull null
-                    if (uid in currentOutgoingIds) return@mapNotNull null
-
-                    val email = doc.getString("email")?.trim().orEmpty()
-                    val name = doc.getString("name")?.trim().orEmpty()
-                    val displayName = doc.getString("displayName")?.trim().orEmpty()
-
-                    val matches = name.contains(query, ignoreCase = true) ||
-                            displayName.contains(query, ignoreCase = true) ||
-                            email.contains(query, ignoreCase = true)
-
-                    if (!matches || email.isBlank()) return@mapNotNull null
-
-                    UserSearchItem(
-                        uid = uid,
-                        name = name,
-                        displayName = displayName,
-                        email = email,
-                        major = doc.getString("major")?.trim().orEmpty(),
-                        profilePictureUrl = doc.getString("profilePictureUrl")?.trim().orEmpty(),
-                        isVerified = false,
-                        isOnline = doc.getBoolean("isOnline") ?: false
-                    )
-                }
-
-                friendSearchResults = results
-            }
-            .addOnFailureListener {
-                friendSearchResults = emptyList()
-            }
-    }
-
     LaunchedEffect(firebaseUser?.uid) {
         if (firebaseUser != null) {
             saveCurrentFcmTokenForUser()
@@ -647,12 +584,15 @@ fun ClassSeekApp(
         if (uid == null) return@DisposableEffect onDispose {}
 
         fun updatePresence(isOnline: Boolean) {
+            val showOnline = userProfile?.showOnlineStatus ?: true
+            val effectiveOnline = isOnline && showOnline
+
             db.collection("users")
                 .document(uid)
                 .set(
                     mapOf(
                         "uid" to uid,
-                        "isOnline" to isOnline,
+                        "isOnline" to effectiveOnline,
                         "lastPresenceUpdate" to FieldValue.serverTimestamp()
                     ),
                     SetOptions.merge()
@@ -738,66 +678,6 @@ fun ClassSeekApp(
             friendsRegistration.remove()
             friendProfileRegistrations.forEach { it.remove() }
             profileFriends.clear()
-        }
-    }
-
-    DisposableEffect(firebaseUser?.uid) {
-        val uid = firebaseUser?.uid
-        if (uid == null) {
-            favoriteFriends.clear()
-            return@DisposableEffect onDispose {}
-        }
-
-        val favoriteProfilesByUid = linkedMapOf<String, UserSearchItem>()
-        val favoriteRegistrations = mutableListOf<ListenerRegistration>()
-
-        val favoritesRegistration = db.collection("users")
-            .document(uid)
-            .collection("favoriteFriends")
-            .addSnapshotListener { snapshot, _ ->
-                favoriteProfilesByUid.clear()
-                favoriteRegistrations.forEach { it.remove() }
-                favoriteRegistrations.clear()
-
-                val favoriteIds = snapshot?.documents?.map { it.id }.orEmpty()
-                if (favoriteIds.isEmpty()) {
-                    favoriteFriends.clear()
-                    return@addSnapshotListener
-                }
-
-                favoriteIds.forEach { favoriteUid ->
-                    val reg = db.collection("users")
-                        .document(favoriteUid)
-                        .addSnapshotListener { userSnap, _ ->
-                            if (userSnap != null && userSnap.exists()) {
-                                val email = userSnap.getString("email")?.trim().orEmpty()
-                                if (email.isNotBlank()) {
-                                    favoriteProfilesByUid[favoriteUid] = UserSearchItem(
-                                        uid = userSnap.id,
-                                        name = userSnap.getString("name")?.trim().orEmpty(),
-                                        displayName = userSnap.getString("displayName")?.trim().orEmpty(),
-                                        email = email,
-                                        major = userSnap.getString("major")?.trim().orEmpty(),
-                                        profilePictureUrl = userSnap.getString("profilePictureUrl")?.trim().orEmpty(),
-                                        isVerified = false,
-                                        isOnline = userSnap.getBoolean("isOnline") ?: false
-                                    )
-                                }
-                            } else {
-                                favoriteProfilesByUid.remove(favoriteUid)
-                            }
-
-                            favoriteFriends.clear()
-                            favoriteFriends.addAll(favoriteProfilesByUid.values)
-                        }
-                    favoriteRegistrations.add(reg)
-                }
-            }
-
-        onDispose {
-            favoritesRegistration.remove()
-            favoriteRegistrations.forEach { it.remove() }
-            favoriteFriends.clear()
         }
     }
 
@@ -947,122 +827,6 @@ fun ClassSeekApp(
         }
     }
 
-    DisposableEffect(firebaseUser?.uid) {
-        val uid = firebaseUser?.uid
-        if (uid == null) {
-            pendingFriendRequests = emptyList()
-            return@DisposableEffect onDispose {}
-        }
-
-        val registrations = mutableListOf<ListenerRegistration>()
-        val pendingByUid = linkedMapOf<String, UserSearchItem>()
-
-        val requestsRegistration = db.collection("users")
-            .document(uid)
-            .collection("friendRequests")
-            .addSnapshotListener { snapshot, _ ->
-                pendingByUid.clear()
-                registrations.forEach { it.remove() }
-                registrations.clear()
-
-                val requestIds = snapshot?.documents?.map { it.id }.orEmpty()
-                if (requestIds.isEmpty()) {
-                    pendingFriendRequests = emptyList()
-                    return@addSnapshotListener
-                }
-
-                requestIds.forEach { requestUid ->
-                    val reg = db.collection("users")
-                        .document(requestUid)
-                        .addSnapshotListener { userSnap, _ ->
-                            if (userSnap != null && userSnap.exists()) {
-                                val email = userSnap.getString("email")?.trim().orEmpty()
-                                if (email.isNotBlank()) {
-                                    pendingByUid[requestUid] = UserSearchItem(
-                                        uid = userSnap.id,
-                                        name = userSnap.getString("name")?.trim().orEmpty(),
-                                        displayName = userSnap.getString("displayName")?.trim().orEmpty(),
-                                        email = email,
-                                        major = userSnap.getString("major")?.trim().orEmpty(),
-                                        profilePictureUrl = userSnap.getString("profilePictureUrl")?.trim().orEmpty(),
-                                        isVerified = false,
-                                        isOnline = userSnap.getBoolean("isOnline") ?: false
-                                    )
-                                }
-                            } else {
-                                pendingByUid.remove(requestUid)
-                            }
-
-                            pendingFriendRequests = pendingByUid.values.toList()
-                        }
-                    registrations.add(reg)
-                }
-            }
-
-        onDispose {
-            requestsRegistration.remove()
-            registrations.forEach { it.remove() }
-        }
-    }
-
-    DisposableEffect(firebaseUser?.uid) {
-        val uid = firebaseUser?.uid
-        if (uid == null) {
-            outgoingFriendRequests = emptyList()
-            return@DisposableEffect onDispose {}
-        }
-
-        val registrations = mutableListOf<ListenerRegistration>()
-        val outgoingByUid = linkedMapOf<String, UserSearchItem>()
-
-        val sentRegistration = db.collection("users")
-            .document(uid)
-            .collection("sentFriendRequests")
-            .addSnapshotListener { snapshot, _ ->
-                outgoingByUid.clear()
-                registrations.forEach { it.remove() }
-                registrations.clear()
-
-                val requestIds = snapshot?.documents?.map { it.id }.orEmpty()
-                if (requestIds.isEmpty()) {
-                    outgoingFriendRequests = emptyList()
-                    return@addSnapshotListener
-                }
-
-                requestIds.forEach { requestUid ->
-                    val reg = db.collection("users")
-                        .document(requestUid)
-                        .addSnapshotListener { userSnap, _ ->
-                            if (userSnap != null && userSnap.exists()) {
-                                val email = userSnap.getString("email")?.trim().orEmpty()
-                                if (email.isNotBlank()) {
-                                    outgoingByUid[requestUid] = UserSearchItem(
-                                        uid = userSnap.id,
-                                        name = userSnap.getString("name")?.trim().orEmpty(),
-                                        displayName = userSnap.getString("displayName")?.trim().orEmpty(),
-                                        email = email,
-                                        major = userSnap.getString("major")?.trim().orEmpty(),
-                                        profilePictureUrl = userSnap.getString("profilePictureUrl")?.trim().orEmpty(),
-                                        isVerified = false,
-                                        isOnline = userSnap.getBoolean("isOnline") ?: false
-                                    )
-                                }
-                            } else {
-                                outgoingByUid.remove(requestUid)
-                            }
-
-                            outgoingFriendRequests = outgoingByUid.values.toList()
-                        }
-                    registrations.add(reg)
-                }
-            }
-
-        onDispose {
-            sentRegistration.remove()
-            registrations.forEach { it.remove() }
-        }
-    }
-
     val displayedEvents = remember(calendarEvents, userProfile?.classes) {
         val virtualEvents = userProfile?.classes?.flatMap { classInfo: ClassInfo ->
             val daysMap = mapOf(
@@ -1153,91 +917,161 @@ fun ClassSeekApp(
         }
 
         if (otherUserProfile != null) {
-            val otherBookmarkedEvents = displayedEvents.filter { otherUserProfile?.bookmarkedEventIds?.contains(it.id) == true }
-            ProfileScreen(
-                userProfile = otherUserProfile!!,
-                isMyProfile = false,
-                favoriteFriends = emptyList(),
-                isFriend = isFriendWithOther,
-                friendRequestStatus = friendRequestStatus,
-                bookmarkedEvents = otherBookmarkedEvents,
-                onSignOut = {},
-                onEditProfile = {},
-                onDeleteAccount = {},
-                onAddFriend = {
-                    scope.launch {
-                        try {
-                            val currentUid = firebaseUser?.uid ?: return@launch
-                            val targetUid = viewOtherUserId ?: return@launch
-                            val chatRepo = ChatRepository(db)
-                            chatRepo.sendFriendRequest(currentUid, targetUid)
-                            friendRequestStatus = "sent"
-                        } catch (e: Exception) {
-                            Log.e("FRIEND_DEBUG", "Error sending friend request", e)
+            val canViewFullProfile = when (otherUserProfile?.profileVisibility) {
+                "Friends Only" -> isFriendWithOther
+                else -> true // Default to Public
+            }
+
+            if (canViewFullProfile) {
+                val otherBookmarkedEvents =
+                    displayedEvents.filter { otherUserProfile?.bookmarkedEventIds?.contains(it.id) == true }
+                ProfileScreen(
+                    userProfile = otherUserProfile!!,
+                    isMyProfile = false,
+                    friends = emptyList(),
+                    isFriend = isFriendWithOther,
+                    friendRequestStatus = friendRequestStatus,
+                    bookmarkedEvents = otherBookmarkedEvents,
+                    onSignOut = {},
+                    onEditProfile = {},
+                    onDeleteAccount = {},
+                    onAddFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.sendFriendRequest(currentUid, targetUid)
+                                friendRequestStatus = "sent"
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error sending friend request", e)
+                            }
                         }
-                    }
-                },
-                onAcceptFriend = {
-                    scope.launch {
-                        try {
-                            val currentUid = firebaseUser?.uid ?: return@launch
-                            val targetUid = viewOtherUserId ?: return@launch
-                            val chatRepo = ChatRepository(db)
-                            chatRepo.acceptFriendRequest(currentUid, targetUid)
-                            isFriendWithOther = true
-                            friendRequestStatus = null
-                        } catch (e: Exception) {
-                            Log.e("FRIEND_DEBUG", "Error accepting friend request", e)
+                    },
+                    onAcceptFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.acceptFriendRequest(currentUid, targetUid)
+                                isFriendWithOther = true
+                                friendRequestStatus = null
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error accepting friend request", e)
+                            }
                         }
-                    }
-                },
-                onDeclineFriend = {
-                    scope.launch {
-                        try {
-                            val currentUid = firebaseUser?.uid ?: return@launch
-                            val targetUid = viewOtherUserId ?: return@launch
-                            val chatRepo = ChatRepository(db)
-                            chatRepo.declineFriendRequest(currentUid, targetUid)
-                            friendRequestStatus = null
-                        } catch (e: Exception) {
-                            Log.e("FRIEND_DEBUG", "Error declining friend request", e)
+                    },
+                    onDeclineFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.declineFriendRequest(currentUid, targetUid)
+                                friendRequestStatus = null
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error declining friend request", e)
+                            }
                         }
-                    }
-                },
-                onCancelFriend = {
-                    scope.launch {
-                        try {
-                            val currentUid = firebaseUser?.uid ?: return@launch
-                            val targetUid = viewOtherUserId ?: return@launch
-                            val chatRepo = ChatRepository(db)
-                            chatRepo.cancelFriendRequest(currentUid, targetUid)
-                            friendRequestStatus = null
-                        } catch (e: Exception) {
-                            Log.e("FRIEND_DEBUG", "Error cancelling friend request", e)
+                    },
+                    onCancelFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.cancelFriendRequest(currentUid, targetUid)
+                                friendRequestStatus = null
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error cancelling friend request", e)
+                            }
                         }
-                    }
-                },
-                onRemoveFriend = {
-                    scope.launch {
-                        try {
-                            val currentUid = firebaseUser?.uid ?: return@launch
-                            val targetUid = viewOtherUserId ?: return@launch
-                            val chatRepo = ChatRepository(db)
-                            chatRepo.removeFriend(currentUid, targetUid)
-                            isFriendWithOther = false
-                            friendRequestStatus = null
-                        } catch (e: Exception) {
-                            Log.e("FRIEND_DEBUG", "Error removing friend", e)
+                    },
+                    onRemoveFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.removeFriend(currentUid, targetUid)
+                                isFriendWithOther = false
+                                friendRequestStatus = null
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error removing friend", e)
+                            }
                         }
+                    },
+                    onBack = {
+                        viewOtherUserId = null
+                        otherUserProfile = null
+                    },
+                    onEditSchedule = {}
+                )
+            } else {
+                // Restricted View for "Friends Only" profiles when not friends
+                RestrictedProfileScreen(
+                    userProfile = otherUserProfile!!,
+                    friendRequestStatus = friendRequestStatus,
+                    onAddFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.sendFriendRequest(currentUid, targetUid)
+                                friendRequestStatus = "sent"
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error sending friend request", e)
+                            }
+                        }
+                    },
+                    onAcceptFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.acceptFriendRequest(currentUid, targetUid)
+                                isFriendWithOther = true
+                                friendRequestStatus = null
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error accepting friend request", e)
+                            }
+                        }
+                    },
+                    onDeclineFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.declineFriendRequest(currentUid, targetUid)
+                                friendRequestStatus = null
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error declining friend request", e)
+                            }
+                        }
+                    },
+                    onCancelFriend = {
+                        scope.launch {
+                            try {
+                                val currentUid = firebaseUser?.uid ?: return@launch
+                                val targetUid = viewOtherUserId ?: return@launch
+                                val chatRepo = ChatRepository(db)
+                                chatRepo.cancelFriendRequest(currentUid, targetUid)
+                                friendRequestStatus = null
+                            } catch (e: Exception) {
+                                Log.e("FRIEND_DEBUG", "Error cancelling friend request", e)
+                            }
+                        }
+                    },
+                    onBack = {
+                        viewOtherUserId = null
+                        otherUserProfile = null
                     }
-                },
-                onBack = {
-                    viewOtherUserId = null
-                    otherUserProfile = null
-                },
-                onEditSchedule = {},
-                onViewAllFriends = null
-            )
+                )
+            }
         } else {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -1264,44 +1098,6 @@ fun ClassSeekApp(
                 sharedLocationByUidToView = senderId
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.MAP
-            }
-        )
-        return
-    }
-
-    if (isViewingAllFriends && firebaseUser != null && userProfile != null) {
-        FriendsDirectoryScreen(
-            friends = profileFriends,
-            incomingRequests = pendingFriendRequests,
-            outgoingRequests = outgoingFriendRequests,
-            searchResults = friendSearchResults,
-            onBack = { isViewingAllFriends = false },
-            onFriendClick = { friend ->
-                isViewingAllFriends = false
-                viewOtherUserId = friend.uid
-            },
-            onIncomingClick = { friend ->
-                isViewingAllFriends = false
-                viewOtherUserId = friend.uid
-            },
-            onOutgoingClick = { friend ->
-                isViewingAllFriends = false
-                viewOtherUserId = friend.uid
-            },
-            onSearchQueryChanged = { query ->
-                searchUsers(query)
-            },
-            onSendFriendRequest = { user ->
-                scope.launch {
-                    try {
-                        val currentUid = firebaseUser?.uid ?: return@launch
-                        val chatRepo = ChatRepository(db)
-                        chatRepo.sendFriendRequest(currentUid, user.uid)
-                        searchUsers("")
-                    } catch (e: Exception) {
-                        Log.e("FRIEND_DEBUG", "Error sending friend request", e)
-                    }
-                }
             }
         )
         return
@@ -1475,24 +1271,7 @@ fun ClassSeekApp(
                                 userProfile = userProfile!!,
                                 isMyProfile = true,
                                 bookmarkedEvents = myBookmarkedEvents,
-                                favoriteFriends = favoriteFriends,
-                                onTogglePinFriend = { friendUid ->
-                                    scope.launch {
-                                        try {
-                                            val currentUid = firebaseUser?.uid ?: return@launch
-                                            val isCurrentlyPinned = favoriteFriends.any { it.uid == friendUid }
-                                            val docRef = db.collection("users").document(currentUid)
-                                                .collection("favoriteFriends").document(friendUid)
-                                            if (isCurrentlyPinned) {
-                                                docRef.delete()
-                                            } else {
-                                                docRef.set(mapOf("pinnedAt" to FieldValue.serverTimestamp()))
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.e("AUTH_DEBUG", "Error deleting account", e)
-                                        }
-                                    }
-                                },
+                                friends = profileFriends,
                                 onSignOut = {},
                                 onEditProfile = {},
                                 onDeleteAccount = {},
@@ -1541,15 +1320,13 @@ fun ClassSeekApp(
                                 },
                                 onEditSchedule = {
                                     isEditingSchedule = true
-                                },
-                                onViewAllFriends = {
-                                    isViewingAllFriends = true
                                 }
                             )
                         }
 
                         AppDestinations.FRIENDS -> {
                             FriendsScreen(
+                                friends = profileFriends,
                                 initialChatId = routedChatId ?: pendingNotificationChatId,
                                 initialChatTitle = routedChatTitle ?: pendingNotificationChatTitle,
                                 onInitialChatConsumed = {
@@ -1605,6 +1382,17 @@ fun ClassSeekApp(
                                                 clearSessionState()
                                             }
                                         )
+                                    }
+                                },
+                                onUpdateSettings = { newSettings ->
+                                    scope.launch {
+                                        try {
+                                            db.collection("users").document(firebaseUser?.uid ?: return@launch)
+                                                .update(newSettings)
+                                                .await()
+                                        } catch (e: Exception) {
+                                            Log.e("SETTINGS_DEBUG", "Error updating settings", e)
+                                        }
                                     }
                                 }
                             )

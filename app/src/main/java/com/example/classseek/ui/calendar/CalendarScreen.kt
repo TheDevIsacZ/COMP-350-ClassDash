@@ -76,6 +76,7 @@ import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.SearchBar
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -453,16 +454,29 @@ fun CalendarScreen(
 
     if (showChatPicker && selectedEventForSharing != null && myUid.isNotBlank()) {
         var chats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
+        var chatSearchQuery by remember(selectedEventForSharing?.id) { mutableStateOf("") }
         LaunchedEffect(Unit) {
             try {
                 chats = chatRepository.getMyChats(myUid)
             } catch (e: Exception) {
             }
         }
+        val filteredChats = if (chatSearchQuery.isBlank()) {
+            chats
+        } else {
+            val normalizedQuery = chatSearchQuery.trim()
+            chats.filter { chat ->
+                chat.title.contains(normalizedQuery, ignoreCase = true) ||
+                    chat.lastMessageText.orEmpty().contains(normalizedQuery, ignoreCase = true)
+            }
+        }
 
         val pickerSheetState = rememberModalBottomSheetState()
         ModalBottomSheet(
-            onDismissRequest = { showChatPicker = false },
+            onDismissRequest = {
+                showChatPicker = false
+                chatSearchQuery = ""
+            },
             sheetState = pickerSheetState
         ) {
             Column(
@@ -477,11 +491,21 @@ fun CalendarScreen(
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
 
-                if (chats.isEmpty()) {
-                    Text("No chats available", modifier = Modifier.padding(vertical = 16.dp))
+                SearchBar(
+                    query = chatSearchQuery,
+                    onQueryChange = { chatSearchQuery = it },
+                    placeholder = "Search chats or people",
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                if (filteredChats.isEmpty()) {
+                    Text(
+                        text = if (chatSearchQuery.isBlank()) "No chats available" else "No matching chats",
+                        modifier = Modifier.padding(vertical = 16.dp)
+                    )
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                        items(chats) { chat ->
+                        items(filteredChats) { chat ->
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
@@ -520,6 +544,7 @@ fun CalendarScreen(
                                                 eventId = event.id
                                             )
                                             showChatPicker = false
+                                            chatSearchQuery = ""
                                             selectedEventForSharing = null
                                         } catch (e: Exception) {
                                         }
