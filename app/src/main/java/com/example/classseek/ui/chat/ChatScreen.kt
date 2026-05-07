@@ -1204,10 +1204,24 @@ fun ChatScreen(
                         },
                         seenByProfiles = if (isMine) seenByProfiles else emptyList(),
                         onLocationClick = onLocationClick,
-                        onAddEventToCalendar = { eventId ->
-                            if (myUid != null) {
+                        onAddEventToCalendar = { eventMsg ->
+                            if (myUid != null && eventMsg.eventId != null) {
+                                val eventData = hashMapOf(
+                                    "eventId" to eventMsg.eventId,
+                                    "title" to (eventMsg.eventTitle ?: "Event"),
+                                    "start" to (eventMsg.eventStart ?: ""),
+                                    "end" to (eventMsg.eventEnd ?: ""),
+                                    "location" to (eventMsg.eventLocation ?: ""),
+                                    "savedAt" to FieldValue.serverTimestamp()
+                                )
+
                                 db.collection("users").document(myUid)
-                                    .update("bookmarkedEventIds", FieldValue.arrayUnion(eventId))
+                                    .collection("sharedEvents")
+                                    .document(eventMsg.eventId)
+                                    .set(eventData)
+
+                                db.collection("users").document(myUid)
+                                    .update("bookmarkedEventIds", FieldValue.arrayUnion(eventMsg.eventId))
                             }
                         }
                     )
@@ -1290,7 +1304,7 @@ private fun MessageRow(
     receiptText: String? = null,
     seenByProfiles: List<ChatUserProfile> = emptyList(),
     onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> },
-    onAddEventToCalendar: (String) -> Unit = {}
+    onAddEventToCalendar: (Message) -> Unit = {}
 ) {
     if (msg.type == "system") {
         Box(
@@ -1376,7 +1390,7 @@ private fun MessageRow(
                                     }
                                 }
                                 if (!isMine && msg.eventId != null) {
-                                    IconButton(onClick = { onAddEventToCalendar(msg.eventId) }) {
+                                    IconButton(onClick = { onAddEventToCalendar(msg) }) {
                                         Icon(
                                             imageVector = Icons.Default.BookmarkAdd,
                                             contentDescription = "Add to Calendar",
