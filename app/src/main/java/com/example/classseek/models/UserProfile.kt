@@ -28,6 +28,7 @@ data class UserProfile(
     val chatNotificationsEnabled: Boolean = true,
     val calendarRemindersEnabled: Boolean = true,
     val eventNotificationsEnabled: Boolean = true,
+    val friendRequestNotificationsEnabled: Boolean = true,
     val showOnlineStatus: Boolean = true,
     val profileVisibility: String = "Public", // "Public" or "Friends Only"
     val shareLocation: Boolean = true

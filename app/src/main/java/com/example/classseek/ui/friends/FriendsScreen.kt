@@ -123,7 +123,9 @@ fun FriendsScreen(
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null,
     onNavigateToProfile: ((String) -> Unit)? = null,
-    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
+    onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> } ,
+    initialFriendRequestUid: String? = null,
+    onFriendRequestConsumed: () -> Unit = {}
 ) {
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
     var activeChatId by remember { mutableStateOf<String?>(null) }
@@ -510,6 +512,16 @@ fun FriendsScreen(
                     }
                 }
             )
+        }
+    }
+    LaunchedEffect(initialFriendRequestUid) {
+        if (initialFriendRequestUid != null && pendingRequests.isNotEmpty()) {
+            // Find the pending request in the list and show it
+            val pendingRequest = pendingRequests.find { it.uid == initialFriendRequestUid }
+            if (pendingRequest != null) {
+                selectedUserForAction = pendingRequest
+                onFriendRequestConsumed()
+            }
         }
     }
 }

@@ -101,6 +101,7 @@ class ClassSeekActivity : ComponentActivity() {
 
     private var launchChatIdState = mutableStateOf<String?>(null)
     private var launchChatTitleState = mutableStateOf<String?>(null)
+    private var launchFriendRequestUidState = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -138,9 +139,13 @@ class ClassSeekActivity : ComponentActivity() {
                 ClassSeekApp(
                     initialChatId = launchChatIdState.value,
                     initialChatTitle = launchChatTitleState.value,
+                    initialFriendRequestUid = launchFriendRequestUidState.value,
                     onNotificationChatConsumed = {
                         launchChatIdState.value = null
                         launchChatTitleState.value = null
+                    },
+                    onFriendRequestNotificationConsumed = {
+                        launchFriendRequestUidState.value = null
                     },
                     themeMode = themeMode,
                     onThemeModeChange = { newThemeMode ->
@@ -166,6 +171,10 @@ class ClassSeekActivity : ComponentActivity() {
             intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_ID)
         launchChatTitleState.value =
             intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_TITLE)
+        launchFriendRequestUidState.value =
+            intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_FRIEND_REQUEST_UID)
+
+        val navigateTo = intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_NAVIGATE_TO)
     }
 
     suspend fun getCalendarEvents(account: GoogleSignInAccount): List<Event>? {
@@ -461,7 +470,9 @@ private suspend fun deleteCurrentAccount(
 fun ClassSeekApp(
     initialChatId: String? = null,
     initialChatTitle: String? = null,
+    initialFriendRequestUid: String? = null,
     onNotificationChatConsumed: () -> Unit = {},
+    onFriendRequestNotificationConsumed: () -> Unit = {},
     themeMode: AppThemeMode,
     onThemeModeChange: (AppThemeMode) -> Unit,
     isDarkTheme: Boolean
@@ -481,9 +492,10 @@ fun ClassSeekApp(
     var viewOtherUserId by remember { mutableStateOf<String?>(null) }
     var otherUserProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isFriendWithOther by remember { mutableStateOf(false) }
-    var friendRequestStatus by remember { mutableStateOf<String?>(null) } // null, "pending", "sent"
+    var friendRequestStatus by remember { mutableStateOf<String?>(null) }
     var isEditingSchedule by remember { mutableStateOf(false) }
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
+    var pendingFriendRequestUid by remember { mutableStateOf<String?>(null) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -514,6 +526,19 @@ fun ClassSeekApp(
         pendingNotificationChatId = null
         pendingNotificationChatTitle = null
         onNotificationChatConsumed()
+    }
+    LaunchedEffect(initialFriendRequestUid) {
+        pendingFriendRequestUid = initialFriendRequestUid
+    }
+
+    LaunchedEffect(firebaseUser?.uid, pendingFriendRequestUid) {
+        if (firebaseUser != null && pendingFriendRequestUid != null) {
+            currentDestination = AppDestinations.FRIENDS
+            // Optionally, you can set viewOtherUserId to show the requester's profile
+            // viewOtherUserId = pendingFriendRequestUid
+            pendingFriendRequestUid = null
+            onFriendRequestNotificationConsumed()
+        }
     }
 
     fun consumeRoutedChat() {
@@ -1256,7 +1281,11 @@ fun ClassSeekApp(
                             "updatedAt" to FieldValue.serverTimestamp(),
                             "bookmarkedEventIds" to profileWithId.bookmarkedEventIds,
                             "semester" to profileWithId.semester,
-                            "classes" to profileWithId.classes
+                            "classes" to profileWithId.classes,
+                            "chatNotificationsEnabled" to profileWithId.chatNotificationsEnabled,
+                            "calendarRemindersEnabled" to profileWithId.calendarRemindersEnabled,
+                            "eventNotificationsEnabled" to profileWithId.eventNotificationsEnabled,
+                            "friendRequestNotificationsEnabled" to profileWithId.friendRequestNotificationsEnabled
                         )
 
                         db.collection("users")
