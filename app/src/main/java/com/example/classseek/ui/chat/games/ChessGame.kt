@@ -25,6 +25,7 @@ import com.github.bhlangonijr.chesslib.Piece
 
 @Composable
 fun ChessGameOverlay(
+    chatId: String,
     gameId: String,
     myUid: String,
     repo: ChatRepository,
@@ -84,6 +85,7 @@ fun ChessGameOverlay(
                         currentTurn = game.currentTurn,
                         playerWhite = game.playerWhite,
                         legalMoves = legalMoves,
+                        isCheck = chessBoard.isKingAttacked,
                         onMove = { move ->
                             legalMoves = emptyList()
                             scope.launch {
@@ -94,15 +96,23 @@ fun ChessGameOverlay(
                                     val isMated = chessBoard.isMated
                                     val isDraw = chessBoard.isDraw
                                     val status = if (isMated || isDraw) "finished" else "active"
-                                    val winnerId = if (isMated) myUid else null
+                                    val winnerId = if (isMated) game.currentTurn else null
+
+                                    val statusMessage = when {
+                                        isMated -> "🏆 Checkmate! ${if (winnerId == myUid) "You" else "Opponent"} won."
+                                        isDraw -> "🤝 Game Over: Draw."
+                                        else -> "Last move: $move"
+                                    }
 
                                     repo.updateGameState(
+                                        chatId = chatId,
                                         gameId = gameId,
                                         newState = chessBoard.fen,
                                         nextTurnUserId = nextTurn,
                                         move = move.toString(),
                                         status = status,
-                                        winnerId = winnerId
+                                        winnerId = winnerId,
+                                        statusMessage = statusMessage
                                     )
                                 } catch (e: Exception) {
                                     android.util.Log.e("ChessGame", "Failed to update game state", e)
@@ -154,10 +164,12 @@ fun ChessBoard(
     currentTurn: String,
     playerWhite: String,
     legalMoves: List<Move>,
+    isCheck: Boolean,
     onMove: (Move) -> Unit
 ) {
     val isWhite = myUid == playerWhite
     val isMyTurn = currentTurn == myUid
+    val sideToMove = board.sideToMove
 
     var selectedSquare by remember { mutableStateOf<Square?>(null) }
     
@@ -174,9 +186,6 @@ fun ChessBoard(
             .border(2.dp, MaterialTheme.colorScheme.outline)
             .padding(4.dp)
     ) {
-        // Rows are 7 down to 0 in chesslib (rank 8 to 1)
-        // But for UI we iterate 0 to 7. 
-        // If White, top row is rank 8 (index 7). If Black, top row is rank 1 (index 0).
         for (uiRow in 0 until 8) {
             Row {
                 for (uiCol in 0 until 8) {
@@ -190,10 +199,15 @@ fun ChessBoard(
                     val isSelected = selectedSquare == square
                     val isHighlighted = highlightedSquares.contains(square)
                     
+                    val isKingInCheck = isCheck && 
+                        ((sideToMove == com.github.bhlangonijr.chesslib.Side.WHITE && piece == Piece.WHITE_KING) ||
+                         (sideToMove == com.github.bhlangonijr.chesslib.Side.BLACK && piece == Piece.BLACK_KING))
+
                     val bgColor = when {
+                        isKingInCheck -> Color.Red.copy(alpha = 0.7f)
                         isSelected -> Color(0xFFF7F769)
-                        isLight -> Color(0xFFEEEED2)
-                        else -> Color(0xFF769656)
+                        isLight -> Color(0xFFDEB887) // BurlyWood (Light Wood)
+                        else -> Color(0xFF8B4513)    // SaddleBrown (Dark Wood)
                     }
 
                     Box(
@@ -202,7 +216,8 @@ fun ChessBoard(
                             .background(bgColor)
                             .clickable(enabled = isMyTurn) {
                                 if (selectedSquare == null) {
-                                    if (piece != Piece.NONE && isPieceMine(piece, isWhite)) {
+                                    val isMyPiece = (sideToMove == piece.pieceSide)
+                                    if (piece != Piece.NONE && isMyPiece) {
                                         selectedSquare = square
                                     }
                                 } else {
@@ -212,8 +227,8 @@ fun ChessBoard(
                                         onMove(move)
                                         selectedSquare = null
                                     } else {
-                                        // Re-select if another of my pieces is clicked
-                                        if (piece != Piece.NONE && isPieceMine(piece, isWhite)) {
+                                        val isMyPiece = (sideToMove == piece.pieceSide)
+                                        if (piece != Piece.NONE && isMyPiece) {
                                             selectedSquare = square
                                         } else {
                                             selectedSquare = null
@@ -231,11 +246,25 @@ fun ChessBoard(
                             )
                         }
                         if (piece != Piece.NONE) {
-                            Text(
-                                text = pieceToUnicode(piece),
-                                fontSize = 32.sp,
-                                color = if (piece.pieceSide == com.github.bhlangonijr.chesslib.Side.WHITE) Color.White else Color.Black
-                            )
+                            val isWhitePiece = piece.pieceSide == com.github.bhlangonijr.chesslib.Side.WHITE
+                            
+                            Box(contentAlignment = Alignment.Center) {
+                                if (isWhitePiece) {
+                                    // Draw a shadow/outline for white pieces to make them pop on light squares
+                                    Text(
+                                        text = pieceToUnicode(piece),
+                                        fontSize = 32.sp,
+                                        color = Color.Black.copy(alpha = 0.5f),
+                                        modifier = Modifier.offset(x = 1.dp, y = 1.dp)
+                                    )
+                                }
+                                
+                                Text(
+                                    text = pieceToUnicode(piece),
+                                    fontSize = 32.sp,
+                                    color = if (isWhitePiece) Color.White else Color.Black
+                                )
+                            }
                         }
                     }
                 }
@@ -244,19 +273,14 @@ fun ChessBoard(
     }
 }
 
-fun isPieceMine(piece: Piece, isWhite: Boolean): Boolean {
-    val side = if (isWhite) com.github.bhlangonijr.chesslib.Side.WHITE else com.github.bhlangonijr.chesslib.Side.BLACK
-    return piece.pieceSide == side
-}
-
 fun pieceToUnicode(piece: Piece): String {
     return when (piece) {
-        Piece.WHITE_PAWN -> "♙"
-        Piece.WHITE_ROOK -> "♖"
-        Piece.WHITE_KNIGHT -> "♘"
-        Piece.WHITE_BISHOP -> "♗"
-        Piece.WHITE_QUEEN -> "♕"
-        Piece.WHITE_KING -> "♔"
+        Piece.WHITE_PAWN -> "♟" // Using filled black character for white piece, colored via Compose
+        Piece.WHITE_ROOK -> "♜"
+        Piece.WHITE_KNIGHT -> "♞"
+        Piece.WHITE_BISHOP -> "♝"
+        Piece.WHITE_QUEEN -> "♛"
+        Piece.WHITE_KING -> "♚"
         Piece.BLACK_PAWN -> "♟"
         Piece.BLACK_ROOK -> "♜"
         Piece.BLACK_KNIGHT -> "♞"

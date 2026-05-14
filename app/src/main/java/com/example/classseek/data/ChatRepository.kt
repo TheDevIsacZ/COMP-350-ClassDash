@@ -1321,7 +1321,7 @@ class ChatRepository(
             }
     }
 
-    suspend fun updateGameState(gameId: String, newState: String, nextTurnUserId: String, move: String, status: String = "active", winnerId: String? = null) {
+    suspend fun updateGameState(chatId: String, gameId: String, newState: String, nextTurnUserId: String, move: String, status: String = "active", winnerId: String? = null, statusMessage: String? = null) {
         val gameRef = db.collection("games").document(gameId)
         val updates = hashMapOf(
             "state" to newState,
@@ -1334,5 +1334,12 @@ class ChatRepository(
             updates["winnerId"] = winnerId
         }
         gameRef.update(updates).await()
+
+        if (statusMessage != null) {
+            val messages = chatMessagesRef(chatId).whereEqualTo("gameId", gameId).get().await()
+            for (doc in messages.documents) {
+                doc.reference.update("text", statusMessage).await()
+            }
+        }
     }
 }

@@ -1189,6 +1189,7 @@ fun ChatScreen(
     if (activeGameId != null && myUid != null) {
         android.util.Log.d("ChatScreen", "Rendering ChessGameOverlay for: $activeGameId")
         ChessGameOverlay(
+            chatId = chatId,
             gameId = activeGameId!!,
             myUid = myUid,
             repo = repo,
@@ -1373,6 +1374,24 @@ fun ChatScreen(
 }
 
 @Composable
+private fun ChessBoardIcon(modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val squareSize = size.width / 8
+        for (row in 0 until 8) {
+            for (col in 0 until 8) {
+                // Wood-like colors for the mini icon
+                val color = if ((row + col) % 2 == 0) Color(0xFFD2B48C) else Color(0xFF8B4513)
+                drawRect(
+                    color = color,
+                    topLeft = androidx.compose.ui.geometry.Offset(col * squareSize, row * squareSize),
+                    size = androidx.compose.ui.geometry.Size(squareSize, squareSize)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun MessageRow(
     msg: Message,
     isMine: Boolean,
@@ -1487,21 +1506,22 @@ private fun MessageRow(
                                     .clickable { msg.gameId?.let { onGameClick(it) } },
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                Icon(
-                                    imageVector = if (msg.gameType == "chess") Icons.Default.Extension else Icons.Default.VideogameAsset,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(48.dp),
-                                    tint = MaterialTheme.colorScheme.primary
+                                ChessBoardIcon(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .padding(4.dp)
+                                        .clip(RoundedCornerShape(4.dp))
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    text = if (msg.gameType == "chess") "Chess" else "Game",
+                                    text = if (msg.gameType == "chess") "Chess Board" else "Game",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Tap to Play",
-                                    style = MaterialTheme.typography.bodySmall
+                                    text = msg.text ?: "Tap to Play",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (msg.text?.contains("won") == true || msg.text?.contains("Draw") == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         } else {
