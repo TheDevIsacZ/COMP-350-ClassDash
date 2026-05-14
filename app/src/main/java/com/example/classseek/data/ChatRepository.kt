@@ -1239,11 +1239,12 @@ class ChatRepository(
         opponentId: String
     ): String {
         val gameRef = db.collection("games").document()
+        val msgRef = chatMessagesRef(chatId).document()
         val batch = db.batch()
         val now = FieldValue.serverTimestamp()
         val chat = getChatInfo(chatId)
 
-        val messageText = "🎮 Started a $gameType game"
+        val messageText = "🎮 Your Turn" // Start with proper status
 
         val gameData = hashMapOf(
             "type" to gameType,
@@ -1253,11 +1254,11 @@ class ChatRepository(
             "state" to initialState,
             "status" to "active",
             "lastMoveAt" to now,
-            "moveHistory" to emptyList<String>()
+            "moveHistory" to emptyList<String>(),
+            "messageId" to msgRef.id // Link back to the chat bubble
         )
         batch.set(gameRef, gameData)
 
-        val msgRef = chatMessagesRef(chatId).document()
         batch.set(
             msgRef,
             mapOf(
@@ -1312,7 +1313,8 @@ class ChatRepository(
                         status = snapshot.getString("status") ?: "active",
                         winnerId = snapshot.getString("winnerId"),
                         lastMoveAt = snapshot.getTimestamp("lastMoveAt"),
-                        moveHistory = snapshot.get("moveHistory") as? List<String> ?: emptyList()
+                        moveHistory = snapshot.get("moveHistory") as? List<String> ?: emptyList(),
+                        messageId = snapshot.getString("messageId") ?: ""
                     )
                     onUpdate(game)
                 } else {
@@ -1323,6 +1325,9 @@ class ChatRepository(
 
     suspend fun updateGameState(chatId: String, gameId: String, newState: String, nextTurnUserId: String, move: String, status: String = "active", winnerId: String? = null, statusMessage: String? = null) {
         val gameRef = db.collection("games").document(gameId)
+        val gameDoc = gameRef.get().await()
+        val messageId = gameDoc.getString("messageId")
+
         val updates = hashMapOf(
             "state" to newState,
             "currentTurn" to nextTurnUserId,
@@ -1333,12 +1338,23 @@ class ChatRepository(
         if (winnerId != null) {
             updates["winnerId"] = winnerId
         }
-        gameRef.update(updates).await()
+        
+        // Use a batch to update both game and message if possible
+        val batch = db.batch()
+        batch.update(gameRef, updates)
+        
+        if (statusMessage != null && messageId != null) {
+            batch.update(chatMessagesRef(chatId).document(messageId), "text", statusMessage)
+            batch.update(chatRef(chatId), "lastMessageText", statusMessage)
+        }
+        
+        batch.commit().await()
 
+        // Sync inbox text (must be done separately as it's multiple documents)
         if (statusMessage != null) {
-            val messages = chatMessagesRef(chatId).whereEqualTo("gameId", gameId).get().await()
-            for (doc in messages.documents) {
-                doc.reference.update("text", statusMessage).await()
+            val chatInfo = getChatInfo(chatId)
+            chatInfo.memberIds.forEach { uid ->
+                userInboxRef(uid).document(chatId).update("lastMessageText", statusMessage)
             }
         }
     }

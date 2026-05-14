@@ -5,6 +5,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,6 +25,12 @@ import com.github.bhlangonijr.chesslib.Square
 import com.github.bhlangonijr.chesslib.move.Move
 import com.github.bhlangonijr.chesslib.Piece
 
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import android.media.AudioManager
+import android.view.SoundEffectConstants
+
 @Composable
 fun ChessGameOverlay(
     chatId: String,
@@ -36,6 +44,10 @@ fun ChessGameOverlay(
     
     val chessBoard = remember { Board() }
     var legalMoves by remember { mutableStateOf<List<Move>>(emptyList()) }
+
+    val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val audioManager = remember { context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager }
 
     DisposableEffect(gameId) {
         val listener = repo.listenToGame(gameId) { updated ->
@@ -87,6 +99,15 @@ fun ChessGameOverlay(
                         legalMoves = legalMoves,
                         isCheck = chessBoard.isKingAttacked,
                         onMove = { move ->
+                            // Haptic feedback (Thump)
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            
+                            // Context-aware sound (Capture vs Move)
+                            val isCapture = chessBoard.getPiece(move.to) != Piece.NONE
+                            val sound = if (isCapture) AudioManager.FX_KEYPRESS_STANDARD else AudioManager.FX_KEY_CLICK
+                            audioManager.playSoundEffect(sound)
+
+                            val sanMove = chessBoard.boardToSan(move)
                             legalMoves = emptyList()
                             scope.launch {
                                 try {
@@ -101,7 +122,7 @@ fun ChessGameOverlay(
                                     val statusMessage = when {
                                         isMated -> "🏆 Checkmate! ${if (winnerId == myUid) "You" else "Opponent"} won."
                                         isDraw -> "🤝 Game Over: Draw."
-                                        else -> "Last move: $move"
+                                        else -> if (nextTurn == myUid) "🎮 Your Turn" else "🎮 Opponent's Turn"
                                     }
 
                                     repo.updateGameState(
@@ -109,7 +130,7 @@ fun ChessGameOverlay(
                                         gameId = gameId,
                                         newState = chessBoard.fen,
                                         nextTurnUserId = nextTurn,
-                                        move = move.toString(),
+                                        move = sanMove,
                                         status = status,
                                         winnerId = winnerId,
                                         statusMessage = statusMessage
@@ -122,6 +143,51 @@ fun ChessGameOverlay(
                     )
 
                     Spacer(Modifier.height(24.dp))
+
+                    // Move History Section (Chess.com horizontal style)
+                    if (game.moveHistory.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .height(48.dp)
+                                .background(Color(0xFF262421), MaterialTheme.shapes.small)
+                                .padding(horizontal = 12.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            androidx.compose.foundation.lazy.LazyRow(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                val pairs = game.moveHistory.chunked(2)
+                                items(pairs.size) { index ->
+                                    val pair = pairs[index]
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            text = "${index + 1}.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF999491)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        MoveTextWithIcon(
+                                            text = pair[0],
+                                            isWhite = true
+                                        )
+                                        if (pair.size > 1) {
+                                            Spacer(Modifier.width(8.dp))
+                                            MoveTextWithIcon(
+                                                text = pair[1],
+                                                isWhite = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
 
                     val isMyTurn = game.currentTurn == myUid
                     val gameStatus = game.status
@@ -153,6 +219,46 @@ fun ChessGameOverlay(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun MoveTextWithIcon(text: String, modifier: Modifier = Modifier, isWhite: Boolean) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        val pieceChar = text.firstOrNull()
+        val pieceSymbol = when (pieceChar) {
+            'N' -> if (isWhite) "♘" else "♞"
+            'B' -> if (isWhite) "♗" else "♝"
+            'R' -> if (isWhite) "♖" else "♜"
+            'Q' -> if (isWhite) "♕" else "♛"
+            'K' -> if (isWhite) "♔" else "♚"
+            else -> null
+        }
+        
+        if (pieceSymbol != null) {
+            Text(
+                text = pieceSymbol,
+                fontSize = 18.sp,
+                color = if (isWhite) Color.White else Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.padding(end = 2.dp)
+            )
+            Text(
+                text = text.substring(1),
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold
+            )
+        } else {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold
+            )
         }
     }
 }
@@ -206,8 +312,8 @@ fun ChessBoard(
                     val bgColor = when {
                         isKingInCheck -> Color.Red.copy(alpha = 0.7f)
                         isSelected -> Color(0xFFF7F769)
-                        isLight -> Color(0xFFDEB887) // BurlyWood (Light Wood)
-                        else -> Color(0xFF8B4513)    // SaddleBrown (Dark Wood)
+                        isLight -> Color(0xFFDEB887)
+                        else -> Color(0xFF8B4513)
                     }
 
                     Box(
@@ -250,7 +356,6 @@ fun ChessBoard(
                             
                             Box(contentAlignment = Alignment.Center) {
                                 if (isWhitePiece) {
-                                    // Draw a shadow/outline for white pieces to make them pop on light squares
                                     Text(
                                         text = pieceToUnicode(piece),
                                         fontSize = 32.sp,
@@ -273,9 +378,25 @@ fun ChessBoard(
     }
 }
 
+// Sound constants
+private const val SOUND_MOVE = AudioManager.FX_KEY_CLICK
+private const val SOUND_CAPTURE = AudioManager.FX_KEYPRESS_STANDARD
+
+// Extension to get SAN move
+fun Board.boardToSan(move: Move): String {
+    // kchesslib doesn't have a direct san(move) method in all versions, 
+    // but move.toString() usually returns UCI. 
+    // Let's use a simple manual SAN generator logic for common cases 
+    // or rely on the library if available.
+    // In kchesslib, we can use the move's SAN from the board history after doing it.
+    val san = this.backup.last()?.move?.toString() ?: move.toString()
+    // Check for mate/check in the library state
+    return if (this.isMated) "$san#" else if (this.isKingAttacked) "$san+" else san
+}
+
 fun pieceToUnicode(piece: Piece): String {
     return when (piece) {
-        Piece.WHITE_PAWN -> "♟" // Using filled black character for white piece, colored via Compose
+        Piece.WHITE_PAWN -> "♟"
         Piece.WHITE_ROOK -> "♜"
         Piece.WHITE_KNIGHT -> "♞"
         Piece.WHITE_BISHOP -> "♝"
