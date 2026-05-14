@@ -31,6 +31,10 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import android.media.AudioManager
 import android.view.SoundEffectConstants
 
+/**
+ * Full-screen Chess Game Overlay.
+ * Manages the real-time game state from Firestore and handles move synchronization.
+ */
 @Composable
 fun ChessGameOverlay(
     chatId: String,
@@ -39,21 +43,29 @@ fun ChessGameOverlay(
     repo: ChatRepository,
     onDismiss: () -> Unit
 ) {
+    // Current state of the game fetched from the 'games' collection
     var gameState by remember { mutableStateOf<GameState?>(null) }
     val scope = rememberCoroutineScope()
     
+    // Core chess engine board from kchesslib
     val chessBoard = remember { Board() }
+    
+    // List of legal moves for the current position, refreshed each turn
     var legalMoves by remember { mutableStateOf<List<Move>>(emptyList()) }
 
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val audioManager = remember { context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager }
 
+    // Listen to real-time updates for this specific game
     DisposableEffect(gameId) {
         val listener = repo.listenToGame(gameId) { updated ->
             gameState = updated
             updated?.let { 
+                // Sync the local engine board with the Firestore FEN string
                 chessBoard.loadFromFen(it.state)
+                
+                // Only generate legal moves if it's the current user's turn
                 if (it.currentTurn == myUid && it.status == "active") {
                     legalMoves = chessBoard.legalMoves().toList()
                 } else {
@@ -99,32 +111,37 @@ fun ChessGameOverlay(
                         legalMoves = legalMoves,
                         isCheck = chessBoard.isKingAttacked,
                         onMove = { move ->
-                            // Haptic feedback (Thump)
+                            // Haptic feedback (Tactile "thump" on piece placement)
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             
-                            // Context-aware sound (Capture vs Move)
+                            // Context-aware sound (Capture clack vs standard Move click)
                             val isCapture = chessBoard.getPiece(move.to) != Piece.NONE
                             val sound = if (isCapture) AudioManager.FX_KEYPRESS_STANDARD else AudioManager.FX_KEY_CLICK
                             audioManager.playSoundEffect(sound)
 
+                            // Get move in Standard Algebraic Notation (e.g., Nf3)
                             val sanMove = chessBoard.boardToSan(move)
-                            legalMoves = emptyList()
+                            legalMoves = emptyList() // Prevent multiple move clicks
+                            
                             scope.launch {
                                 try {
+                                    // Togle turn between White and Black players
                                     val nextTurn = if (game.currentTurn == game.playerWhite) game.playerBlack else game.playerWhite
                                     
-                                    // Check for game over conditions
+                                    // Check for game over conditions using kchesslib
                                     val isMated = chessBoard.isMated
                                     val isDraw = chessBoard.isDraw
                                     val status = if (isMated || isDraw) "finished" else "active"
                                     val winnerId = if (isMated) game.currentTurn else null
 
+                                    // Status message displayed in the chat bubble and inbox
                                     val statusMessage = when {
                                         isMated -> "🏆 Checkmate! ${if (winnerId == myUid) "You" else "Opponent"} won."
                                         isDraw -> "🤝 Game Over: Draw."
                                         else -> if (nextTurn == myUid) "🎮 Your Turn" else "🎮 Opponent's Turn"
                                     }
 
+                                    // Push all updates to Firestore in a single atomic batch
                                     repo.updateGameState(
                                         chatId = chatId,
                                         gameId = gameId,
@@ -263,6 +280,10 @@ fun MoveTextWithIcon(text: String, modifier: Modifier = Modifier, isWhite: Boole
     }
 }
 
+/**
+ * Standard 8x8 Chess Board UI.
+ * Handles board coordinate mapping, piece rendering, and move interaction.
+ */
 @Composable
 fun ChessBoard(
     board: Board,
@@ -279,6 +300,7 @@ fun ChessBoard(
 
     var selectedSquare by remember { mutableStateOf<Square?>(null) }
     
+    // Calculate highlighted squares based on the currently selected piece and the engine's legal moves
     val highlightedSquares = remember(selectedSquare, legalMoves) {
         if (selectedSquare == null) emptyList()
         else {
@@ -292,6 +314,8 @@ fun ChessBoard(
             .border(2.dp, MaterialTheme.colorScheme.outline)
             .padding(4.dp)
     ) {
+        // Iterate through rows and columns to draw the grid.
+        // Logic handles board flipping (if playing as black, board is inverted).
         for (uiRow in 0 until 8) {
             Row {
                 for (uiCol in 0 until 8) {
@@ -305,15 +329,16 @@ fun ChessBoard(
                     val isSelected = selectedSquare == square
                     val isHighlighted = highlightedSquares.contains(square)
                     
+                    // Logic for King in Check red glow - triggers when the engine detects an attack on the active King
                     val isKingInCheck = isCheck && 
                         ((sideToMove == com.github.bhlangonijr.chesslib.Side.WHITE && piece == Piece.WHITE_KING) ||
                          (sideToMove == com.github.bhlangonijr.chesslib.Side.BLACK && piece == Piece.BLACK_KING))
 
                     val bgColor = when {
-                        isKingInCheck -> Color.Red.copy(alpha = 0.7f)
-                        isSelected -> Color(0xFFF7F769)
-                        isLight -> Color(0xFFDEB887)
-                        else -> Color(0xFF8B4513)
+                        isKingInCheck -> Color.Red.copy(alpha = 0.7f) // Visual alert for Check
+                        isSelected -> Color(0xFFF7F769) // Yellow selection highlight
+                        isLight -> Color(0xFFDEB887) // Classic wooden theme (Light)
+                        else -> Color(0xFF8B4513)    // Classic wooden theme (Dark)
                     }
 
                     Box(
@@ -322,17 +347,21 @@ fun ChessBoard(
                             .background(bgColor)
                             .clickable(enabled = isMyTurn) {
                                 if (selectedSquare == null) {
+                                    // Select a piece if it's the user's turn and the piece belongs to them
                                     val isMyPiece = (sideToMove == piece.pieceSide)
                                     if (piece != Piece.NONE && isMyPiece) {
                                         selectedSquare = square
                                     }
                                 } else {
+                                    // Check if the click is on a legal move destination
                                     val move = legalMoves.find { it.from == selectedSquare && it.to == square }
                                     if (move != null) {
+                                        // Execute move on the local engine and notify the overlay
                                         board.doMove(move)
                                         onMove(move)
                                         selectedSquare = null
                                     } else {
+                                        // Re-select if clicking another of the user's pieces
                                         val isMyPiece = (sideToMove == piece.pieceSide)
                                         if (piece != Piece.NONE && isMyPiece) {
                                             selectedSquare = square
@@ -345,6 +374,7 @@ fun ChessBoard(
                         contentAlignment = Alignment.Center
                     ) {
                         if (isHighlighted) {
+                            // Draw a small dot on valid destination squares
                             Box(
                                 modifier = Modifier
                                     .size(15.dp)
@@ -356,6 +386,7 @@ fun ChessBoard(
                             
                             Box(contentAlignment = Alignment.Center) {
                                 if (isWhitePiece) {
+                                    // Layered rendering for White pieces to provide a dark outline/shadow for high visibility
                                     Text(
                                         text = pieceToUnicode(piece),
                                         fontSize = 32.sp,

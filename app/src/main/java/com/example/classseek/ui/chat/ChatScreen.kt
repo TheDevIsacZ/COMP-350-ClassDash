@@ -1373,13 +1373,17 @@ fun ChatScreen(
     }
 }
 
+/**
+ * Custom-drawn Chess Board icon for the chat bubble.
+ * Matches the classic wooden theme used on the actual board.
+ */
 @Composable
 private fun ChessBoardIcon(modifier: Modifier = Modifier) {
     androidx.compose.foundation.Canvas(modifier = modifier) {
         val squareSize = size.width / 8
         for (row in 0 until 8) {
             for (col in 0 until 8) {
-                // Wood-like colors for the mini icon
+                // Alternating wood tones: BurlyWood and SaddleBrown
                 val color = if ((row + col) % 2 == 0) Color(0xFFD2B48C) else Color(0xFF8B4513)
                 drawRect(
                     color = color,
