@@ -85,10 +85,25 @@ fun ChessGameOverlay(
                         playerWhite = game.playerWhite,
                         legalMoves = legalMoves,
                         onMove = { move ->
+                            legalMoves = emptyList()
                             scope.launch {
                                 try {
                                     val nextTurn = if (game.currentTurn == game.playerWhite) game.playerBlack else game.playerWhite
-                                    repo.updateGameState(gameId, chessBoard.fen, nextTurn, move.toString())
+                                    
+                                    // Check for game over conditions
+                                    val isMated = chessBoard.isMated
+                                    val isDraw = chessBoard.isDraw
+                                    val status = if (isMated || isDraw) "finished" else "active"
+                                    val winnerId = if (isMated) myUid else null
+
+                                    repo.updateGameState(
+                                        gameId = gameId,
+                                        newState = chessBoard.fen,
+                                        nextTurnUserId = nextTurn,
+                                        move = move.toString(),
+                                        status = status,
+                                        winnerId = winnerId
+                                    )
                                 } catch (e: Exception) {
                                     android.util.Log.e("ChessGame", "Failed to update game state", e)
                                 }
@@ -99,11 +114,27 @@ fun ChessGameOverlay(
                     Spacer(Modifier.height(24.dp))
 
                     val isMyTurn = game.currentTurn == myUid
-                    Text(
-                        text = if (isMyTurn) "Your Turn" else "Opponent's Turn",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (isMyTurn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                    )
+                    val gameStatus = game.status
+                    
+                    if (gameStatus == "finished") {
+                        val resultText = when {
+                            game.winnerId == myUid -> "You Win! 🏆"
+                            game.winnerId != null -> "Opponent Wins!"
+                            else -> "Draw! 🤝"
+                        }
+                        Text(
+                            text = resultText,
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text(
+                            text = if (isMyTurn) "Your Turn" else "Opponent's Turn",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (isMyTurn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
 
                     Spacer(Modifier.height(32.dp))
 
