@@ -311,6 +311,13 @@ fun SettingsProfileScreen(
                         checked = userProfile.eventNotificationsEnabled,
                         onCheckedChange = { onUpdateSettings(mapOf("eventNotificationsEnabled" to it)) }
                     )
+                    HorizontalDivider(color = ProfileTheme.Border)
+                    SettingsSwitchRow(
+                    title = "Friend Requests",
+                    subtitle = "Notifications for new friend requests and acceptances",
+                    checked = userProfile.friendRequestNotificationsEnabled,
+                    onCheckedChange = { onUpdateSettings(mapOf("friendRequestNotificationsEnabled" to it)) }
+                    )
                 }
             }
         }
