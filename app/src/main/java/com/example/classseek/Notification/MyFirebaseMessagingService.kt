@@ -26,6 +26,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         const val EXTRA_CHAT_ID = "chat_id"
         const val EXTRA_CHAT_TITLE = "chat_title"
+        const val EXTRA_FRIEND_REQUEST_UID = "requester_uid"
+        const val EXTRA_NAVIGATE_TO = "navigate_to"
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
@@ -56,6 +58,27 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                     messageBody = "$senderName shared an event: $eventTitle"
                 )
             }
+            "friend_request" -> {
+                val requesterUid = data["requesterUid"]
+                val title = data["title"] ?: remoteMessage.notification?.title ?: "Friend Request"
+                val body = data["body"] ?: remoteMessage.notification?.body ?: ""
+
+                sendFriendRequestNotification(
+                    requesterUid = requesterUid ?: "",
+                    title = title,
+                    messageBody = body
+                )
+            }
+            "friend_request_accepted" -> {
+                val title = data["title"] ?: remoteMessage.notification?.title ?: "Friend Request Accepted"
+                val body = data["body"] ?: remoteMessage.notification?.body ?: ""
+
+                sendFriendRequestAcceptedNotification(
+                    title = title,
+                    messageBody = body
+                )
+            }
+
             else -> {
                 // Existing notification handling
                 val chatId = data["chatId"]
@@ -156,6 +179,93 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         notificationManager.notify(chatId.hashCode(), notificationBuilder.build())
     }
+
+    private fun sendFriendRequestNotification(
+        requesterUid: String,
+        title: String,
+        messageBody: String
+    ) {
+        val intent = Intent(this, ClassSeekActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_FRIEND_REQUEST_UID, requesterUid)
+            putExtra(EXTRA_NAVIGATE_TO, "friends")
+        }
+
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            requesterUid.hashCode(),
+            intent,
+            pendingIntentFlags
+        )
+
+        val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(messageBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(messageBody))
+            .setAutoCancel(true)
+            .setSound(defaultSoundUri)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        createNotificationChannelIfNeeded(notificationManager)
+
+        notificationManager.notify(requesterUid.hashCode(), notificationBuilder.build())
+    }
+
+    private fun sendFriendRequestAcceptedNotification(
+        title: String,
+        messageBody: String
+    ) {
+        val intent = Intent(this, ClassSeekActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_NAVIGATE_TO, "friends")
+        }
+
+        val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            System.currentTimeMillis().toInt(),
+            intent,
+            pendingIntentFlags
+        )
+
+        val defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+        val notificationBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(messageBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(messageBody))
+            .setAutoCancel(true)
+            .setSound(defaultSoundUri)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+
+        val notificationManager =
+            getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        createNotificationChannelIfNeeded(notificationManager)
+
+        notificationManager.notify(System.currentTimeMillis().toInt(), notificationBuilder.build())
+    }
+
 
     private fun sendNotification(title: String, messageBody: String) {
         val intent = Intent(this, ClassSeekActivity::class.java).apply {
