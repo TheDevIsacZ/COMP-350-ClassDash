@@ -136,4 +136,11 @@ dependencies {
 
     // Coroutines support for Firebase Tasks
     implementation(libs.kotlinx.coroutines.play.services)
+
+    // Networking
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    implementation(libs.kchesslib)
 }

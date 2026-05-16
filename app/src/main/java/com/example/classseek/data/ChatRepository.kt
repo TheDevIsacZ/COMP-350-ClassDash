@@ -37,7 +37,9 @@ data class Message(
     val eventStart: String? = null,
     val eventEnd: String? = null,
     val eventLocation: String? = null,
-    val eventId: String? = null
+    val eventId: String? = null,
+    val gameId: String? = null,
+    val gameType: String? = null
 )
 
 data class ReadReceiptState(
@@ -1015,7 +1017,9 @@ class ChatRepository(
             eventStart = getString("eventStart"),
             eventEnd = getString("eventEnd"),
             eventLocation = getString("eventLocation"),
-            eventId = getString("eventId")
+            eventId = getString("eventId"),
+            gameId = getString("gameId"),
+            gameType = getString("gameType")
         )
     }
 
@@ -1225,5 +1229,145 @@ class ChatRepository(
 
         val doc = dmThreads.document(dmKey).get().await()
         return doc.getString("chatId")
+    }
+
+    /**
+     * Initializes and sends a new Game Invitation.
+     * Links the game state with a specific chat bubble for status tracking.
+     */
+    suspend fun sendGameMessage(
+        chatId: String,
+        senderId: String,
+        gameType: String,
+        initialState: String,
+        opponentId: String
+    ): String {
+        val gameRef = db.collection("games").document()
+        val msgRef = chatMessagesRef(chatId).document()
+        val batch = db.batch()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
+
+        val messageText = "🎮 Your Turn" // Initial invitation status
+
+        val gameData = hashMapOf(
+            "type" to gameType,
+            "playerWhite" to senderId,
+            "playerBlack" to opponentId,
+            "currentTurn" to senderId, // White (sender) starts first
+            "state" to initialState,
+            "status" to "active",
+            "lastMoveAt" to now,
+            "moveHistory" to emptyList<String>(),
+            "messageId" to msgRef.id // Store the link to the chat bubble for updates
+        )
+        batch.set(gameRef, gameData)
+
+        // Create the game message in the chat thread
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "game",
+                "text" to messageText,
+                "gameId" to gameRef.id,
+                "gameType" to gameType,
+                "createdAt" to now
+            )
+        )
+
+        // Update thread and inbox previews for all participants
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to messageText,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to messageText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
+    }
+
+    fun listenToGame(gameId: String, onUpdate: (com.example.classseek.models.GameState?) -> Unit) : ListenerRegistration {
+        return db.collection("games").document(gameId)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    val game = com.example.classseek.models.GameState(
+                        id = snapshot.id,
+                        type = snapshot.getString("type") ?: "",
+                        playerWhite = snapshot.getString("playerWhite") ?: "",
+                        playerBlack = snapshot.getString("playerBlack") ?: "",
+                        currentTurn = snapshot.getString("currentTurn") ?: "",
+                        state = snapshot.getString("state") ?: "",
+                        status = snapshot.getString("status") ?: "active",
+                        winnerId = snapshot.getString("winnerId"),
+                        lastMoveAt = snapshot.getTimestamp("lastMoveAt"),
+                        moveHistory = snapshot.get("moveHistory") as? List<String> ?: emptyList(),
+                        messageId = snapshot.getString("messageId") ?: ""
+                    )
+                    onUpdate(game)
+                } else {
+                    onUpdate(null)
+                }
+            }
+    }
+
+    /**
+     * Updates the game state and synchronization across the chat and inbox.
+     * Uses a single batch for atomic updates to game doc and message doc.
+     */
+    suspend fun updateGameState(chatId: String, gameId: String, newState: String, nextTurnUserId: String, move: String, status: String = "active", winnerId: String? = null, statusMessage: String? = null) {
+        val gameRef = db.collection("games").document(gameId)
+        val gameDoc = gameRef.get().await()
+        val messageId = gameDoc.getString("messageId")
+
+        val updates = hashMapOf(
+            "state" to newState,
+            "currentTurn" to nextTurnUserId,
+            "lastMoveAt" to FieldValue.serverTimestamp(),
+            "moveHistory" to FieldValue.arrayUnion(move),
+            "status" to status
+        )
+        if (winnerId != null) {
+            updates["winnerId"] = winnerId
+        }
+        
+        // Use a batch to ensure the game board and the chat bubble text update simultaneously
+        val batch = db.batch()
+        batch.update(gameRef, updates)
+        
+        if (statusMessage != null && messageId != null) {
+            // Update the text in the specific chat bubble (e.g., "Opponent's Turn")
+            batch.update(chatMessagesRef(chatId).document(messageId), "text", statusMessage)
+            // Update the thread's last message for the inbox preview
+            batch.update(chatRef(chatId), "lastMessageText", statusMessage)
+        }
+        
+        batch.commit().await()
+
+        // Sync individual user inbox documents (cannot be batched easily with chat updates)
+        if (statusMessage != null) {
+            val chatInfo = getChatInfo(chatId)
+            chatInfo.memberIds.forEach { uid ->
+                userInboxRef(uid).document(chatId).update("lastMessageText", statusMessage)
+            }
+        }
     }
 }

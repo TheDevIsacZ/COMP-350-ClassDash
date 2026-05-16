@@ -21,7 +21,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.VideogameAsset
+import com.example.classseek.ui.chat.games.ChessGameOverlay
 import androidx.compose.material.icons.filled.Map
 import com.google.firebase.firestore.FieldValue
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
@@ -30,6 +35,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -269,6 +275,9 @@ fun ChatScreen(
     var confirmDeleteGroup by remember(chatId) { mutableStateOf(false) }
     var confirmLeaveGroup by remember(chatId) { mutableStateOf(false) }
     var transferToUid by remember(chatId) { mutableStateOf<String?>(null) }
+
+    var showGameSelection by remember(chatId) { mutableStateOf(false) }
+    var activeGameId by remember(chatId) { mutableStateOf<String?>(null) }
 
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
@@ -1133,6 +1142,61 @@ fun ChatScreen(
         )
     }
 
+    if (showGameSelection) {
+        AlertDialog(
+            onDismissRequest = { showGameSelection = false },
+            title = { Text("Choose a Game") },
+            text = {
+                Column {
+                    ListItem(
+                        headlineContent = { Text("Chess") },
+                        leadingContent = { Icon(Icons.Default.Casino, contentDescription = null) },
+                        modifier = Modifier.clickable {
+                            showGameSelection = false
+                            val opponentId = if (isGroupChat()) {
+                                groupMembers.firstOrNull { it.uid != myUid }?.uid ?: ""
+                            } else {
+                                chatInfo?.memberIds?.find { it != myUid } ?: ""
+                            }
+
+                            if (myUid != null && opponentId.isNotBlank()) {
+                                scope.launch {
+                                    try {
+                                        sending = true
+                                        // Standard Chess starting position (Full FEN)
+                                        val initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+                                        repo.sendGameMessage(chatId, myUid, "chess", initialFen, opponentId)
+                                    } catch (e: Exception) {
+                                        error = e.message ?: "Failed to start game"
+                                    } finally {
+                                        sending = false
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showGameSelection = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (activeGameId != null && myUid != null) {
+        android.util.Log.d("ChatScreen", "Rendering ChessGameOverlay for: $activeGameId")
+        ChessGameOverlay(
+            chatId = chatId,
+            gameId = activeGameId!!,
+            myUid = myUid,
+            repo = repo,
+            onDismiss = { activeGameId = null }
+        )
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
@@ -1223,6 +1287,10 @@ fun ChatScreen(
                                 db.collection("users").document(myUid)
                                     .update("bookmarkedEventIds", FieldValue.arrayUnion(eventMsg.eventId))
                             }
+                        },
+                        onGameClick = { gameId ->
+                            android.util.Log.d("ChatScreen", "Game clicked: $gameId")
+                            activeGameId = gameId
                         }
                     )
                 }
@@ -1236,6 +1304,17 @@ fun ChatScreen(
                     .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(
+                    onClick = { showGameSelection = true },
+                    enabled = myUid != null && !sending
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Games",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
                 OutlinedTextField(
                     modifier = Modifier.weight(1f),
                     value = input,
@@ -1294,6 +1373,28 @@ fun ChatScreen(
     }
 }
 
+/**
+ * Custom-drawn Chess Board icon for the chat bubble.
+ * Matches the classic wooden theme used on the actual board.
+ */
+@Composable
+private fun ChessBoardIcon(modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val squareSize = size.width / 8
+        for (row in 0 until 8) {
+            for (col in 0 until 8) {
+                // Alternating wood tones: BurlyWood and SaddleBrown
+                val color = if ((row + col) % 2 == 0) Color(0xFFD2B48C) else Color(0xFF8B4513)
+                drawRect(
+                    color = color,
+                    topLeft = androidx.compose.ui.geometry.Offset(col * squareSize, row * squareSize),
+                    size = androidx.compose.ui.geometry.Size(squareSize, squareSize)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun MessageRow(
     msg: Message,
@@ -1304,7 +1405,8 @@ private fun MessageRow(
     receiptText: String? = null,
     seenByProfiles: List<ChatUserProfile> = emptyList(),
     onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> },
-    onAddEventToCalendar: (Message) -> Unit = {}
+    onAddEventToCalendar: (Message) -> Unit = {},
+    onGameClick: (String) -> Unit = {}
 ) {
     if (msg.type == "system") {
         Box(
@@ -1349,7 +1451,8 @@ private fun MessageRow(
                 Surface(
                     tonalElevation = 1.dp,
                     shape = MaterialTheme.shapes.medium,
-                    color = if (msg.type == "location") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+                    color = if (msg.type == "location") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                    modifier = if (msg.type == "game") Modifier.clickable { msg.gameId?.let { onGameClick(it) } } else Modifier
                 ) {
                     Column(Modifier.padding(10.dp)) {
                         if (msg.type == "location" && msg.latitude != null && msg.longitude != null) {
@@ -1398,6 +1501,32 @@ private fun MessageRow(
                                         )
                                     }
                                 }
+                            }
+                        } else if (msg.type == "game") {
+                            Column(
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .fillMaxWidth()
+                                    .clickable { msg.gameId?.let { onGameClick(it) } },
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                ChessBoardIcon(
+                                    modifier = Modifier
+                                        .size(64.dp)
+                                        .padding(4.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = if (msg.gameType == "chess") "Chess Board" else "Game",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = msg.text ?: "Tap to Play",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (msg.text?.contains("won") == true || msg.text?.contains("Draw") == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         } else {
                             Text(msg.text ?: "[${msg.type}]")
