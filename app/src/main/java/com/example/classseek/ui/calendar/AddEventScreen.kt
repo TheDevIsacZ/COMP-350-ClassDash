@@ -35,7 +35,7 @@ fun AddEventScreen(
     onBackClick: () -> Unit,
     onSaveClick: (ClassSchedule, String?) -> Unit,
     onDeleteClick: (String) -> Unit = {},
-    onSetReminder: (Event) -> Unit = {}
+    onSetReminder: (Event?) -> Unit = {}
 ) {
     var eventName by remember { mutableStateOf(editingEvent?.summary ?: "") }
     var location by remember { mutableStateOf(editingEvent?.location ?: "") }
@@ -78,10 +78,10 @@ fun AddEventScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { onSetReminder(editingEvent) }) {
+                        Icon(Icons.Default.Notifications, contentDescription = "Set Reminder")
+                    }
                     if (editingEvent != null) {
-                        IconButton(onClick = { onSetReminder(editingEvent) }) {
-                            Icon(Icons.Default.Notifications, contentDescription = "Set Reminder")
-                        }
                         IconButton(onClick = { onDeleteClick(editingEvent.id) }) {
                             Icon(Icons.Default.Delete, contentDescription = "Delete Event")
                         }

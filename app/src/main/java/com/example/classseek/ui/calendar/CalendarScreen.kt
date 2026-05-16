@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
@@ -336,14 +335,9 @@ fun CalendarScreen(
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onEditClick = { onEditEventClick(event) },
-                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -372,14 +366,9 @@ fun CalendarScreen(
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onEditClick = { onEditEventClick(event) },
-                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -444,14 +433,9 @@ fun CalendarScreen(
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onEditClick = { onEditEventClick(event) },
-                                onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -852,12 +836,11 @@ fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (In
 fun AgendaItem(
     event: Event, userProfile: UserProfile?, canDelete: Boolean = false,
     onEditClick: () -> Unit = {},
-    onDeleteClick: () -> Unit = {}, onShareClick: () -> Unit = {}, onSetReminder: (Event) -> Unit = {}
+    onShareClick: () -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
     val eventColor = Color(0xFF4285F4)
-    var showMenu by remember { mutableStateOf(false) }
     val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) ?: false
     var optimisticIsBookmarked by remember(event.id, isBookmarked) { mutableStateOf(isBookmarked) }
 
@@ -880,6 +863,11 @@ fun AgendaItem(
                         Text(event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                         if (!event.location.isNullOrEmpty()) Text(event.location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    if (canDelete) {
+                        IconButton(onClick = onEditClick) {
+                            Icon(Icons.Default.Edit, "Edit event", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                     IconButton(onClick = {
                         val uid = FirebaseAuth.getInstance().currentUser?.uid
                         if (uid != null) {
@@ -901,17 +889,8 @@ fun AgendaItem(
                             tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray
                         )
                     }
-                    IconButton(onClick = { onSetReminder(event) }) {
-                        Icon(Icons.Default.Notifications, "Set Reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                    }
                     IconButton(onClick = onShareClick) {
                         Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary)
-                    }
-
-                    if (canDelete) {
-                        IconButton(onClick = onEditClick) {
-                            Icon(Icons.Default.Edit, "Edit event", tint = MaterialTheme.colorScheme.primary)
-                        }
                     }
                 }
             }

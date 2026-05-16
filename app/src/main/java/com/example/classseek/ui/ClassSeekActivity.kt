@@ -168,6 +168,33 @@ class ClassSeekActivity : ComponentActivity() {
             intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_CHAT_TITLE)
     }
 
+    fun saveReminderToFirestore(event: Event, minutes: Int) {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            val eventTimeMillis = event.start?.dateTime?.value
+                ?: event.start?.date?.value
+                ?: System.currentTimeMillis()
+
+            val testReminderTime = System.currentTimeMillis() - 60000
+
+            val reminderData = hashMapOf(
+                "eventId" to (event.id ?: "test"),
+                "eventTitle" to (event.summary ?: "Test Event"),
+                "eventTime" to eventTimeMillis,
+                "reminderMinutes" to minutes,
+                "reminderTime" to testReminderTime,
+                "notificationSent" to false,
+            )
+
+            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .collection("reminders")
+                .document(event.id ?: "test")
+                .set(reminderData)
+        }
+    }
+
     suspend fun getCalendarEvents(account: GoogleSignInAccount): List<Event>? {
         return withContext(Dispatchers.IO) {
             try {
@@ -553,6 +580,7 @@ fun ClassSeekApp(
     
     var showReminderDialogInEditor by remember { mutableStateOf(false) }
     var eventForReminderInEditor by remember { mutableStateOf<Event?>(null) }
+    var reminderMinutesForNewEvent by remember { mutableStateOf<Int?>(null) }
     var viewOtherUserId by remember { mutableStateOf<String?>(null) }
     var otherUserProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isFriendWithOther by remember { mutableStateOf(false) }
@@ -1364,17 +1392,30 @@ fun ClassSeekApp(
             onSaveClick = { schedule, eventId ->
                 scope.launch {
                     signedInAccount?.let { account ->
-                        val success = if (eventId != null) {
-                            activity?.updateEventInCalendar(account, eventId, schedule) ?: false
+                        if (eventId != null) {
+                            val success = activity?.updateEventInCalendar(account, eventId, schedule) ?: false
+                            if (success) {
+                                val events = activity?.getCalendarEvents(account)
+                                if (events != null) calendarEvents = events
+                                editingEvent = null
+                            }
                         } else {
-                            (activity?.addEventToCalendar(account, schedule) != null)
-                        }
-                        
-                        if (success) {
-                            val events = activity?.getCalendarEvents(account)
-                            if (events != null) calendarEvents = events
-                            isAddingEvent = false
-                            editingEvent = null
+                            val newEventId = activity?.addEventToCalendar(account, schedule)
+                            if (newEventId != null) {
+                                val events = activity?.getCalendarEvents(account)
+                                if (events != null) calendarEvents = events
+                                
+                                // If a reminder was set BEFORE saving, save it now that we have an ID
+                                reminderMinutesForNewEvent?.let { minutes ->
+                                    val createdEvent = events?.find { it.id == newEventId }
+                                    if (createdEvent != null) {
+                                        activity?.saveReminderToFirestore(createdEvent, minutes)
+                                    }
+                                }
+                                
+                                isAddingEvent = false
+                                reminderMinutesForNewEvent = null
+                            }
                         }
                     }
                 }
@@ -1392,43 +1433,32 @@ fun ClassSeekApp(
                 }
             },
             onSetReminder = { event ->
-                eventForReminderInEditor = event
-                showReminderDialogInEditor = true
+                if (event != null) {
+                    eventForReminderInEditor = event
+                    showReminderDialogInEditor = true
+                } else {
+                    // This is a new event, show reminder dialog without an event object yet
+                    showReminderDialogInEditor = true
+                    eventForReminderInEditor = null
+                }
             }
         )
 
-        if (showReminderDialogInEditor && eventForReminderInEditor != null) {
+        if (showReminderDialogInEditor) {
+            val eventTitle = eventForReminderInEditor?.summary ?: "New Event"
             com.example.classseek.ui.calendar.ReminderDialog(
-                eventTitle = eventForReminderInEditor?.summary ?: "Untitled Event",
+                eventTitle = eventTitle,
                 onDismiss = {
                     showReminderDialogInEditor = false
                     eventForReminderInEditor = null
                 },
                 onSetReminder = { minutes ->
-                    val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
                     val event = eventForReminderInEditor
-                    if (uid != null && event != null) {
-                        val eventTimeMillis = event.start?.dateTime?.value
-                            ?: event.start?.date?.value
-                            ?: System.currentTimeMillis()
-
-                        val testReminderTime = System.currentTimeMillis() - 60000
-
-                        val reminderData = hashMapOf(
-                            "eventId" to (event.id ?: "test"),
-                            "eventTitle" to (event.summary ?: "Test Event"),
-                            "eventTime" to eventTimeMillis,
-                            "reminderMinutes" to minutes,
-                            "reminderTime" to testReminderTime,
-                            "notificationSent" to false,
-                        )
-
-                        com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                            .collection("users")
-                            .document(uid)
-                            .collection("reminders")
-                            .document(event.id ?: "test")
-                            .set(reminderData)
+                    if (event != null) {
+                        activity?.saveReminderToFirestore(event, minutes)
+                    } else {
+                        // Store the chosen minutes to apply AFTER the event is created
+                        reminderMinutesForNewEvent = minutes
                     }
                     showReminderDialogInEditor = false
                     eventForReminderInEditor = null
