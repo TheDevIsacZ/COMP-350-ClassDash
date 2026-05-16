@@ -10,6 +10,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import com.example.classseek.models.ClassSchedule
+import com.google.api.services.calendar.model.Event
 import java.util.*
 import java.text.SimpleDateFormat
 
@@ -28,21 +31,33 @@ import java.text.SimpleDateFormat
 @Composable
 fun AddEventScreen(
     initialDateMillis: Long? = null,
+    editingEvent: Event? = null,
     onBackClick: () -> Unit,
-    onSaveClick: (ClassSchedule) -> Unit
+    onSaveClick: (ClassSchedule, String?) -> Unit,
+    onDeleteClick: (String) -> Unit = {},
+    onSetReminder: (Event) -> Unit = {}
 ) {
-    var eventName by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var startTime by remember { mutableStateOf("09:00 AM") }
-    var endTime by remember { mutableStateOf("10:00 AM") }
-    var selectedDays by remember { mutableStateOf(setOf<Int>()) }
+    var eventName by remember { mutableStateOf(editingEvent?.summary ?: "") }
+    var location by remember { mutableStateOf(editingEvent?.location ?: "") }
+
+    val initialStartTime = editingEvent?.start?.dateTime?.let { formatTimeToPicker(it.value) } ?: "09:00 AM"
+    val initialEndTime = editingEvent?.end?.dateTime?.let { formatTimeToPicker(it.value) } ?: "10:00 AM"
+
+    var startTime by remember { mutableStateOf(initialStartTime) }
+    var endTime by remember { mutableStateOf(initialEndTime) }
+    
+    val initialDays = editingEvent?.recurrence?.firstOrNull()?.let { parseRruleDays(it) } ?: emptySet()
+    var selectedDays by remember { mutableStateOf(initialDays) }
 
     BackHandler {
         onBackClick()
     }
     
-    var startDate by remember { mutableStateOf(initialDateMillis ?: System.currentTimeMillis()) }
-    var endDate by remember { mutableStateOf(startDate + 1000L * 60 * 60 * 24 * 7) }
+    val initialStartDate = editingEvent?.start?.dateTime?.value ?: editingEvent?.start?.date?.value ?: initialDateMillis ?: System.currentTimeMillis()
+    val initialEndDate = editingEvent?.recurrence?.firstOrNull()?.let { parseRruleUntil(it) } ?: (initialStartDate + 1000L * 60 * 60 * 24 * 7)
+
+    var startDate by remember { mutableStateOf(initialStartDate) }
+    var endDate by remember { mutableStateOf(initialEndDate) }
 
     var showStartDatePicker by remember { mutableStateOf(false) }
     var showEndDatePicker by remember { mutableStateOf(false) }
@@ -56,10 +71,20 @@ fun AddEventScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("New Event") },
+                title = { Text(if (editingEvent != null) "Edit Event" else "New Event") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (editingEvent != null) {
+                        IconButton(onClick = { onSetReminder(editingEvent) }) {
+                            Icon(Icons.Default.Notifications, contentDescription = "Set Reminder")
+                        }
+                        IconButton(onClick = { onDeleteClick(editingEvent.id) }) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Event")
+                        }
                     }
                 }
             )
@@ -226,13 +251,14 @@ fun AddEventScreen(
                             location = location,
                             startDate = startDate,
                             endDate = if (selectedDays.isEmpty()) startDate else endDate
-                        )
+                        ),
+                        editingEvent?.id
                     )
                 },
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 enabled = eventName.isNotBlank()
             ) {
-                Text("Save to Calendar", style = MaterialTheme.typography.titleMedium)
+                Text(if (editingEvent != null) "Update Event" else "Save to Calendar", style = MaterialTheme.typography.titleMedium)
             }
         }
     }
@@ -394,4 +420,33 @@ fun TimePickerDialog(
 private fun formatDate(timestamp: Long): String {
     val sdf = SimpleDateFormat("EEEE, MMM dd, yyyy", Locale.getDefault())
     return sdf.format(Date(timestamp))
+}
+
+private fun formatTimeToPicker(timestamp: Long): String {
+    val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+    return sdf.format(Date(timestamp))
+}
+
+private fun parseRruleDays(rrule: String): Set<Int> {
+    val daysMap = mapOf(
+        "MO" to Calendar.MONDAY,
+        "TU" to Calendar.TUESDAY,
+        "WE" to Calendar.WEDNESDAY,
+        "TH" to Calendar.THURSDAY,
+        "FR" to Calendar.FRIDAY,
+        "SA" to Calendar.SATURDAY,
+        "SU" to Calendar.SUNDAY
+    )
+    val byDayPart = rrule.split(";").find { it.startsWith("BYDAY=") } ?: return emptySet()
+    val days = byDayPart.removePrefix("BYDAY=").split(",")
+    return days.mapNotNull { daysMap[it] }.toSet()
+}
+
+private fun parseRruleUntil(rrule: String): Long {
+    val untilPart = rrule.split(";").find { it.startsWith("UNTIL=") } ?: return System.currentTimeMillis()
+    val dateStr = untilPart.removePrefix("UNTIL=")
+    val sdf = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+    return try { sdf.parse(dateStr)?.time ?: System.currentTimeMillis() } catch (e: Exception) { System.currentTimeMillis() }
 }

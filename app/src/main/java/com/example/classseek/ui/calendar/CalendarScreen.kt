@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
@@ -105,6 +106,7 @@ fun CalendarScreen(
     userProfile: UserProfile?,
     onSignInClick: (Intent) -> Unit,
     onAddEventClick: (Long) -> Unit,
+    onEditEventClick: (Event) -> Unit,
     onDeleteEventClick: (String) -> Unit,
     chatRepository: ChatRepository,
     myUid: String
@@ -333,6 +335,7 @@ fun CalendarScreen(
                                 event = event,
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
+                                onEditClick = { onEditEventClick(event) },
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onShareClick = {
                                     selectedEventForSharing = event
@@ -368,6 +371,7 @@ fun CalendarScreen(
                                 event = event,
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
+                                onEditClick = { onEditEventClick(event) },
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onShareClick = {
                                     selectedEventForSharing = event
@@ -439,6 +443,7 @@ fun CalendarScreen(
                                 event = event,
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
+                                onEditClick = { onEditEventClick(event) },
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onShareClick = {
                                     selectedEventForSharing = event
@@ -846,6 +851,7 @@ fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (In
 @Composable
 fun AgendaItem(
     event: Event, userProfile: UserProfile?, canDelete: Boolean = false,
+    onEditClick: () -> Unit = {},
     onDeleteClick: () -> Unit = {}, onShareClick: () -> Unit = {}, onSetReminder: (Event) -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
@@ -903,11 +909,8 @@ fun AgendaItem(
                     }
 
                     if (canDelete) {
-                        Box {
-                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "More options") }
-                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDeleteClick() })
-                            }
+                        IconButton(onClick = onEditClick) {
+                            Icon(Icons.Default.Edit, "Edit event", tint = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }
