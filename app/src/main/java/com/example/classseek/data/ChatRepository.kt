@@ -10,6 +10,8 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 import java.security.MessageDigest
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 
 data class ChatListItem(
     val id: String = "",
@@ -39,7 +41,14 @@ data class Message(
     val eventLocation: String? = null,
     val eventId: String? = null,
     val gameId: String? = null,
-    val gameType: String? = null
+    val gameType: String? = null,
+    val imageUrl: String? = null,
+    val imagePath: String? = null,
+    val imageContentType: String? = null,
+    val imageSizeBytes: Long? = null,
+    val imageWidth: Int? = null,
+    val imageHeight: Int? = null
+
 )
 
 data class ReadReceiptState(
@@ -67,7 +76,8 @@ data class ChatInfo(
 )
 
 class ChatRepository(
-    private val db: FirebaseFirestore
+    private val db: FirebaseFirestore,
+    private val storage: FirebaseStorage = FirebaseStorage.getInstance()
 ) {
     private val chats = db.collection("chats")
     private val users = db.collection("users")
@@ -803,6 +813,80 @@ class ChatRepository(
         return msgRef.id
     }
 
+    suspend fun sendImageMessage(
+        chatId: String,
+        senderId: String,
+        imageBytes: ByteArray,
+        imageWidth: Int,
+        imageHeight: Int
+    ): String {
+        if (imageBytes.isEmpty()) throw Exception("Image is empty")
+
+        val msgRef = chatMessagesRef(chatId).document()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
+
+        val imagePath = "chatImages/$chatId/${msgRef.id}.jpg"
+        val storageRef = storage.reference.child(imagePath)
+
+        val metadata = StorageMetadata.Builder()
+            .setContentType("image/jpeg")
+            .setCustomMetadata("chatId", chatId)
+            .setCustomMetadata("messageId", msgRef.id)
+            .setCustomMetadata("senderId", senderId)
+            .build()
+
+        storageRef.putBytes(imageBytes, metadata).await()
+        val downloadUrl = storageRef.downloadUrl.await().toString()
+
+        val previewText = "📷 Photo"
+        val batch = db.batch()
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "image",
+                "text" to previewText,
+                "imageUrl" to downloadUrl,
+                "imagePath" to imagePath,
+                "imageContentType" to "image/jpeg",
+                "imageSizeBytes" to imageBytes.size,
+                "imageWidth" to imageWidth,
+                "imageHeight" to imageHeight,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to previewText,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to chat.type,
+                    "lastMessageText" to previewText,
+                    "lastMessageAt" to now,
+                    "hidden" to false
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
+    }
+
     suspend fun sendLocationMessage(
         chatId: String,
         senderId: String,
@@ -1019,7 +1103,14 @@ class ChatRepository(
             eventLocation = getString("eventLocation"),
             eventId = getString("eventId"),
             gameId = getString("gameId"),
-            gameType = getString("gameType")
+            gameType = getString("gameType"),
+            imageUrl = getString("imageUrl"),
+            imagePath = getString("imagePath"),
+            imageContentType = getString("imageContentType"),
+            imageSizeBytes = getLong("imageSizeBytes"),
+            imageWidth = getLong("imageWidth")?.toInt(),
+            imageHeight = getLong("imageHeight")?.toInt()
+
         )
     }
 

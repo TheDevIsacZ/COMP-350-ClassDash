@@ -81,6 +81,20 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import androidx.compose.foundation.layout.FlowRow
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Image
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import kotlin.math.max
+import kotlin.math.min
+
 data class ChatUserProfile(
     val uid: String,
     val displayName: String,
@@ -282,6 +296,49 @@ fun ChatScreen(
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
     val latestMyMessageId = myLatestMessage?.id
+
+    val context = LocalContext.current
+    var sendingImage by remember { mutableStateOf(false) }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        val uid = myUid ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+
+        sendingImage = true
+        hasSentMessageThisSession = true
+        initialScrollDone = true
+
+        scope.launch {
+            try {
+                val compressed = compressImageForChat(context, uri)
+
+                val sentMessageId = repo.sendImageMessage(
+                    chatId = chatId,
+                    senderId = uid,
+                    imageBytes = compressed.bytes,
+                    imageWidth = compressed.width,
+                    imageHeight = compressed.height
+                )
+
+                pendingScrollToMessageId = sentMessageId
+
+                try {
+                    repo.updateMyLastRead(chatId, uid, sentMessageId)
+                    myLastReadMessageId = sentMessageId
+                } catch (_: Exception) {
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = e.message ?: "Image send failed"
+                pendingScrollToMessageId = null
+            } finally {
+                sendingImage = false
+            }
+        }
+    }
 
     fun normalizedRole(role: String?): String = when (role?.trim()?.lowercase()) {
         "host", "owner" -> "owner"
@@ -987,57 +1044,7 @@ fun ChatScreen(
             dismissButton = {}
         )
     }
-    /**
-     * Currently this feature is not implemented
-     *
-    if (confirmDeleteGroup) {
-    AlertDialog(
-    onDismissRequest = {
-    if (!managingGroup) confirmDeleteGroup = false
-    },
-    title = { Text("Delete group permanently?") },
-    text = {
-    Text("This will delete the group for everyone and cannot be undone.")
-    },
-    confirmButton = {
-    TextButton(
-    enabled = !managingGroup,
-    onClick = {
-    scope.launch {
-    try {
-    managingGroup = true
-    repo.deleteGroupChatPermanently(
-    chatId = chatId,
-    actingUid = myUid ?: throw Exception("Not signed in")
-    )
-    confirmDeleteGroup = false
-    showManageDialog = false
-    onBack()
-    } catch (e: CancellationException) {
-    throw e
-    } catch (e: Exception) {
-    error = e.message ?: "Failed to delete group"
-    } finally {
-    managingGroup = false
-    }
-    }
-    }
-    ) {
-    Text("Delete")
-    }
 
-    },
-    dismissButton = {
-    TextButton(
-    enabled = !managingGroup,
-    onClick = { confirmDeleteGroup = false }
-    ) {
-    Text("Cancel")
-    }
-    }
-    )
-    }
-     */
 
     if (confirmLeaveGroup) {
         AlertDialog(
@@ -1297,7 +1304,7 @@ fun ChatScreen(
             }
 
             HorizontalDivider()
-
+//imagetext
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1528,6 +1535,15 @@ private fun MessageRow(
                                     color = if (msg.text?.contains("won") == true || msg.text?.contains("Draw") == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        } else if (msg.type == "image" && !msg.imageUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = msg.imageUrl,
+                                contentDescription = "Shared image",
+                                modifier = Modifier
+                                    .size(220.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop
+                            )
                         } else {
                             Text(msg.text ?: "[${msg.type}]")
                         }
@@ -1576,4 +1592,88 @@ private fun MessageRow(
             }
         }
     }
+}
+private data class CompressedChatImage(
+    val bytes: ByteArray,
+    val width: Int,
+    val height: Int
+)
+
+private suspend fun compressImageForChat(
+    context: Context,
+    uri: Uri,
+    maxDimension: Int = 1280,
+    quality: Int = 75,
+    maxBytes: Int = 1_500_000
+): CompressedChatImage = withContext(Dispatchers.IO) {
+    val resolver = context.contentResolver
+
+    val boundsOptions = BitmapFactory.Options().apply {
+        inJustDecodeBounds = true
+    }
+
+    resolver.openInputStream(uri)?.use { input ->
+        BitmapFactory.decodeStream(input, null, boundsOptions)
+    } ?: throw Exception("Could not open image")
+
+    if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
+        throw Exception("Invalid image")
+    }
+
+    var sampleSize = 1
+    while (
+        boundsOptions.outWidth / sampleSize > maxDimension * 2 ||
+        boundsOptions.outHeight / sampleSize > maxDimension * 2
+    ) {
+        sampleSize *= 2
+    }
+
+    val decodeOptions = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+    }
+
+    val decodedBitmap = resolver.openInputStream(uri)?.use { input ->
+        BitmapFactory.decodeStream(input, null, decodeOptions)
+    } ?: throw Exception("Could not decode image")
+
+    val largestSide = max(decodedBitmap.width, decodedBitmap.height)
+    val scale = min(1f, maxDimension.toFloat() / largestSide.toFloat())
+
+    val finalBitmap = if (scale < 1f) {
+        Bitmap.createScaledBitmap(
+            decodedBitmap,
+            (decodedBitmap.width * scale).toInt(),
+            (decodedBitmap.height * scale).toInt(),
+            true
+        )
+    } else {
+        decodedBitmap
+    }
+
+    var currentQuality = quality
+    var bytes: ByteArray
+
+    do {
+        val output = ByteArrayOutputStream()
+        output.use {
+            finalBitmap.compress(Bitmap.CompressFormat.JPEG, currentQuality, it)
+            bytes = it.toByteArray()
+        }
+        currentQuality -= 10
+    } while (bytes.size > maxBytes && currentQuality >= 45)
+
+    if (finalBitmap !== decodedBitmap) {
+        decodedBitmap.recycle()
+    }
+    finalBitmap.recycle()
+
+    if (bytes.size > maxBytes) {
+        throw Exception("Image is too large after compression")
+    }
+
+    CompressedChatImage(
+        bytes = bytes,
+        width = boundsOptions.outWidth,
+        height = boundsOptions.outHeight
+    )
 }
