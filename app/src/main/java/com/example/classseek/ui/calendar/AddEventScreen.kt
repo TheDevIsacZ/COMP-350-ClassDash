@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,6 +33,7 @@ import java.text.SimpleDateFormat
 fun AddEventScreen(
     initialDateMillis: Long? = null,
     editingEvent: Event? = null,
+    isReminderSet: Boolean = false,
     onBackClick: () -> Unit,
     onSaveClick: (ClassSchedule, String?) -> Unit,
     onDeleteClick: (String) -> Unit = {},
@@ -79,7 +81,10 @@ fun AddEventScreen(
                 },
                 actions = {
                     IconButton(onClick = { onSetReminder(editingEvent) }) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Set Reminder")
+                        Icon(
+                            imageVector = if (isReminderSet) Icons.Default.Notifications else Icons.Default.NotificationsNone,
+                            contentDescription = "Set Reminder"
+                        )
                     }
                     if (editingEvent != null) {
                         IconButton(onClick = { onDeleteClick(editingEvent.id) }) {

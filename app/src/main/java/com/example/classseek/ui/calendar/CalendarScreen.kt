@@ -103,6 +103,7 @@ fun CalendarScreen(
     signedInAccount: GoogleSignInAccount?,
     calendarEvents: List<Event>,
     userProfile: UserProfile?,
+    userReminders: Map<String, Int>,
     onSignInClick: (Intent) -> Unit,
     onAddEventClick: (Long) -> Unit,
     onEditEventClick: (Event) -> Unit,
@@ -121,7 +122,6 @@ fun CalendarScreen(
     var selectedEventForSharing by remember { mutableStateOf<Event?>(null) }
     var showReminderDialog by remember { mutableStateOf(false) }
     var selectedEventForReminder by remember { mutableStateOf<Event?>(null) }
-    var userReminders by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
 
     var hasCalendarPermission by remember {
         mutableStateOf(
@@ -143,28 +143,6 @@ fun CalendarScreen(
             .requestScopes(Scope("https://www.googleapis.com/auth/calendar"))
             .build()
         GoogleSignIn.getClient(context, gso)
-    }
-
-    LaunchedEffect(signedInAccount?.email) {
-        val uid = FirebaseAuth.getInstance().currentUser?.uid
-        if (uid != null) {
-            FirebaseFirestore.getInstance()
-                .collection("users")
-                .document(uid)
-                .collection("reminders")
-                .addSnapshotListener { snapshot, _ ->
-                    if (snapshot != null) {
-                        val reminders = mutableMapOf<String, Boolean>()
-                        snapshot.documents.forEach { doc ->
-                            val eventId = doc.getString("eventId")
-                            if (eventId != null) {
-                                reminders[eventId] = true
-                            }
-                        }
-                        userReminders = reminders
-                    }
-                }
-        }
     }
 
     if (!hasCalendarPermission) {
@@ -803,8 +781,13 @@ private fun dayKey(millis: Long): String {
 }
 
 @Composable
-fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (Int) -> Unit) {
-    var selectedMinutes by remember { mutableStateOf(15) }
+fun ReminderDialog(
+    eventTitle: String,
+    initialMinutes: Int? = null,
+    onDismiss: () -> Unit,
+    onSetReminder: (Int) -> Unit
+) {
+    var selectedMinutes by remember { mutableStateOf(initialMinutes) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Set Reminder for") },
@@ -827,7 +810,12 @@ fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (In
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onSetReminder(selectedMinutes) }) { Text("Set Reminder") } },
+        confirmButton = {
+            TextButton(
+                onClick = { selectedMinutes?.let { onSetReminder(it) } },
+                enabled = selectedMinutes != null
+            ) { Text("Set Reminder") }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }

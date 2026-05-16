@@ -587,6 +587,7 @@ fun ClassSeekApp(
     var friendRequestStatus by remember { mutableStateOf<String?>(null) } // null, "pending", "sent"
     var isEditingSchedule by remember { mutableStateOf(false) }
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
+    var userReminders by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -607,6 +608,30 @@ fun ClassSeekApp(
     var sharedLocationToView by remember { mutableStateOf<LatLng?>(null) }
     var sharedLocationNameToView by remember { mutableStateOf<String?>(null) }
     var sharedLocationByUidToView by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(firebaseUser?.uid) {
+        val uid = firebaseUser?.uid
+        if (uid != null) {
+            db.collection("users")
+                .document(uid)
+                .collection("reminders")
+                .addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null) {
+                        val reminders = mutableMapOf<String, Int>()
+                        snapshot.documents.forEach { doc ->
+                            val eventId = doc.getString("eventId")
+                            val minutes = doc.getLong("reminderMinutes")?.toInt()
+                            if (eventId != null && minutes != null) {
+                                reminders[eventId] = minutes
+                            }
+                        }
+                        userReminders = reminders
+                    }
+                }
+        } else {
+            userReminders = emptyMap()
+        }
+    }
 
     LaunchedEffect(initialChatId, initialChatTitle) {
         pendingNotificationChatId = initialChatId
@@ -1382,12 +1407,20 @@ fun ClassSeekApp(
             }
         )
     } else if (isAddingEvent || editingEvent != null) {
+        val isReminderSet = if (editingEvent != null) {
+            userReminders.containsKey(editingEvent?.id)
+        } else {
+            reminderMinutesForNewEvent != null
+        }
+
         AddEventScreen(
             initialDateMillis = initialDateForNewEvent,
             editingEvent = editingEvent,
+            isReminderSet = isReminderSet,
             onBackClick = { 
                 isAddingEvent = false
                 editingEvent = null
+                reminderMinutesForNewEvent = null
             },
             onSaveClick = { schedule, eventId ->
                 scope.launch {
@@ -1446,8 +1479,15 @@ fun ClassSeekApp(
 
         if (showReminderDialogInEditor) {
             val eventTitle = eventForReminderInEditor?.summary ?: "New Event"
+            val currentReminderMinutes = if (editingEvent != null) {
+                userReminders[editingEvent?.id]
+            } else {
+                reminderMinutesForNewEvent
+            }
+            
             com.example.classseek.ui.calendar.ReminderDialog(
                 eventTitle = eventTitle,
+                initialMinutes = currentReminderMinutes,
                 onDismiss = {
                     showReminderDialogInEditor = false
                     eventForReminderInEditor = null
@@ -1486,6 +1526,7 @@ fun ClassSeekApp(
                                 signedInAccount = signedInAccount,
                                 calendarEvents = displayedEvents,
                                 userProfile = userProfile,
+                                userReminders = userReminders,
                                 onSignInClick = { intent -> signInLauncher.launch(intent) },
                                 onAddEventClick = { dateMillis ->
                                     initialDateForNewEvent = dateMillis
