@@ -9,9 +9,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,11 +33,11 @@ import java.text.SimpleDateFormat
 fun AddEventScreen(
     initialDateMillis: Long? = null,
     editingEvent: Event? = null,
-    isReminderSet: Boolean = false,
+    reminderMinutes: Int? = null,
     onBackClick: () -> Unit,
     onSaveClick: (ClassSchedule, String?) -> Unit,
     onDeleteClick: (String) -> Unit = {},
-    onSetReminder: (Event?) -> Unit = {}
+    onSetReminder: (Int?) -> Unit = {}
 ) {
     var eventName by remember { mutableStateOf(editingEvent?.summary ?: "") }
     var location by remember { mutableStateOf(editingEvent?.location ?: "") }
@@ -67,6 +67,10 @@ fun AddEventScreen(
     var showStartTimePicker by remember { mutableStateOf(false) }
     var showEndTimePicker by remember { mutableStateOf(false) }
 
+    var showReminderOptions by remember { mutableStateOf(false) }
+    var showCustomReminderDialog by remember { mutableStateOf(false) }
+    var customMinutesText by remember { mutableStateOf("") }
+
     val days = listOf("M", "T", "W", "T", "F", "S", "S")
     val dayValues = listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY, Calendar.SUNDAY)
 
@@ -80,12 +84,6 @@ fun AddEventScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { onSetReminder(editingEvent) }) {
-                        Icon(
-                            imageVector = if (isReminderSet) Icons.Default.Notifications else Icons.Default.NotificationsNone,
-                            contentDescription = "Set Reminder"
-                        )
-                    }
                     if (editingEvent != null) {
                         IconButton(onClick = { onDeleteClick(editingEvent.id) }) {
                             Icon(Icons.Default.Delete, contentDescription = "Delete Event")
@@ -117,43 +115,6 @@ fun AddEventScreen(
                 label = { Text("Location (Optional)") },
                 modifier = Modifier.fillMaxWidth()
             )
-
-            HorizontalDivider()
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    days.forEachIndexed { index, day ->
-                        val dayValue = dayValues[index]
-                        val isSelected = selectedDays.contains(dayValue)
-                        
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable {
-                                    selectedDays = if (isSelected) {
-                                        selectedDays - dayValue
-                                    } else {
-                                        selectedDays + dayValue
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = day,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
-                }
-            }
 
             HorizontalDivider()
 
@@ -217,6 +178,43 @@ fun AddEventScreen(
                 }
             }
 
+            HorizontalDivider()
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    days.forEachIndexed { index, day ->
+                        val dayValue = dayValues[index]
+                        val isSelected = selectedDays.contains(dayValue)
+                        
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable {
+                                    selectedDays = if (isSelected) {
+                                        selectedDays - dayValue
+                                    } else {
+                                        selectedDays + dayValue
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = day,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             if (selectedDays.isNotEmpty()) {
                 OutlinedCard(
                     onClick = { showEndDatePicker = true },
@@ -234,6 +232,46 @@ fun AddEventScreen(
                         }
                     }
                 }
+            }
+
+            HorizontalDivider()
+
+            Text("Reminders", style = MaterialTheme.typography.titleSmall)
+
+            reminderMinutes?.let { minutes ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "${formatMinutes(minutes)} before",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    IconButton(onClick = { onSetReminder(null) }) {
+                        Icon(Icons.Default.Close, contentDescription = "Remove Reminder")
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showReminderOptions = true }
+                    .padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.NotificationsNone,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = "Add Notification",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodyLarge
+                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -348,6 +386,88 @@ fun AddEventScreen(
             },
             onDismiss = { showEndTimePicker = false }
         )
+    }
+
+    if (showReminderOptions) {
+        BasicAlertDialog(onDismissRequest = { showReminderOptions = false }) {
+            Surface(
+                shape = MaterialTheme.shapes.extraLarge,
+                tonalElevation = 6.dp,
+                modifier = Modifier.width(IntrinsicSize.Min)
+            ) {
+                Column(modifier = Modifier.padding(vertical = 16.dp)) {
+                    val options = listOf(5, 10, 15, 20, 30)
+                    options.forEach { minutes ->
+                        Text(
+                            text = "$minutes minutes before",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSetReminder(minutes)
+                                    showReminderOptions = false
+                                }
+                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                    Text(
+                        text = "Custom...",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showReminderOptions = false
+                                showCustomReminderDialog = true
+                            }
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+        }
+    }
+
+    if (showCustomReminderDialog) {
+        AlertDialog(
+            onDismissRequest = { showCustomReminderDialog = false },
+            title = { Text("Custom Reminder") },
+            text = {
+                Column {
+                    Text("Enter minutes before event:")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = customMinutesText,
+                        onValueChange = { if (it.all { char -> char.isDigit() }) customMinutesText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. 45") }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        customMinutesText.toIntOrNull()?.let { onSetReminder(it) }
+                        showCustomReminderDialog = false
+                        customMinutesText = ""
+                    },
+                    enabled = customMinutesText.isNotBlank()
+                ) { Text("OK") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomReminderDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+private fun formatMinutes(minutes: Int): String {
+    return when {
+        minutes == 0 -> "At time of event"
+        minutes < 60 -> "$minutes minutes"
+        minutes % 60 == 0 -> {
+            val hours = minutes / 60
+            if (hours == 1) "1 hour" else "$hours hours"
+        }
+        else -> "$minutes minutes"
     }
 }
 

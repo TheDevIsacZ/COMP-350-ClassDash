@@ -120,8 +120,6 @@ fun CalendarScreen(
     var showStarredOnly by remember { mutableStateOf(false) }
     var showChatPicker by remember { mutableStateOf(false) }
     var selectedEventForSharing by remember { mutableStateOf<Event?>(null) }
-    var showReminderDialog by remember { mutableStateOf(false) }
-    var selectedEventForReminder by remember { mutableStateOf<Event?>(null) }
 
     var hasCalendarPermission by remember {
         mutableStateOf(
@@ -573,54 +571,6 @@ fun CalendarScreen(
             }
         }
     }
-
-    if (showReminderDialog && selectedEventForReminder != null) {
-        ReminderDialog(
-            eventTitle = selectedEventForReminder?.summary ?: "Untitled Event",
-            onDismiss = {
-                showReminderDialog = false
-                selectedEventForReminder = null
-            },
-            onSetReminder = { minutes ->
-                val uid = FirebaseAuth.getInstance().currentUser?.uid
-                val event = selectedEventForReminder
-                if (uid != null && event != null) {
-                    val eventTimeMillis = event.start?.dateTime?.value
-                        ?: event.start?.date?.value
-                        ?: System.currentTimeMillis()
-
-                    // For testing: set reminder to NOW so it triggers immediately
-                    val testReminderTime = System.currentTimeMillis() - 60000  // 1 minute ago
-
-                    val reminderData = hashMapOf(
-                        "eventId" to (event.id ?: "test"),
-                        "eventTitle" to (event.summary ?: "Test Event"),
-                        "eventTime" to eventTimeMillis,
-                        "reminderMinutes" to minutes,
-                        "reminderTime" to testReminderTime,
-                        "notificationSent" to false,
-                    )
-
-                    Log.d("REMINDER_DEBUG", "Saving reminder: $reminderData")
-
-                    FirebaseFirestore.getInstance()
-                        .collection("users")
-                        .document(uid)
-                        .collection("reminders")
-                        .document(event.id ?: "test")
-                        .set(reminderData)
-                        .addOnSuccessListener {
-                            Log.d("REMINDER_DEBUG", "✅ Reminder saved successfully!")
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e("REMINDER_DEBUG", "❌ Failed to save reminder: ${e.message}", e)
-                        }
-                }
-                showReminderDialog = false
-                selectedEventForReminder = null
-            }
-        )
-    }
 }
 
 @Composable
@@ -778,46 +728,6 @@ private fun buildCalendarCells(monthCalendar: JavaCalendar): List<Long?> {
 private fun dayKey(millis: Long): String {
     val cal = JavaCalendar.getInstance().apply { timeInMillis = millis }
     return "${cal.get(JavaCalendar.YEAR)}-${cal.get(JavaCalendar.MONTH)}-${cal.get(JavaCalendar.DAY_OF_MONTH)}"
-}
-
-@Composable
-fun ReminderDialog(
-    eventTitle: String,
-    initialMinutes: Int? = null,
-    onDismiss: () -> Unit,
-    onSetReminder: (Int) -> Unit
-) {
-    var selectedMinutes by remember { mutableStateOf(initialMinutes) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Set Reminder for") },
-        text = {
-            Column {
-                Text(eventTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Remind me:", style = MaterialTheme.typography.labelLarge)
-                Spacer(modifier = Modifier.height(8.dp))
-                listOf(0 to "At time of event", 5 to "5 minutes before", 15 to "15 minutes before",
-                    30 to "30 minutes before", 60 to "1 hour before", 120 to "2 hours before", 1440 to "1 day before"
-                ).forEach { (minutes, label) ->
-                    Row(modifier = Modifier.fillMaxWidth().clickable { selectedMinutes = minutes }.padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = selectedMinutes == minutes, onClick = { selectedMinutes = minutes })
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(label, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { selectedMinutes?.let { onSetReminder(it) } },
-                enabled = selectedMinutes != null
-            ) { Text("Set Reminder") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
 }
 
 @Composable

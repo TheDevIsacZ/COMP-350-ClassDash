@@ -195,6 +195,18 @@ class ClassSeekActivity : ComponentActivity() {
         }
     }
 
+    fun deleteReminderFromFirestore(eventId: String) {
+        val uid = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .collection("reminders")
+                .document(eventId)
+                .delete()
+        }
+    }
+
     suspend fun getCalendarEvents(account: GoogleSignInAccount): List<Event>? {
         return withContext(Dispatchers.IO) {
             try {
@@ -251,7 +263,7 @@ class ClassSeekActivity : ComponentActivity() {
     suspend fun addEventToCalendar(
         account: GoogleSignInAccount,
         schedule: ClassSchedule
-    ): String? {
+    ): Event? {
         return withContext(Dispatchers.IO) {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
@@ -310,7 +322,7 @@ class ClassSeekActivity : ComponentActivity() {
 
                 val createdEvent = service.events().insert("primary", event).execute()
                 Log.d("CALENDAR_DEBUG", "Event created successfully: ${createdEvent.htmlLink}")
-                createdEvent.id
+                createdEvent
             } catch (e: Exception) {
                 Log.e("CALENDAR_DEBUG", "addEventToCalendar: ERROR", e)
                 null
@@ -578,15 +590,13 @@ fun ClassSeekApp(
     var editingEvent by remember { mutableStateOf<Event?>(null) }
     var isEditingProfile by remember { mutableStateOf(false) }
     
-    var showReminderDialogInEditor by remember { mutableStateOf(false) }
-    var eventForReminderInEditor by remember { mutableStateOf<Event?>(null) }
-    var reminderMinutesForNewEvent by remember { mutableStateOf<Int?>(null) }
     var viewOtherUserId by remember { mutableStateOf<String?>(null) }
     var otherUserProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isFriendWithOther by remember { mutableStateOf(false) }
     var friendRequestStatus by remember { mutableStateOf<String?>(null) } // null, "pending", "sent"
     var isEditingSchedule by remember { mutableStateOf(false) }
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
+    var reminderMinutesForNewEvent by remember { mutableStateOf<Int?>(null) }
     var userReminders by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     val scope = rememberCoroutineScope()
@@ -1407,16 +1417,10 @@ fun ClassSeekApp(
             }
         )
     } else if (isAddingEvent || editingEvent != null) {
-        val isReminderSet = if (editingEvent != null) {
-            userReminders.containsKey(editingEvent?.id)
-        } else {
-            reminderMinutesForNewEvent != null
-        }
-
         AddEventScreen(
             initialDateMillis = initialDateForNewEvent,
             editingEvent = editingEvent,
-            isReminderSet = isReminderSet,
+            reminderMinutes = if (editingEvent != null) userReminders[editingEvent?.id] else reminderMinutesForNewEvent,
             onBackClick = { 
                 isAddingEvent = false
                 editingEvent = null
@@ -1433,17 +1437,14 @@ fun ClassSeekApp(
                                 editingEvent = null
                             }
                         } else {
-                            val newEventId = activity?.addEventToCalendar(account, schedule)
-                            if (newEventId != null) {
+                            val createdEvent = activity?.addEventToCalendar(account, schedule)
+                            if (createdEvent != null) {
                                 val events = activity?.getCalendarEvents(account)
                                 if (events != null) calendarEvents = events
                                 
                                 // If a reminder was set BEFORE saving, save it now that we have an ID
                                 reminderMinutesForNewEvent?.let { minutes ->
-                                    val createdEvent = events?.find { it.id == newEventId }
-                                    if (createdEvent != null) {
-                                        activity?.saveReminderToFirestore(createdEvent, minutes)
-                                    }
+                                    activity?.saveReminderToFirestore(createdEvent, minutes)
                                 }
                                 
                                 isAddingEvent = false
@@ -1465,46 +1466,18 @@ fun ClassSeekApp(
                     }
                 }
             },
-            onSetReminder = { event ->
-                if (event != null) {
-                    eventForReminderInEditor = event
-                    showReminderDialogInEditor = true
+            onSetReminder = { minutes ->
+                if (editingEvent != null) {
+                    if (minutes != null) {
+                        activity?.saveReminderToFirestore(editingEvent!!, minutes)
+                    } else {
+                        activity?.deleteReminderFromFirestore(editingEvent!!.id)
+                    }
                 } else {
-                    // This is a new event, show reminder dialog without an event object yet
-                    showReminderDialogInEditor = true
-                    eventForReminderInEditor = null
+                    reminderMinutesForNewEvent = minutes
                 }
             }
         )
-
-        if (showReminderDialogInEditor) {
-            val eventTitle = eventForReminderInEditor?.summary ?: "New Event"
-            val currentReminderMinutes = if (editingEvent != null) {
-                userReminders[editingEvent?.id]
-            } else {
-                reminderMinutesForNewEvent
-            }
-            
-            com.example.classseek.ui.calendar.ReminderDialog(
-                eventTitle = eventTitle,
-                initialMinutes = currentReminderMinutes,
-                onDismiss = {
-                    showReminderDialogInEditor = false
-                    eventForReminderInEditor = null
-                },
-                onSetReminder = { minutes ->
-                    val event = eventForReminderInEditor
-                    if (event != null) {
-                        activity?.saveReminderToFirestore(event, minutes)
-                    } else {
-                        // Store the chosen minutes to apply AFTER the event is created
-                        reminderMinutesForNewEvent = minutes
-                    }
-                    showReminderDialogInEditor = false
-                    eventForReminderInEditor = null
-                }
-            )
-        }
     } else {
         NavigationSuiteScaffold(
             navigationSuiteItems = {
