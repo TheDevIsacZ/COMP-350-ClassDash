@@ -622,15 +622,24 @@ fun CalendarScreen(
                         ?: event.start?.date?.value
                         ?: System.currentTimeMillis()
 
-                    // For testing: set reminder to NOW so it triggers immediately
-                    val testReminderTime = System.currentTimeMillis() - 60000  // 1 minute ago
+                    // Format the event time for notification
+                    val eventDate = Date(eventTimeMillis)
+                    val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
+                    val dateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                    val formattedTime = timeFormatter.format(eventDate)
+                    val formattedDate = dateFormatter.format(eventDate)
+
+                    // Calculate reminder time (when to send the notification)
+                    val reminderTimeInMillis = eventTimeMillis - (minutes * 60 * 1000L)
 
                     val reminderData = hashMapOf(
                         "eventId" to (event.id ?: "test"),
                         "eventTitle" to (event.summary ?: "Test Event"),
                         "eventTime" to eventTimeMillis,
+                        "eventTimeFormatted" to formattedTime,  
+                        "eventDateFormatted" to formattedDate,  
                         "reminderMinutes" to minutes,
-                        "reminderTime" to testReminderTime,
+                        "reminderTime" to reminderTimeInMillis,
                         "notificationSent" to false,
                     )
 
@@ -644,6 +653,7 @@ fun CalendarScreen(
                         .set(reminderData)
                         .addOnSuccessListener {
                             Log.d("REMINDER_DEBUG", "✅ Reminder saved successfully!")
+                            // Show a toast or snackbar to confirm
                         }
                         .addOnFailureListener { e ->
                             Log.e("REMINDER_DEBUG", "❌ Failed to save reminder: ${e.message}", e)
