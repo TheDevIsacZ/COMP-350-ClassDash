@@ -1,43 +1,54 @@
 package com.example.classseek.ui.chat
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Casino
-import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.VideogameAsset
-import com.example.classseek.ui.chat.games.ChessGameOverlay
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Map
-import com.google.firebase.firestore.FieldValue
-import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -60,8 +71,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -71,15 +86,21 @@ import com.example.classseek.data.ChatInfo
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.data.GroupMember
 import com.example.classseek.data.Message
+import com.example.classseek.ui.chat.games.ChessGameOverlay
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.android.awaitFrame
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import androidx.compose.foundation.layout.FlowRow
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import kotlin.math.max
+import kotlin.math.min
 
 data class ChatUserProfile(
     val uid: String,
@@ -122,66 +143,95 @@ private fun ProfileAvatar(
     }
 }
 
+@Composable
+private fun GroupAvatar(
+    imageUrl: String,
+    title: String,
+    modifier: Modifier = Modifier
+) {
+    if (imageUrl.isNotBlank()) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = "$title group picture",
+            modifier = modifier
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Surface(
+            modifier = modifier.clip(CircleShape),
+            shape = CircleShape,
+            color = ChatHeaderAccent.copy(alpha = 0.14f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = title.trim().take(1).ifBlank { "G" }.uppercase(),
+                    color = ChatHeaderAccent,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun GroupChatHeader(
     title: String,
+    profilePictureUrl: String,
     onBack: () -> Unit,
     onManage: () -> Unit
 ) {
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-            actionIconContentColor = MaterialTheme.colorScheme.onSurface
-        ),
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Surface(
-                    modifier = Modifier.size(34.dp),
-                    shape = CircleShape,
-                    color = ChatHeaderAccent.copy(alpha = 0.14f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = title.trim().take(1).ifBlank { "G" }.uppercase(),
-                            color = ChatHeaderAccent,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TopAppBar(
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                actionIconContentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    GroupAvatar(
+                        imageUrl = profilePictureUrl,
+                        title = title,
+                        modifier = Modifier.size(32.dp)
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
-                )
+            },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
+                        contentDescription = "Back",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            },
+            actions = {
+                IconButton(onClick = onManage) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More options"
+                    )
+                }
             }
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
-                    contentDescription = "Back",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        },
-        actions = {
-            IconButton(onClick = onManage) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "More options"
-                )
-            }
-        }
-    )
-    HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+        )
+
+        HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+    }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -191,39 +241,45 @@ private fun DirectMessageHeader(
     profilePictureUrl: String,
     onBack: () -> Unit
 ) {
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            navigationIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-        ),
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ProfileAvatar(
-                    imageUrl = profilePictureUrl,
-                    label = title,
-                    modifier = Modifier.size(34.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
-                )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TopAppBar(
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                navigationIconContentColor = ChatHeaderAccent,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ProfileAvatar(
+                        imageUrl = profilePictureUrl,
+                        label = title,
+                        modifier = Modifier.size(32.dp)
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
+                        contentDescription = "Back",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
-                    contentDescription = "Back",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    )
-    HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+        )
+
+        HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+    }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -241,6 +297,7 @@ fun ChatScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     val db = remember { FirebaseFirestore.getInstance() }
     val myUid = auth.currentUser?.uid
+    val context = LocalContext.current
 
     val messages = remember(chatId) { mutableStateListOf<Message>() }
     val listState = rememberLazyListState()
@@ -248,6 +305,7 @@ fun ChatScreen(
     var input by remember(chatId) { mutableStateOf("") }
     var error by remember(chatId) { mutableStateOf<String?>(null) }
     var sending by remember(chatId) { mutableStateOf(false) }
+    var sendingImage by remember(chatId) { mutableStateOf(false) }
 
     var initialReadMarked by remember(chatId) { mutableStateOf(false) }
     var initialScrollDone by remember(chatId) { mutableStateOf(false) }
@@ -272,7 +330,7 @@ fun ChatScreen(
     var memberSearchQuery by remember(chatId) { mutableStateOf("") }
     val memberSearchResults = remember(chatId) { mutableStateListOf<ChatUserProfile>() }
     var managingGroup by remember(chatId) { mutableStateOf(false) }
-    var confirmDeleteGroup by remember(chatId) { mutableStateOf(false) }
+    var updatingGroupIcon by remember(chatId) { mutableStateOf(false) }
     var confirmLeaveGroup by remember(chatId) { mutableStateOf(false) }
     var transferToUid by remember(chatId) { mutableStateOf<String?>(null) }
 
@@ -283,6 +341,120 @@ fun ChatScreen(
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
     val latestMyMessageId = myLatestMessage?.id
 
+    suspend fun refreshGroupMeta() {
+        val uid = myUid ?: return
+        val info = repo.getChatInfo(chatId)
+        chatInfo = info
+        myRole = repo.getMyRole(chatId, uid)
+
+        if (info.type == "group") {
+            groupMembers = repo.getGroupMembers(chatId)
+        } else {
+            repo.refreshDmInboxMetadata(chatId)
+            groupMembers = emptyList()
+        }
+    }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = PickVisualMedia()
+    ) { uri: Uri? ->
+        val uid = myUid ?: return@rememberLauncherForActivityResult
+
+        if (uri == null) {
+            return@rememberLauncherForActivityResult
+        }
+
+        sendingImage = true
+        hasSentMessageThisSession = true
+        initialScrollDone = true
+        error = null
+
+        scope.launch {
+            try {
+                Log.d("CHAT_IMAGE_DEBUG", "Picked image Uri: $uri")
+                Log.d("CHAT_IMAGE_DEBUG", "Uri scheme: ${uri.scheme}")
+                Log.d("CHAT_IMAGE_DEBUG", "Uri type: ${context.contentResolver.getType(uri)}")
+
+                val compressed = compressImageForChat(context, uri)
+
+                Log.d("CHAT_IMAGE_DEBUG", "Compressed image size: ${compressed.bytes.size}")
+                Log.d("CHAT_IMAGE_DEBUG", "Compressed image width: ${compressed.width}")
+                Log.d("CHAT_IMAGE_DEBUG", "Compressed image height: ${compressed.height}")
+
+                val sentMessageId = repo.sendImageMessage(
+                    chatId = chatId,
+                    senderId = uid,
+                    imageBytes = compressed.bytes,
+                    imageWidth = compressed.width,
+                    imageHeight = compressed.height
+                )
+
+                pendingScrollToMessageId = sentMessageId
+
+                try {
+                    repo.updateMyLastRead(chatId, uid, sentMessageId)
+                    myLastReadMessageId = sentMessageId
+                } catch (_: Exception) {
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("CHAT_IMAGE_DEBUG", "Image send failed", e)
+                error = e.message ?: "Image send failed"
+                pendingScrollToMessageId = null
+            } finally {
+                sendingImage = false
+            }
+        }
+    }
+
+    val groupIconPickerLauncher = rememberLauncherForActivityResult(
+        contract = PickVisualMedia()
+    ) { uri: Uri? ->
+        val uid = myUid ?: return@rememberLauncherForActivityResult
+
+        if (uri == null) {
+            return@rememberLauncherForActivityResult
+        }
+
+        updatingGroupIcon = true
+        managingGroup = true
+        error = null
+
+        scope.launch {
+            try {
+                Log.d("GROUP_ICON_DEBUG", "Picked group icon Uri: $uri")
+
+                val compressed = compressImageForChat(
+                    context = context,
+                    uri = uri,
+                    maxDimension = 640,
+                    quality = 80,
+                    maxBytes = 600_000
+                )
+
+                val updatedUrl = repo.updateGroupChatIcon(
+                    chatId = chatId,
+                    actingUid = uid,
+                    imageBytes = compressed.bytes,
+                    imageWidth = compressed.width,
+                    imageHeight = compressed.height
+                )
+
+                chatInfo = chatInfo?.copy(profilePictureUrl = updatedUrl)
+                refreshGroupMeta()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("GROUP_ICON_DEBUG", "Group image update failed", e)
+                error = e.message ?: "Group image update failed"
+            } finally {
+                updatingGroupIcon = false
+                managingGroup = false
+            }
+        }
+    }
+
     fun normalizedRole(role: String?): String = when (role?.trim()?.lowercase()) {
         "host", "owner" -> "owner"
         "cohost" -> "cohost"
@@ -290,12 +462,14 @@ fun ChatScreen(
     }
 
     fun isGroupChat(): Boolean = chatInfo?.type == "group"
+
     fun canManageMembers(): Boolean {
         val role = normalizedRole(myRole)
         return role == "owner" || role == "cohost"
     }
+
     fun canEditRoles(): Boolean = normalizedRole(myRole) == "owner"
-    fun canDeleteGroup(): Boolean = normalizedRole(myRole) == "owner"
+
     fun canRemoveMember(member: GroupMember): Boolean {
         val myRoleNorm = normalizedRole(myRole)
         val memberRoleNorm = normalizedRole(member.role)
@@ -333,13 +507,16 @@ fun ChatScreen(
     val directMessagePartnerUid = remember(chatInfo?.memberIds, myUid) {
         chatInfo?.memberIds?.firstOrNull { it != myUid }
     }
+
     val directMessagePartnerProfile = directMessagePartnerUid?.let { userProfiles[it] }
+
     val directMessageTitle = directMessagePartnerProfile?.displayName
         ?.takeIf { it.isNotBlank() }
         ?: directMessagePartnerProfile?.email
             ?.substringBefore("@")
             ?.takeIf { it.isNotBlank() }
         ?: title
+
     val directMessageAvatarUrl = directMessagePartnerProfile?.profilePictureUrl.orEmpty()
 
     val latestSeen = remember(
@@ -390,19 +567,6 @@ fun ChatScreen(
                 }
             } catch (_: Exception) {
             }
-        }
-    }
-
-    suspend fun refreshGroupMeta() {
-        val uid = myUid ?: return
-        val info = repo.getChatInfo(chatId)
-        chatInfo = info
-        myRole = repo.getMyRole(chatId, uid)
-        if (info.type == "group") {
-            groupMembers = repo.getGroupMembers(chatId)
-        } else {
-            repo.refreshDmInboxMetadata(chatId)
-            groupMembers = emptyList()
         }
     }
 
@@ -472,6 +636,7 @@ fun ChatScreen(
         }
 
         lifecycleOwner.lifecycle.addObserver(observer)
+
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
@@ -513,6 +678,7 @@ fun ChatScreen(
         }
 
         val query = memberSearchQuery.trim()
+
         if (query.isBlank()) {
             memberSearchResults.clear()
             return@LaunchedEffect
@@ -580,6 +746,7 @@ fun ChatScreen(
                 val idx = messages.indexOfFirst { it.id == myLastReadMessageId }
                 if (idx >= 0) (idx - 1).coerceAtLeast(0) else 0
             }
+
             else -> 0
         }
 
@@ -623,7 +790,9 @@ fun ChatScreen(
             }
         )
 
-        onDispose { messagesReg.remove() }
+        onDispose {
+            messagesReg.remove()
+        }
     }
 
     DisposableEffect(chatId) {
@@ -645,11 +814,18 @@ fun ChatScreen(
                     createdBy = doc.getString("createdBy") ?: "",
                     memberIds = (doc.get("memberIds") as? List<*>)
                         ?.filterIsInstance<String>()
+                        .orEmpty(),
+                    profilePictureUrl = doc.getString("photoURL")
+                        ?.trim()
                         .orEmpty()
+                        .ifBlank { doc.getString("profilePictureUrl")?.trim().orEmpty() }
+                        .ifBlank { doc.getString("groupImageUrl")?.trim().orEmpty() }
                 )
             }
 
-        onDispose { reg.remove() }
+        onDispose {
+            reg.remove()
+        }
     }
 
     DisposableEffect(chatId, myUid, showManageDialog) {
@@ -668,6 +844,7 @@ fun ChatScreen(
                     val docs = snapshot?.documents.orEmpty()
 
                     memberLastReadByUid.clear()
+
                     for (doc in docs) {
                         memberLastReadByUid[doc.id] = doc.getString("lastReadMessageId")
                     }
@@ -692,7 +869,9 @@ fun ChatScreen(
                     }
                 }
 
-            onDispose { reg.remove() }
+            onDispose {
+                reg.remove()
+            }
         }
     }
 
@@ -705,14 +884,72 @@ fun ChatScreen(
                     memberSearchResults.clear()
                 }
             },
-            title = { Text("Manage Group") },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Manage Group")
+
+                        if (updatingGroupIcon) {
+                            Text(
+                                text = "Uploading group image...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        enabled = myUid != null && canManageMembers() && !managingGroup && !updatingGroupIcon,
+                        onClick = {
+                            groupIconPickerLauncher.launch(
+                                PickVisualMediaRequest(PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit group image"
+                        )
+                    }
+                }
+            },
             text = {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     item("group_manage_header") {
                         Column {
-                            Text("Your role: ${myRole ?: "member"}")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                GroupAvatar(
+                                    imageUrl = chatInfo?.profilePictureUrl.orEmpty(),
+                                    title = chatInfo?.title ?: title,
+                                    modifier = Modifier.size(52.dp)
+                                )
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = chatInfo?.title ?: title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+
+                                    Text(
+                                        text = "Your role: ${myRole ?: "member"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
 
                             if (canManageMembers()) {
                                 Spacer(Modifier.height(8.dp))
@@ -760,6 +997,7 @@ fun ChatScreen(
                                                                 text = candidate.displayName.ifBlank { candidate.email },
                                                                 style = MaterialTheme.typography.bodyMedium
                                                             )
+
                                                             if (candidate.displayName.isNotBlank()) {
                                                                 Text(
                                                                     text = candidate.email,
@@ -774,6 +1012,7 @@ fun ChatScreen(
                                                                 scope.launch {
                                                                     try {
                                                                         managingGroup = true
+
                                                                         repo.addGroupMember(
                                                                             chatId = chatId,
                                                                             actingUid = myUid ?: throw Exception("Not signed in"),
@@ -827,12 +1066,14 @@ fun ChatScreen(
 
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(label)
+
                                     if (member.email.isNotBlank()) {
                                         Text(
                                             member.email,
                                             style = MaterialTheme.typography.bodySmall
                                         )
                                     }
+
                                     Text(
                                         "Role: ${member.role}",
                                         style = MaterialTheme.typography.bodySmall
@@ -853,12 +1094,14 @@ fun ChatScreen(
                                             scope.launch {
                                                 try {
                                                     managingGroup = true
+
                                                     repo.updateGroupMemberRole(
                                                         chatId = chatId,
                                                         actingUid = myUid ?: throw Exception("Not signed in"),
                                                         targetUid = member.uid,
                                                         newRole = "cohost"
                                                     )
+
                                                     refreshGroupMeta()
                                                 } catch (e: CancellationException) {
                                                     throw e
@@ -879,12 +1122,14 @@ fun ChatScreen(
                                             scope.launch {
                                                 try {
                                                     managingGroup = true
+
                                                     repo.updateGroupMemberRole(
                                                         chatId = chatId,
                                                         actingUid = myUid ?: throw Exception("Not signed in"),
                                                         targetUid = member.uid,
                                                         newRole = "member"
                                                     )
+
                                                     refreshGroupMeta()
                                                 } catch (e: CancellationException) {
                                                     throw e
@@ -916,11 +1161,13 @@ fun ChatScreen(
                                             scope.launch {
                                                 try {
                                                     managingGroup = true
+
                                                     repo.removeGroupMember(
                                                         chatId = chatId,
                                                         actingUid = myUid ?: throw Exception("Not signed in"),
                                                         targetUid = member.uid
                                                     )
+
                                                     refreshGroupMeta()
                                                 } catch (e: CancellationException) {
                                                     throw e
@@ -936,16 +1183,12 @@ fun ChatScreen(
                                     }
                                 }
                             }
-
-                            //dividers to make space for the Delete group chat functionality - currently removed since it is not implemented
-
-                            // Spacer(Modifier.height(8.dp))
-                            // HorizontalDivider()
                         }
                     }
 
                     item("leave_group_section") {
                         Spacer(Modifier.height(12.dp))
+
                         Button(
                             enabled = !managingGroup,
                             modifier = Modifier.fillMaxWidth(),
@@ -954,22 +1197,6 @@ fun ChatScreen(
                             Text("Leave Group")
                         }
                     }
-
-                    /**
-                     * Currently this feature is not implemented
-                     *
-                    if (canDeleteGroup()) {
-                    item("delete_group_section") {
-                    Spacer(Modifier.height(12.dp))
-                    Button(
-                    enabled = !managingGroup,
-                    onClick = { confirmDeleteGroup = true }
-                    ) {
-                    Text("Delete Group Permanently")
-                    }
-                    }
-                    }
-                     */
                 }
             },
             confirmButton = {
@@ -987,57 +1214,6 @@ fun ChatScreen(
             dismissButton = {}
         )
     }
-    /**
-     * Currently this feature is not implemented
-     *
-    if (confirmDeleteGroup) {
-    AlertDialog(
-    onDismissRequest = {
-    if (!managingGroup) confirmDeleteGroup = false
-    },
-    title = { Text("Delete group permanently?") },
-    text = {
-    Text("This will delete the group for everyone and cannot be undone.")
-    },
-    confirmButton = {
-    TextButton(
-    enabled = !managingGroup,
-    onClick = {
-    scope.launch {
-    try {
-    managingGroup = true
-    repo.deleteGroupChatPermanently(
-    chatId = chatId,
-    actingUid = myUid ?: throw Exception("Not signed in")
-    )
-    confirmDeleteGroup = false
-    showManageDialog = false
-    onBack()
-    } catch (e: CancellationException) {
-    throw e
-    } catch (e: Exception) {
-    error = e.message ?: "Failed to delete group"
-    } finally {
-    managingGroup = false
-    }
-    }
-    }
-    ) {
-    Text("Delete")
-    }
-
-    },
-    dismissButton = {
-    TextButton(
-    enabled = !managingGroup,
-    onClick = { confirmDeleteGroup = false }
-    ) {
-    Text("Cancel")
-    }
-    }
-    )
-    }
-     */
 
     if (confirmLeaveGroup) {
         AlertDialog(
@@ -1060,10 +1236,12 @@ fun ChatScreen(
                             scope.launch {
                                 try {
                                     managingGroup = true
+
                                     repo.leaveGroupChat(
                                         chatId = chatId,
                                         myUid = myUid ?: throw Exception("Not signed in")
                                     )
+
                                     confirmLeaveGroup = false
                                     showManageDialog = false
                                     onBack()
@@ -1111,11 +1289,13 @@ fun ChatScreen(
                         scope.launch {
                             try {
                                 managingGroup = true
+
                                 repo.transferOwnership(
                                     chatId = chatId,
                                     actingUid = myUid ?: throw Exception("Not signed in"),
                                     newOwnerUid = transferToUid!!
                                 )
+
                                 transferToUid = null
                                 refreshGroupMeta()
                             } catch (e: CancellationException) {
@@ -1150,9 +1330,15 @@ fun ChatScreen(
                 Column {
                     ListItem(
                         headlineContent = { Text("Chess") },
-                        leadingContent = { Icon(Icons.Default.Casino, contentDescription = null) },
+                        leadingContent = {
+                            Icon(
+                                Icons.Default.Casino,
+                                contentDescription = null
+                            )
+                        },
                         modifier = Modifier.clickable {
                             showGameSelection = false
+
                             val opponentId = if (isGroupChat()) {
                                 groupMembers.firstOrNull { it.uid != myUid }?.uid ?: ""
                             } else {
@@ -1163,9 +1349,17 @@ fun ChatScreen(
                                 scope.launch {
                                     try {
                                         sending = true
-                                        // Standard Chess starting position (Full FEN)
-                                        val initialFen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-                                        repo.sendGameMessage(chatId, myUid, "chess", initialFen, opponentId)
+
+                                        val initialFen =
+                                            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+
+                                        repo.sendGameMessage(
+                                            chatId = chatId,
+                                            senderId = myUid,
+                                            gameType = "chess",
+                                            initialState = initialFen,
+                                            opponentId = opponentId
+                                        )
                                     } catch (e: Exception) {
                                         error = e.message ?: "Failed to start game"
                                     } finally {
@@ -1187,7 +1381,8 @@ fun ChatScreen(
     }
 
     if (activeGameId != null && myUid != null) {
-        android.util.Log.d("ChatScreen", "Rendering ChessGameOverlay for: $activeGameId")
+        Log.d("ChatScreen", "Rendering ChessGameOverlay for: $activeGameId")
+
         ChessGameOverlay(
             chatId = chatId,
             gameId = activeGameId!!,
@@ -1198,17 +1393,13 @@ fun ChatScreen(
     }
 
     Scaffold(
-        modifier = modifier.fillMaxSize()
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .imePadding()
-        ) {
+        modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
             if (isGroupChat()) {
                 GroupChatHeader(
                     title = chatInfo?.title ?: title,
+                    profilePictureUrl = chatInfo?.profilePictureUrl.orEmpty(),
                     onBack = onBack,
                     onManage = { showManageDialog = true }
                 )
@@ -1219,11 +1410,72 @@ fun ChatScreen(
                     onBack = onBack
                 )
             }
+        },
+        bottomBar = {
+            ChatMessageInputBar(
+                input = input,
+                onInputChange = { input = it },
+                enabled = myUid != null && !sending && !sendingImage,
+                canSend = myUid != null &&
+                        input.trim().isNotEmpty() &&
+                        !sending &&
+                        !sendingImage,
+                sending = sending,
+                sendingImage = sendingImage,
+                onGameClick = { showGameSelection = true },
+                onImageClick = {
+                    imagePickerLauncher.launch(
+                        PickVisualMediaRequest(PickVisualMedia.ImageOnly)
+                    )
+                },
+                onSendClick = {
+                    val uid = myUid ?: return@ChatMessageInputBar
+                    val text = input.trim()
 
+                    sending = true
+                    hasSentMessageThisSession = true
+                    initialScrollDone = true
+
+                    scope.launch {
+                        try {
+                            val sentMessageId = repo.sendTextMessage(
+                                chatId = chatId,
+                                senderId = uid,
+                                text = text
+                            )
+
+                            pendingScrollToMessageId = sentMessageId
+
+                            try {
+                                repo.updateMyLastRead(chatId, uid, sentMessageId)
+                                myLastReadMessageId = sentMessageId
+                            } catch (_: Exception) {
+                            }
+
+                            input = ""
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = e.message ?: "Send failed"
+                            pendingScrollToMessageId = null
+                        } finally {
+                            sending = false
+                        }
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+        ) {
             if (error != null) {
                 Text(
                     text = "Error: $error",
-                    modifier = Modifier.padding(12.dp)
+                    modifier = Modifier.padding(12.dp),
+                    color = MaterialTheme.colorScheme.error
                 )
             }
 
@@ -1235,13 +1487,13 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(top = 16.dp, bottom = 72.dp)
+                contentPadding = PaddingValues(top = 12.dp, bottom = 10.dp)
             ) {
                 items(
                     items = messages,
                     key = { it.id }
                 ) { msg ->
-                    val isMine = (myUid != null && msg.senderId == myUid)
+                    val isMine = myUid != null && msg.senderId == myUid
 
                     val seenByProfiles = memberLastReadByUid
                         .filter { (uid, lastReadId) ->
@@ -1255,7 +1507,7 @@ fun ChatScreen(
                         msg = msg,
                         isMine = isMine,
                         senderLabel = if (isMine) "You" else userLabel(msg.senderId),
-                        senderAvatarUrl = if (isMine) "" else (userProfiles[msg.senderId]?.profilePictureUrl ?: ""),
+                        senderAvatarUrl = if (isMine) "" else userProfiles[msg.senderId]?.profilePictureUrl.orEmpty(),
                         showReceipt = msg.id == latestMyMessageId,
                         receiptText = if (msg.id == latestMyMessageId) {
                             when {
@@ -1279,34 +1531,66 @@ fun ChatScreen(
                                     "savedAt" to FieldValue.serverTimestamp()
                                 )
 
-                                db.collection("users").document(myUid)
+                                db.collection("users")
+                                    .document(myUid)
                                     .collection("sharedEvents")
                                     .document(eventMsg.eventId)
                                     .set(eventData)
 
-                                db.collection("users").document(myUid)
-                                    .update("bookmarkedEventIds", FieldValue.arrayUnion(eventMsg.eventId))
+                                db.collection("users")
+                                    .document(myUid)
+                                    .update(
+                                        "bookmarkedEventIds",
+                                        FieldValue.arrayUnion(eventMsg.eventId)
+                                    )
                             }
                         },
                         onGameClick = { gameId ->
-                            android.util.Log.d("ChatScreen", "Game clicked: $gameId")
+                            Log.d("ChatScreen", "Game clicked: $gameId")
                             activeGameId = gameId
                         }
                     )
                 }
             }
+        }
+    }
+}
 
-            HorizontalDivider()
+@Composable
+private fun ChatMessageInputBar(
+    input: String,
+    onInputChange: (String) -> Unit,
+    enabled: Boolean,
+    canSend: Boolean,
+    sending: Boolean,
+    sendingImage: Boolean,
+    onGameClick: () -> Unit,
+    onImageClick: () -> Unit,
+    onSendClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
+            HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.Bottom
             ) {
                 IconButton(
-                    onClick = { showGameSelection = true },
-                    enabled = myUid != null && !sending
+                    onClick = onGameClick,
+                    enabled = enabled,
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
@@ -1316,79 +1600,69 @@ fun ChatScreen(
                 }
 
                 OutlinedTextField(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
                     value = input,
-                    onValueChange = { input = it },
-                    label = { Text("Message") },
+                    onValueChange = onInputChange,
+                    placeholder = { Text("Message") },
                     singleLine = false,
-                    enabled = myUid != null && !sending,
+                    enabled = enabled,
                     minLines = 1,
-                    maxLines = 20
+                    maxLines = 5,
+                    shape = RoundedCornerShape(24.dp),
+                    trailingIcon = {
+                        IconButton(
+                            enabled = enabled,
+                            onClick = onImageClick
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Image,
+                                contentDescription = "Send image"
+                            )
+                        }
+                    }
                 )
 
                 Spacer(Modifier.width(8.dp))
 
                 Button(
-                    enabled = myUid != null && input.trim().isNotEmpty() && !sending,
-                    onClick = {
-                        val uid = myUid ?: return@Button
-                        val text = input.trim()
-
-                        sending = true
-                        hasSentMessageThisSession = true
-                        initialScrollDone = true
-
-                        scope.launch {
-                            try {
-                                val sentMessageId = repo.sendTextMessage(
-                                    chatId = chatId,
-                                    senderId = uid,
-                                    text = text
-                                )
-
-                                pendingScrollToMessageId = sentMessageId
-
-                                try {
-                                    repo.updateMyLastRead(chatId, uid, sentMessageId)
-                                    myLastReadMessageId = sentMessageId
-                                } catch (_: Exception) {
-                                }
-
-                                input = ""
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                error = e.message ?: "Send failed"
-                                pendingScrollToMessageId = null
-                            } finally {
-                                sending = false
-                            }
-                        }
-                    }
+                    enabled = canSend,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    onClick = onSendClick
                 ) {
-                    Text(if (sending) "Sending…" else "Send")
+                    Text(
+                        when {
+                            sending -> "Sending…"
+                            sendingImage -> "Uploading…"
+                            else -> "Send"
+                        },
+                        maxLines = 1
+                    )
                 }
             }
         }
     }
 }
 
-/**
- * Custom-drawn Chess Board icon for the chat bubble.
- * Matches the classic wooden theme used on the actual board.
- */
 @Composable
 private fun ChessBoardIcon(modifier: Modifier = Modifier) {
-    androidx.compose.foundation.Canvas(modifier = modifier) {
+    Canvas(modifier = modifier) {
         val squareSize = size.width / 8
+
         for (row in 0 until 8) {
             for (col in 0 until 8) {
-                // Alternating wood tones: BurlyWood and SaddleBrown
-                val color = if ((row + col) % 2 == 0) Color(0xFFD2B48C) else Color(0xFF8B4513)
+                val color = if ((row + col) % 2 == 0) {
+                    Color(0xFFD2B48C)
+                } else {
+                    Color(0xFF8B4513)
+                }
+
                 drawRect(
                     color = color,
-                    topLeft = androidx.compose.ui.geometry.Offset(col * squareSize, row * squareSize),
-                    size = androidx.compose.ui.geometry.Size(squareSize, squareSize)
+                    topLeft = Offset(col * squareSize, row * squareSize),
+                    size = Size(squareSize, squareSize)
                 )
             }
         }
@@ -1426,6 +1700,7 @@ private fun MessageRow(
                 )
             }
         }
+
         return
     }
 
@@ -1451,25 +1726,44 @@ private fun MessageRow(
                 Surface(
                     tonalElevation = 1.dp,
                     shape = MaterialTheme.shapes.medium,
-                    color = if (msg.type == "location") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-                    modifier = if (msg.type == "game") Modifier.clickable { msg.gameId?.let { onGameClick(it) } } else Modifier
+                    color = if (msg.type == "location") {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    },
+                    modifier = if (msg.type == "game") {
+                        Modifier.clickable { msg.gameId?.let { onGameClick(it) } }
+                    } else {
+                        Modifier
+                    }
                 ) {
                     Column(Modifier.padding(10.dp)) {
                         if (msg.type == "location" && msg.latitude != null && msg.longitude != null) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Map, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Icon(
+                                    Icons.Default.Map,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+
                                 Spacer(Modifier.width(8.dp))
+
                                 Column {
                                     Text(
                                         text = msg.locationName ?: "Shared Location",
                                         style = MaterialTheme.typography.bodyLarge,
                                         fontWeight = FontWeight.Bold
                                     )
+
                                     Text(
                                         text = "Tap to view on map",
                                         style = MaterialTheme.typography.bodySmall,
                                         modifier = Modifier.clickable {
-                                            onLocationClick(LatLng(msg.latitude, msg.longitude), msg.locationName ?: "Shared Location", msg.senderId)
+                                            onLocationClick(
+                                                LatLng(msg.latitude, msg.longitude),
+                                                msg.locationName ?: "Shared Location",
+                                                msg.senderId
+                                            )
                                         }
                                     )
                                 }
@@ -1482,16 +1776,22 @@ private fun MessageRow(
                                         style = MaterialTheme.typography.bodyLarge,
                                         fontWeight = FontWeight.Bold
                                     )
+
                                     if (!msg.eventStart.isNullOrBlank()) {
                                         Text(
                                             "🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}",
                                             style = MaterialTheme.typography.bodySmall
                                         )
                                     }
+
                                     if (!msg.eventLocation.isNullOrBlank()) {
-                                        Text("📍 ${msg.eventLocation}", style = MaterialTheme.typography.bodySmall)
+                                        Text(
+                                            "📍 ${msg.eventLocation}",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
                                     }
                                 }
+
                                 if (!isMine && msg.eventId != null) {
                                     IconButton(onClick = { onAddEventToCalendar(msg) }) {
                                         Icon(
@@ -1516,18 +1816,37 @@ private fun MessageRow(
                                         .padding(4.dp)
                                         .clip(RoundedCornerShape(4.dp))
                                 )
+
                                 Spacer(Modifier.height(4.dp))
+
                                 Text(
                                     text = if (msg.gameType == "chess") "Chess Board" else "Game",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
+
                                 Text(
                                     text = msg.text ?: "Tap to Play",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (msg.text?.contains("won") == true || msg.text?.contains("Draw") == true) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = if (
+                                        msg.text?.contains("won") == true ||
+                                        msg.text?.contains("Draw") == true
+                                    ) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                 )
                             }
+                        } else if (msg.type == "image" && !msg.imageUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = msg.imageUrl,
+                                contentDescription = "Shared image",
+                                modifier = Modifier
+                                    .size(220.dp)
+                                    .clip(RoundedCornerShape(12.dp)),
+                                contentScale = ContentScale.Crop
+                            )
                         } else {
                             Text(msg.text ?: "[${msg.type}]")
                         }
@@ -1576,4 +1895,107 @@ private fun MessageRow(
             }
         }
     }
+}
+
+private data class CompressedChatImage(
+    val bytes: ByteArray,
+    val width: Int,
+    val height: Int
+)
+
+private suspend fun compressImageForChat(
+    context: Context,
+    uri: Uri,
+    maxDimension: Int = 1280,
+    quality: Int = 75,
+    maxBytes: Int = 1_500_000
+): CompressedChatImage = withContext(Dispatchers.IO) {
+    val resolver = context.contentResolver
+
+    val originalBytes = resolver.openInputStream(uri)?.use { input ->
+        input.readBytes()
+    } ?: throw Exception("Could not open image")
+
+    if (originalBytes.isEmpty()) {
+        throw Exception("Selected image is empty")
+    }
+
+    val boundsOptions = BitmapFactory.Options().apply {
+        inJustDecodeBounds = true
+    }
+
+    BitmapFactory.decodeByteArray(
+        originalBytes,
+        0,
+        originalBytes.size,
+        boundsOptions
+    )
+
+    if (boundsOptions.outWidth <= 0 || boundsOptions.outHeight <= 0) {
+        throw Exception("Selected file is not a supported image")
+    }
+
+    var sampleSize = 1
+
+    while (
+        boundsOptions.outWidth / sampleSize > maxDimension * 2 ||
+        boundsOptions.outHeight / sampleSize > maxDimension * 2
+    ) {
+        sampleSize *= 2
+    }
+
+    val decodeOptions = BitmapFactory.Options().apply {
+        inSampleSize = sampleSize
+    }
+
+    val decodedBitmap = BitmapFactory.decodeByteArray(
+        originalBytes,
+        0,
+        originalBytes.size,
+        decodeOptions
+    ) ?: throw Exception("Could not decode image")
+
+    val largestSide = max(decodedBitmap.width, decodedBitmap.height)
+    val scale = min(1f, maxDimension.toFloat() / largestSide.toFloat())
+
+    val finalBitmap = if (scale < 1f) {
+        Bitmap.createScaledBitmap(
+            decodedBitmap,
+            (decodedBitmap.width * scale).toInt().coerceAtLeast(1),
+            (decodedBitmap.height * scale).toInt().coerceAtLeast(1),
+            true
+        )
+    } else {
+        decodedBitmap
+    }
+
+    var currentQuality = quality
+    var compressedBytes: ByteArray
+
+    do {
+        val output = ByteArrayOutputStream()
+
+        output.use {
+            finalBitmap.compress(Bitmap.CompressFormat.JPEG, currentQuality, it)
+            compressedBytes = it.toByteArray()
+        }
+
+        currentQuality -= 10
+    } while (compressedBytes.size > maxBytes && currentQuality >= 45)
+
+    if (finalBitmap !== decodedBitmap) {
+        decodedBitmap.recycle()
+    }
+
+    finalBitmap.recycle()
+
+    if (compressedBytes.size > maxBytes) {
+        throw Exception("Image is too large after compression")
+    }
+
+    CompressedChatImage(
+        bytes = compressedBytes,
+        width = boundsOptions.outWidth,
+        height = boundsOptions.outHeight
+    )
 }
