@@ -289,7 +289,11 @@ fun ProfileCreationScreen(
                                     followingCount = initialProfile?.followingCount ?: "0",
                                     bookmarkedEventIds = initialProfile?.bookmarkedEventIds ?: emptyList(),
                                     semester = initialProfile?.semester ?: "Fall",
-                                    classes = initialProfile?.classes ?: emptyList()
+                                    classes = initialProfile?.classes ?: emptyList(),
+                                    chatNotificationsEnabled = initialProfile?.chatNotificationsEnabled ?: true,
+                                    calendarRemindersEnabled = initialProfile?.calendarRemindersEnabled ?: true,
+                                    eventNotificationsEnabled = initialProfile?.eventNotificationsEnabled ?: true,
+                                    friendRequestNotificationsEnabled = initialProfile?.friendRequestNotificationsEnabled ?: true,
                                 )
                             )
                         } catch (e: Exception) {
@@ -319,4 +323,3 @@ fun ProfileCreationScreen(
         }
     }
 }
-

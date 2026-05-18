@@ -79,6 +79,7 @@ import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.friends.SearchBar
+import com.example.classseek.ui.calendar.UserReminderPreference
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -121,6 +122,7 @@ fun CalendarScreen(
     var showReminderDialog by remember { mutableStateOf(false) }
     var selectedEventForReminder by remember { mutableStateOf<Event?>(null) }
     var userReminders by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var reminderPreferences by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     var hasCalendarPermission by remember {
         mutableStateOf(
@@ -161,6 +163,27 @@ fun CalendarScreen(
                             }
                         }
                         userReminders = reminders
+                    }
+                }
+        }
+    }
+
+    LaunchedEffect(signedInAccount?.email) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .collection("reminderPreferences")
+                .addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null) {
+                        val prefs = mutableMapOf<String, Int>()
+                        snapshot.documents.forEach { doc ->
+                            val eventId = doc.id
+                            val minutes = doc.getLong("selectedMinutes")?.toInt() ?: 15
+                            prefs[eventId] = minutes
+                        }
+                        reminderPreferences = prefs
                     }
                 }
         }
@@ -608,8 +631,12 @@ fun CalendarScreen(
     }
 
     if (showReminderDialog && selectedEventForReminder != null) {
+        val eventId = selectedEventForReminder?.id ?: ""
+        val savedPreference = reminderPreferences[eventId] ?: 15
+
         ReminderDialog(
             eventTitle = selectedEventForReminder?.summary ?: "Untitled Event",
+            initialSelectedMinutes = savedPreference,  
             onDismiss = {
                 showReminderDialog = false
                 selectedEventForReminder = null
@@ -622,20 +649,30 @@ fun CalendarScreen(
                         ?: event.start?.date?.value
                         ?: System.currentTimeMillis()
 
-                    // For testing: set reminder to NOW so it triggers immediately
-                    val testReminderTime = System.currentTimeMillis() - 60000  // 1 minute ago
+                    // Format the event time for notification
+                    val eventDate = Date(eventTimeMillis)
+                    val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
+                    val dateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                    val formattedTime = timeFormatter.format(eventDate)
+                    val formattedDate = dateFormatter.format(eventDate)
+
+                    // Calculate reminder time (when to send the notification)
+                    val reminderTimeInMillis = eventTimeMillis - (minutes * 60 * 1000L)
 
                     val reminderData = hashMapOf(
                         "eventId" to (event.id ?: "test"),
                         "eventTitle" to (event.summary ?: "Test Event"),
                         "eventTime" to eventTimeMillis,
+                        "eventTimeFormatted" to formattedTime,
+                        "eventDateFormatted" to formattedDate,
                         "reminderMinutes" to minutes,
-                        "reminderTime" to testReminderTime,
+                        "reminderTime" to reminderTimeInMillis,
                         "notificationSent" to false,
                     )
 
                     Log.d("REMINDER_DEBUG", "Saving reminder: $reminderData")
 
+                    // Save the reminder
                     FirebaseFirestore.getInstance()
                         .collection("users")
                         .document(uid)
@@ -647,6 +684,26 @@ fun CalendarScreen(
                         }
                         .addOnFailureListener { e ->
                             Log.e("REMINDER_DEBUG", "❌ Failed to save reminder: ${e.message}", e)
+                        }
+
+                    // Save the user's preference for this event
+                    val preferenceData = hashMapOf(
+                        "eventId" to (event.id ?: ""),
+                        "selectedMinutes" to minutes,
+                        "lastUpdated" to System.currentTimeMillis()
+                    )
+
+                    FirebaseFirestore.getInstance()
+                        .collection("users")
+                        .document(uid)
+                        .collection("reminderPreferences")
+                        .document(event.id ?: "")
+                        .set(preferenceData)
+                        .addOnSuccessListener {
+                            Log.d("REMINDER_DEBUG", "✅ Reminder preference saved for event ${event.id}")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e("REMINDER_DEBUG", "❌ Failed to save reminder preference: ${e.message}", e)
                         }
                 }
                 showReminderDialog = false
@@ -814,8 +871,14 @@ private fun dayKey(millis: Long): String {
 }
 
 @Composable
-fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (Int) -> Unit) {
-    var selectedMinutes by remember { mutableStateOf(15) }
+fun ReminderDialog(
+    eventTitle: String,
+    initialSelectedMinutes: Int = 15,  // Add this parameter
+    onDismiss: () -> Unit,
+    onSetReminder: (Int) -> Unit
+) {
+    var selectedMinutes by remember(initialSelectedMinutes) { mutableStateOf(initialSelectedMinutes) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Set Reminder for") },
@@ -825,21 +888,45 @@ fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (In
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("Remind me:", style = MaterialTheme.typography.labelLarge)
                 Spacer(modifier = Modifier.height(8.dp))
-                listOf(0 to "At time of event", 5 to "5 minutes before", 15 to "15 minutes before",
-                    30 to "30 minutes before", 60 to "1 hour before", 120 to "2 hours before", 1440 to "1 day before"
-                ).forEach { (minutes, label) ->
-                    Row(modifier = Modifier.fillMaxWidth().clickable { selectedMinutes = minutes }.padding(vertical = 8.dp),
+
+                val reminderOptions = listOf(
+                    0 to "At time of event",
+                    5 to "5 minutes before",
+                    15 to "15 minutes before",
+                    30 to "30 minutes before",
+                    60 to "1 hour before",
+                    120 to "2 hours before",
+                    1440 to "1 day before"
+                )
+
+                reminderOptions.forEach { (minutes, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedMinutes = minutes }
+                            .padding(vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        RadioButton(selected = selectedMinutes == minutes, onClick = { selectedMinutes = minutes })
+                        RadioButton(
+                            selected = selectedMinutes == minutes,
+                            onClick = { selectedMinutes = minutes }
+                        )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(label, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onSetReminder(selectedMinutes) }) { Text("Set Reminder") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        confirmButton = {
+            TextButton(onClick = { onSetReminder(selectedMinutes) }) {
+                Text("Set Reminder")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
     )
 }
 
