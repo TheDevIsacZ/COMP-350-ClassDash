@@ -72,7 +72,8 @@ data class ChatInfo(
     val type: String,
     val title: String,
     val createdBy: String,
-    val memberIds: List<String>
+    val memberIds: List<String>,
+    val profilePictureUrl: String = ""
 )
 
 class ChatRepository(
@@ -141,6 +142,27 @@ class ChatRepository(
         )
     }
 
+    private fun buildChatInboxPreviewDoc(
+        chat: ChatInfo,
+        lastMessageText: String?,
+        lastMessageAt: Any?
+    ): Map<String, Any?> {
+        val doc = mutableMapOf<String, Any?>(
+            "chatId" to chat.id,
+            "title" to chat.title,
+            "type" to chat.type,
+            "lastMessageText" to lastMessageText,
+            "lastMessageAt" to lastMessageAt,
+            "hidden" to false
+        )
+
+        if (chat.type == "group" && chat.profilePictureUrl.isNotBlank()) {
+            doc["profilePictureUrl"] = chat.profilePictureUrl
+        }
+
+        return doc
+    }
+
     private suspend fun syncDmInboxMetadata(
         chatId: String,
         uidA: String,
@@ -177,7 +199,12 @@ class ChatRepository(
             type = doc.getString("type") ?: "dm",
             title = doc.getString("title") ?: "Chat",
             createdBy = doc.getString("createdBy") ?: "",
-            memberIds = (doc.get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+            memberIds = (doc.get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty(),
+            profilePictureUrl = doc.getString("photoURL")
+                ?.trim()
+                .orEmpty()
+                .ifBlank { doc.getString("profilePictureUrl")?.trim().orEmpty() }
+                .ifBlank { doc.getString("groupImageUrl")?.trim().orEmpty() }
         )
     }
 
@@ -332,6 +359,7 @@ class ChatRepository(
             "lastMessageAt" to null,
             "lastMessageText" to null,
             "lastMessageSenderId" to null,
+            "photoURL" to "",
             "hidden" to false
         )
 
@@ -357,6 +385,7 @@ class ChatRepository(
                     "chatId" to chatId,
                     "title" to finalTitle,
                     "type" to "group",
+                    "profilePictureUrl" to "",
                     "lastMessageText" to null,
                     "lastMessageAt" to null,
                     "hidden" to false
@@ -422,6 +451,63 @@ class ChatRepository(
         return doc.getString("role")
     }
 
+    suspend fun updateGroupChatIcon(
+        chatId: String,
+        actingUid: String,
+        imageBytes: ByteArray,
+        imageWidth: Int,
+        imageHeight: Int
+    ): String {
+        if (imageBytes.isEmpty()) throw Exception("Image is empty")
+
+        val chat = getChatInfo(chatId)
+        if (chat.type != "group") throw Exception("Not a group chat")
+        if (!chat.memberIds.contains(actingUid)) {
+            throw Exception("Only group members can edit the group image")
+        }
+
+        val role = getMyRole(chatId, actingUid)?.trim()?.lowercase()
+        if (role != "owner" && role != "cohost") {
+            throw Exception("Only the group owner or cohosts can edit the group image")
+        }
+
+        val imagePath = "chatImages/$chatId/group_icon_${System.currentTimeMillis()}.jpg"
+        val storageRef = storage.reference.child(imagePath)
+
+        val metadata = StorageMetadata.Builder()
+            .setContentType("image/jpeg")
+            .setCustomMetadata("chatId", chatId)
+            .setCustomMetadata("updatedBy", actingUid)
+            .setCustomMetadata("purpose", "groupIcon")
+            .build()
+
+        storageRef.putBytes(imageBytes, metadata).await()
+        val downloadUrl = storageRef.downloadUrl.await().toString()
+
+        val batch = db.batch()
+        batch.set(
+            chatRef(chatId),
+            mapOf("photoURL" to downloadUrl),
+            SetOptions.merge()
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to "group",
+                    "profilePictureUrl" to downloadUrl
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return downloadUrl
+    }
+
     private suspend fun getUserDisplayName(uid: String): String {
         val doc = users.document(uid).get().await()
 
@@ -482,14 +568,7 @@ class ChatRepository(
                     )
                 }
             } else {
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to trimmed,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                )
+                buildChatInboxPreviewDoc(chat, trimmed, now)
             }
 
             batch.set(userInboxRef(uid).document(chatId), inboxDoc, SetOptions.merge())
@@ -558,14 +637,7 @@ class ChatRepository(
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to title,
-                    "type" to "group",
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat.copy(title = title), systemText, now),
                 SetOptions.merge()
             )
         }
@@ -631,14 +703,7 @@ class ChatRepository(
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to "group",
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, systemText, now),
                 SetOptions.merge()
             )
         }
@@ -693,14 +758,7 @@ class ChatRepository(
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to "group",
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, systemText, now),
                 SetOptions.merge()
             )
         }
@@ -797,14 +855,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to trimmed,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, trimmed, now),
                 SetOptions.merge()
             )
         }
@@ -871,14 +922,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to previewText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, previewText, now),
                 SetOptions.merge()
             )
         }
@@ -926,14 +970,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to text,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, text, now),
                 SetOptions.merge()
             )
         }
@@ -1066,14 +1103,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, systemText, now),
                 SetOptions.merge()
             )
         }
@@ -1120,7 +1150,9 @@ class ChatRepository(
             title = getString("title") ?: "Chat",
             type = getString("type") ?: "dm",
             otherUserUid = getString("otherUserUid"),
-            profilePictureUrl = getString("profilePictureUrl") ?: "",
+            profilePictureUrl = getString("profilePictureUrl")
+                ?: getString("groupImageUrl")
+                ?: "",
             lastMessageText = getString("lastMessageText"),
             lastMessageAt = getTimestamp("lastMessageAt"),
             hidden = getBoolean("hidden") ?: false
@@ -1296,14 +1328,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to messageText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, messageText, now),
                 SetOptions.merge()
             )
         }
@@ -1380,14 +1405,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to messageText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, messageText, now),
                 SetOptions.merge()
             )
         }

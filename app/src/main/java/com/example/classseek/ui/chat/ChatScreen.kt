@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Casino
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
@@ -142,10 +143,44 @@ private fun ProfileAvatar(
     }
 }
 
+@Composable
+private fun GroupAvatar(
+    imageUrl: String,
+    title: String,
+    modifier: Modifier = Modifier
+) {
+    if (imageUrl.isNotBlank()) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = "$title group picture",
+            modifier = modifier
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentScale = ContentScale.Crop
+        )
+    } else {
+        Surface(
+            modifier = modifier.clip(CircleShape),
+            shape = CircleShape,
+            color = ChatHeaderAccent.copy(alpha = 0.14f)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = title.trim().take(1).ifBlank { "G" }.uppercase(),
+                    color = ChatHeaderAccent,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 private fun GroupChatHeader(
     title: String,
+    profilePictureUrl: String,
     onBack: () -> Unit,
     onManage: () -> Unit
 ) {
@@ -159,20 +194,11 @@ private fun GroupChatHeader(
             ),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        modifier = Modifier.size(32.dp),
-                        shape = CircleShape,
-                        color = ChatHeaderAccent.copy(alpha = 0.14f)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = title.trim().take(1).ifBlank { "G" }.uppercase(),
-                                color = ChatHeaderAccent,
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+                    GroupAvatar(
+                        imageUrl = profilePictureUrl,
+                        title = title,
+                        modifier = Modifier.size(32.dp)
+                    )
 
                     Spacer(modifier = Modifier.width(10.dp))
 
@@ -304,6 +330,7 @@ fun ChatScreen(
     var memberSearchQuery by remember(chatId) { mutableStateOf("") }
     val memberSearchResults = remember(chatId) { mutableStateListOf<ChatUserProfile>() }
     var managingGroup by remember(chatId) { mutableStateOf(false) }
+    var updatingGroupIcon by remember(chatId) { mutableStateOf(false) }
     var confirmLeaveGroup by remember(chatId) { mutableStateOf(false) }
     var transferToUid by remember(chatId) { mutableStateOf<String?>(null) }
 
@@ -313,6 +340,20 @@ fun ChatScreen(
     val newestVisible = messages.firstOrNull()
     val myLatestMessage = messages.firstOrNull { it.senderId == myUid }
     val latestMyMessageId = myLatestMessage?.id
+
+    suspend fun refreshGroupMeta() {
+        val uid = myUid ?: return
+        val info = repo.getChatInfo(chatId)
+        chatInfo = info
+        myRole = repo.getMyRole(chatId, uid)
+
+        if (info.type == "group") {
+            groupMembers = repo.getGroupMembers(chatId)
+        } else {
+            repo.refreshDmInboxMetadata(chatId)
+            groupMembers = emptyList()
+        }
+    }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = PickVisualMedia()
@@ -363,6 +404,53 @@ fun ChatScreen(
                 pendingScrollToMessageId = null
             } finally {
                 sendingImage = false
+            }
+        }
+    }
+
+    val groupIconPickerLauncher = rememberLauncherForActivityResult(
+        contract = PickVisualMedia()
+    ) { uri: Uri? ->
+        val uid = myUid ?: return@rememberLauncherForActivityResult
+
+        if (uri == null) {
+            return@rememberLauncherForActivityResult
+        }
+
+        updatingGroupIcon = true
+        managingGroup = true
+        error = null
+
+        scope.launch {
+            try {
+                Log.d("GROUP_ICON_DEBUG", "Picked group icon Uri: $uri")
+
+                val compressed = compressImageForChat(
+                    context = context,
+                    uri = uri,
+                    maxDimension = 640,
+                    quality = 80,
+                    maxBytes = 600_000
+                )
+
+                val updatedUrl = repo.updateGroupChatIcon(
+                    chatId = chatId,
+                    actingUid = uid,
+                    imageBytes = compressed.bytes,
+                    imageWidth = compressed.width,
+                    imageHeight = compressed.height
+                )
+
+                chatInfo = chatInfo?.copy(profilePictureUrl = updatedUrl)
+                refreshGroupMeta()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("GROUP_ICON_DEBUG", "Group image update failed", e)
+                error = e.message ?: "Group image update failed"
+            } finally {
+                updatingGroupIcon = false
+                managingGroup = false
             }
         }
     }
@@ -479,20 +567,6 @@ fun ChatScreen(
                 }
             } catch (_: Exception) {
             }
-        }
-    }
-
-    suspend fun refreshGroupMeta() {
-        val uid = myUid ?: return
-        val info = repo.getChatInfo(chatId)
-        chatInfo = info
-        myRole = repo.getMyRole(chatId, uid)
-
-        if (info.type == "group") {
-            groupMembers = repo.getGroupMembers(chatId)
-        } else {
-            repo.refreshDmInboxMetadata(chatId)
-            groupMembers = emptyList()
         }
     }
 
@@ -740,7 +814,12 @@ fun ChatScreen(
                     createdBy = doc.getString("createdBy") ?: "",
                     memberIds = (doc.get("memberIds") as? List<*>)
                         ?.filterIsInstance<String>()
+                        .orEmpty(),
+                    profilePictureUrl = doc.getString("photoURL")
+                        ?.trim()
                         .orEmpty()
+                        .ifBlank { doc.getString("profilePictureUrl")?.trim().orEmpty() }
+                        .ifBlank { doc.getString("groupImageUrl")?.trim().orEmpty() }
                 )
             }
 
@@ -805,14 +884,72 @@ fun ChatScreen(
                     memberSearchResults.clear()
                 }
             },
-            title = { Text("Manage Group") },
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Manage Group")
+
+                        if (updatingGroupIcon) {
+                            Text(
+                                text = "Uploading group image...",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        enabled = myUid != null && canManageMembers() && !managingGroup && !updatingGroupIcon,
+                        onClick = {
+                            groupIconPickerLauncher.launch(
+                                PickVisualMediaRequest(PickVisualMedia.ImageOnly)
+                            )
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit group image"
+                        )
+                    }
+                }
+            },
             text = {
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     item("group_manage_header") {
                         Column {
-                            Text("Your role: ${myRole ?: "member"}")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                GroupAvatar(
+                                    imageUrl = chatInfo?.profilePictureUrl.orEmpty(),
+                                    title = chatInfo?.title ?: title,
+                                    modifier = Modifier.size(52.dp)
+                                )
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = chatInfo?.title ?: title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+
+                                    Text(
+                                        text = "Your role: ${myRole ?: "member"}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
 
                             if (canManageMembers()) {
                                 Spacer(Modifier.height(8.dp))
@@ -1262,6 +1399,7 @@ fun ChatScreen(
             if (isGroupChat()) {
                 GroupChatHeader(
                     title = chatInfo?.title ?: title,
+                    profilePictureUrl = chatInfo?.profilePictureUrl.orEmpty(),
                     onBack = onBack,
                     onManage = { showManageDialog = true }
                 )

@@ -82,12 +82,13 @@ private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
 private fun UserAvatar(
     imageUrl: String,
     label: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentDescription: String = "$label profile picture"
 ) {
     if (imageUrl.isNotBlank()) {
         AsyncImage(
             model = imageUrl,
-            contentDescription = "$label profile picture",
+            contentDescription = contentDescription,
             modifier = modifier
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -991,7 +992,12 @@ fun ChatListItemRow(
             UserAvatar(
                 imageUrl = chat.profilePictureUrl,
                 label = chat.title,
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier.size(56.dp),
+                contentDescription = if (chat.type == "group") {
+                    "${chat.title} group image"
+                } else {
+                    "${chat.title} profile picture"
+                }
             )
 
             Spacer(modifier = Modifier.width(12.dp))
