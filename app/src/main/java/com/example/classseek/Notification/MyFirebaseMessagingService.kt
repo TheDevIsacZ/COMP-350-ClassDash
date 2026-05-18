@@ -171,6 +171,17 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setSound(defaultSoundUri)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .addAction(
+                R.drawable.ic_notification,
+                "Dismiss",
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, ClassSeekActivity::class.java),
+                    pendingIntentFlags
+                )
+            )
+
 
         val notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -340,16 +351,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setSound(defaultSoundUri)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .addAction(
-                R.drawable.ic_notification,
-                "Dismiss",
-                PendingIntent.getActivity(
-                    this,
-                    0,
-                    Intent(this, ClassSeekActivity::class.java),
-                    pendingIntentFlags
-                )
-            )
 
         val notificationManager =
             getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
