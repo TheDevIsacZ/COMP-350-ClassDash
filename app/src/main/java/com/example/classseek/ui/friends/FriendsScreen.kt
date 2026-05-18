@@ -123,6 +123,7 @@ fun FriendsScreen(
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null,
     onNavigateToProfile: ((String) -> Unit)? = null,
+    onOpenChat: ((String, String) -> Unit)? = null,
     onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
 ) {
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
@@ -142,6 +143,19 @@ fun FriendsScreen(
     var sentRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var favoriteFriendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
+
+    fun openChat(chatId: String, chatTitle: String) {
+        if (onOpenChat != null) {
+            activeChatId = null
+            activeChatTitle = null
+            currentScreen = FriendsNavigation.MAIN
+            onOpenChat(chatId, chatTitle)
+        } else {
+            activeChatId = chatId
+            activeChatTitle = chatTitle
+            currentScreen = FriendsNavigation.CHAT
+        }
+    }
 
     BackHandler(enabled = currentScreen != FriendsNavigation.MAIN) {
         when (currentScreen) {
@@ -172,9 +186,7 @@ fun FriendsScreen(
 
     LaunchedEffect(initialChatId) {
         if (initialChatId != null) {
-            activeChatId = initialChatId
-            activeChatTitle = initialChatTitle ?: "Chat"
-            currentScreen = FriendsNavigation.CHAT
+            openChat(initialChatId, initialChatTitle ?: "Chat")
             onInitialChatConsumed?.invoke()
         }
     }
@@ -276,9 +288,7 @@ fun FriendsScreen(
                     pendingRequests = pendingRequests,
                     chats = chats,
                     onChatClick = { chat ->
-                        activeChatId = chat.id
-                        activeChatTitle = chat.title
-                        currentScreen = FriendsNavigation.CHAT
+                        openChat(chat.id, chat.title)
                     },
                     onDeleteChat = { chat ->
                         chatToDelete = chat
@@ -315,9 +325,7 @@ fun FriendsScreen(
                         selectedUserForAction = user
                     },
                     onGroupCreated = { groupTitle, chatId ->
-                        activeChatId = chatId
-                        activeChatTitle = groupTitle
-                        currentScreen = FriendsNavigation.CHAT
+                        openChat(chatId, groupTitle)
                     },
                     repo = repo,
                     auth = auth,
@@ -371,10 +379,9 @@ fun FriendsScreen(
                         selectedUserForAction = null
                         scope.launch {
                             try {
-                                val chatId = repo.openOrCreateDm(myUid, targetUser.uid, targetUser.displayName)
-                                activeChatId = chatId
-                                activeChatTitle = targetUser.displayName
-                                currentScreen = FriendsNavigation.CHAT
+                                val chatTitle = targetUser.displayName.ifBlank { targetUser.email }
+                                val chatId = repo.openOrCreateDm(myUid, targetUser.uid, chatTitle)
+                                openChat(chatId, chatTitle)
                             } catch (_: Exception) {
                             }
                         }

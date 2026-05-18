@@ -1180,12 +1180,16 @@ fun ClassSeekApp(
         return
     }
 
-    if (pendingNotificationChatId != null && firebaseUser != null && userProfile != null) {
+    val fullScreenChatId = routedChatId ?: pendingNotificationChatId
+    val fullScreenChatTitle = routedChatTitle ?: pendingNotificationChatTitle ?: "Chat"
+
+    if (fullScreenChatId != null && firebaseUser != null && userProfile != null) {
         ChatScreen(
-            chatId = pendingNotificationChatId!!,
-            title = pendingNotificationChatTitle ?: "Chat",
+            chatId = fullScreenChatId,
+            title = fullScreenChatTitle,
             onBack = {
                 viewOtherUserId = null
+                consumeRoutedChat()
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.FRIENDS
             },
@@ -1193,9 +1197,12 @@ fun ClassSeekApp(
                 sharedLocationToView = latLng
                 sharedLocationNameToView = name
                 sharedLocationByUidToView = senderId
+                consumeRoutedChat()
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.MAP
-            }
+            },
+            repo = repo,
+            auth = auth
         )
         return
     }
@@ -1436,6 +1443,11 @@ fun ClassSeekApp(
                                 },
                                 onNavigateToProfile = { uid ->
                                     viewOtherUserId = uid
+                                },
+                                onOpenChat = { chatId, chatTitle ->
+                                    routedChatId = chatId
+                                    routedChatTitle = chatTitle
+                                    currentDestination = AppDestinations.FRIENDS
                                 },
                                 onLocationClick = { latLng, name, senderId ->
                                     sharedLocationToView = latLng

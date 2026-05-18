@@ -21,10 +21,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -72,6 +75,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -145,60 +149,63 @@ private fun GroupChatHeader(
     onBack: () -> Unit,
     onManage: () -> Unit
 ) {
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-            navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
-            actionIconContentColor = MaterialTheme.colorScheme.onSurface
-        ),
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(34.dp),
-                    shape = CircleShape,
-                    color = ChatHeaderAccent.copy(alpha = 0.14f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = title.trim().take(1).ifBlank { "G" }.uppercase(),
-                            color = ChatHeaderAccent,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TopAppBar(
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                actionIconContentColor = MaterialTheme.colorScheme.onSurface
+            ),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(32.dp),
+                        shape = CircleShape,
+                        color = ChatHeaderAccent.copy(alpha = 0.14f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = title.trim().take(1).ifBlank { "G" }.uppercase(),
+                                color = ChatHeaderAccent,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
-                )
+            },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
+                        contentDescription = "Back",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            },
+            actions = {
+                IconButton(onClick = onManage) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "More options"
+                    )
+                }
             }
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
-                    contentDescription = "Back",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        },
-        actions = {
-            IconButton(onClick = onManage) {
-                Icon(
-                    imageVector = Icons.Default.MoreVert,
-                    contentDescription = "More options"
-                )
-            }
-        }
-    )
+        )
 
-    HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+        HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+    }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -208,42 +215,45 @@ private fun DirectMessageHeader(
     profilePictureUrl: String,
     onBack: () -> Unit
 ) {
-    TopAppBar(
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            navigationIconContentColor = ChatHeaderAccent,
-            titleContentColor = MaterialTheme.colorScheme.onSurface,
-        ),
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ProfileAvatar(
-                    imageUrl = profilePictureUrl,
-                    label = title,
-                    modifier = Modifier.size(34.dp)
-                )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        TopAppBar(
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                navigationIconContentColor = ChatHeaderAccent,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+            ),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ProfileAvatar(
+                        imageUrl = profilePictureUrl,
+                        label = title,
+                        modifier = Modifier.size(32.dp)
+                    )
 
-                Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
 
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1
-                )
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            },
+            navigationIcon = {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
+                        contentDescription = "Back",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
-        },
-        navigationIcon = {
-            IconButton(onClick = onBack) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
-                    contentDescription = "Back",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    )
+        )
 
-    HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+        HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
+    }
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
@@ -1246,14 +1256,9 @@ fun ChatScreen(
     }
 
     Scaffold(
-        modifier = modifier.fillMaxSize()
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .padding(innerPadding)
-                .fillMaxSize()
-                .imePadding()
-        ) {
+        modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
             if (isGroupChat()) {
                 GroupChatHeader(
                     title = chatInfo?.title ?: title,
@@ -1267,7 +1272,67 @@ fun ChatScreen(
                     onBack = onBack
                 )
             }
+        },
+        bottomBar = {
+            ChatMessageInputBar(
+                input = input,
+                onInputChange = { input = it },
+                enabled = myUid != null && !sending && !sendingImage,
+                canSend = myUid != null &&
+                        input.trim().isNotEmpty() &&
+                        !sending &&
+                        !sendingImage,
+                sending = sending,
+                sendingImage = sendingImage,
+                onGameClick = { showGameSelection = true },
+                onImageClick = {
+                    imagePickerLauncher.launch(
+                        PickVisualMediaRequest(PickVisualMedia.ImageOnly)
+                    )
+                },
+                onSendClick = {
+                    val uid = myUid ?: return@ChatMessageInputBar
+                    val text = input.trim()
 
+                    sending = true
+                    hasSentMessageThisSession = true
+                    initialScrollDone = true
+
+                    scope.launch {
+                        try {
+                            val sentMessageId = repo.sendTextMessage(
+                                chatId = chatId,
+                                senderId = uid,
+                                text = text
+                            )
+
+                            pendingScrollToMessageId = sentMessageId
+
+                            try {
+                                repo.updateMyLastRead(chatId, uid, sentMessageId)
+                                myLastReadMessageId = sentMessageId
+                            } catch (_: Exception) {
+                            }
+
+                            input = ""
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = e.message ?: "Send failed"
+                            pendingScrollToMessageId = null
+                        } finally {
+                            sending = false
+                        }
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+        ) {
             if (error != null) {
                 Text(
                     text = "Error: $error",
@@ -1284,7 +1349,7 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(top = 16.dp, bottom = 72.dp)
+                contentPadding = PaddingValues(top = 12.dp, bottom = 10.dp)
             ) {
                 items(
                     items = messages,
@@ -1349,18 +1414,45 @@ fun ChatScreen(
                     )
                 }
             }
+        }
+    }
+}
 
-            HorizontalDivider()
+@Composable
+private fun ChatMessageInputBar(
+    input: String,
+    onInputChange: (String) -> Unit,
+    enabled: Boolean,
+    canSend: Boolean,
+    sending: Boolean,
+    sendingImage: Boolean,
+    onGameClick: () -> Unit,
+    onImageClick: () -> Unit,
+    onSendClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
+            HorizontalDivider(color = ChatHeaderDivider, thickness = 1.dp)
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.Bottom
             ) {
                 IconButton(
-                    onClick = { showGameSelection = true },
-                    enabled = myUid != null && !sending && !sendingImage
+                    onClick = onGameClick,
+                    enabled = enabled,
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
@@ -1370,22 +1462,21 @@ fun ChatScreen(
                 }
 
                 OutlinedTextField(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 48.dp),
                     value = input,
-                    onValueChange = { input = it },
+                    onValueChange = onInputChange,
                     placeholder = { Text("Message") },
                     singleLine = false,
-                    enabled = myUid != null && !sending && !sendingImage,
+                    enabled = enabled,
                     minLines = 1,
-                    maxLines = 20,
+                    maxLines = 5,
+                    shape = RoundedCornerShape(24.dp),
                     trailingIcon = {
                         IconButton(
-                            enabled = myUid != null && !sending && !sendingImage,
-                            onClick = {
-                                imagePickerLauncher.launch(
-                                    PickVisualMediaRequest(PickVisualMedia.ImageOnly)
-                                )
-                            }
+                            enabled = enabled,
+                            onClick = onImageClick
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Image,
@@ -1398,52 +1489,18 @@ fun ChatScreen(
                 Spacer(Modifier.width(8.dp))
 
                 Button(
-                    enabled = myUid != null &&
-                            input.trim().isNotEmpty() &&
-                            !sending &&
-                            !sendingImage,
-                    onClick = {
-                        val uid = myUid ?: return@Button
-                        val text = input.trim()
-
-                        sending = true
-                        hasSentMessageThisSession = true
-                        initialScrollDone = true
-
-                        scope.launch {
-                            try {
-                                val sentMessageId = repo.sendTextMessage(
-                                    chatId = chatId,
-                                    senderId = uid,
-                                    text = text
-                                )
-
-                                pendingScrollToMessageId = sentMessageId
-
-                                try {
-                                    repo.updateMyLastRead(chatId, uid, sentMessageId)
-                                    myLastReadMessageId = sentMessageId
-                                } catch (_: Exception) {
-                                }
-
-                                input = ""
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (e: Exception) {
-                                error = e.message ?: "Send failed"
-                                pendingScrollToMessageId = null
-                            } finally {
-                                sending = false
-                            }
-                        }
-                    }
+                    enabled = canSend,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    onClick = onSendClick
                 ) {
                     Text(
                         when {
                             sending -> "Sending…"
                             sendingImage -> "Uploading…"
                             else -> "Send"
-                        }
+                        },
+                        maxLines = 1
                     )
                 }
             }
