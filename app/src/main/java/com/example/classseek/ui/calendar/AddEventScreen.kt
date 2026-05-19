@@ -10,6 +10,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,21 +30,66 @@ import java.text.SimpleDateFormat
 @Composable
 fun AddEventScreen(
     initialDateMillis: Long? = null,
+    existingEvent: com.google.api.services.calendar.model.Event? = null,
     onBackClick: () -> Unit,
-    onSaveClick: (ClassSchedule) -> Unit
+    onSaveClick: (ClassSchedule) -> Unit,
+    onDeleteClick: (() -> Unit)? = null,
+    onSetReminderClick: (() -> Unit)? = null
 ) {
-    var eventName by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var startTime by remember { mutableStateOf("09:00 AM") }
-    var endTime by remember { mutableStateOf("10:00 AM") }
-    var selectedDays by remember { mutableStateOf(setOf<Int>()) }
+    var eventName by remember { mutableStateOf(existingEvent?.summary ?: "") }
+    var location by remember { mutableStateOf(existingEvent?.location ?: "") }
+    
+    val initialStartTime = existingEvent?.start?.dateTime?.let { 
+        SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(it.value))
+    } ?: "09:00 AM"
+    
+    val initialEndTime = existingEvent?.end?.dateTime?.let { 
+        SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(it.value))
+    } ?: "10:00 AM"
+
+    var startTime by remember { mutableStateOf(initialStartTime) }
+    var endTime by remember { mutableStateOf(initialEndTime) }
+    
+    val initialDays = existingEvent?.recurrence?.firstOrNull { it.startsWith("RRULE:") }?.let { rrule ->
+        val byDay = rrule.split(";").firstOrNull { it.startsWith("BYDAY=") }?.substringAfter("BYDAY=")
+        val daysMap = mapOf(
+            "MO" to Calendar.MONDAY,
+            "TU" to Calendar.TUESDAY,
+            "WE" to Calendar.WEDNESDAY,
+            "TH" to Calendar.THURSDAY,
+            "FR" to Calendar.FRIDAY,
+            "SA" to Calendar.SATURDAY,
+            "SU" to Calendar.SUNDAY
+        )
+        byDay?.split(",")?.mapNotNull { daysMap[it] }?.toSet()
+    } ?: emptySet()
+
+    var selectedDays by remember { mutableStateOf(initialDays) }
 
     BackHandler {
         onBackClick()
     }
     
-    var startDate by remember { mutableStateOf(initialDateMillis ?: System.currentTimeMillis()) }
-    var endDate by remember { mutableStateOf(startDate + 1000L * 60 * 60 * 24 * 7) }
+    val initialStartMillis = existingEvent?.start?.dateTime?.value 
+        ?: existingEvent?.start?.date?.value 
+        ?: initialDateMillis 
+        ?: System.currentTimeMillis()
+        
+    val initialEndMillis = existingEvent?.recurrence?.firstOrNull { it.startsWith("RRULE:") }?.let { rrule ->
+        val until = rrule.split(";").firstOrNull { it.startsWith("UNTIL=") }?.substringAfter("UNTIL=")
+        if (until != null) {
+            try {
+                SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.parse(until)?.time
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+    } ?: (initialStartMillis + 1000L * 60 * 60 * 24 * 7)
+
+    var startDate by remember { mutableStateOf(initialStartMillis) }
+    var endDate by remember { mutableStateOf(initialEndMillis) }
 
     var showStartDatePicker by remember { mutableStateOf(false) }
     var showEndDatePicker by remember { mutableStateOf(false) }
@@ -56,10 +103,37 @@ fun AddEventScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("New Event") },
+                title = { Text(if (existingEvent != null) "Edit Event" else "New Event") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = {
+                            val finalDays = if (selectedDays.isEmpty()) {
+                                val cal = Calendar.getInstance().apply { timeInMillis = startDate }
+                                listOf(cal.get(Calendar.DAY_OF_WEEK))
+                            } else {
+                                selectedDays.toList()
+                            }
+
+                            onSaveClick(
+                                ClassSchedule(
+                                    className = eventName,
+                                    daysOfWeek = finalDays,
+                                    startTime = startTime,
+                                    endTime = endTime,
+                                    location = location,
+                                    startDate = startDate,
+                                    endDate = if (selectedDays.isEmpty()) startDate else endDate
+                                )
+                            )
+                        },
+                        enabled = eventName.isNotBlank()
+                    ) {
+                        Text("Save", fontWeight = FontWeight.Bold)
                     }
                 }
             )
@@ -208,32 +282,33 @@ fun AddEventScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            Button(
-                onClick = {
-                    val finalDays = if (selectedDays.isEmpty()) {
-                        val cal = Calendar.getInstance().apply { timeInMillis = startDate }
-                        listOf(cal.get(Calendar.DAY_OF_WEEK))
-                    } else {
-                        selectedDays.toList()
-                    }
-
-                    onSaveClick(
-                        ClassSchedule(
-                            className = eventName,
-                            daysOfWeek = finalDays,
-                            startTime = startTime,
-                            endTime = endTime,
-                            location = location,
-                            startDate = startDate,
-                            endDate = if (selectedDays.isEmpty()) startDate else endDate
-                        )
-                    )
-                },
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                enabled = eventName.isNotBlank()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Save to Calendar", style = MaterialTheme.typography.titleMedium)
+                IconButton(onClick = { onSetReminderClick?.invoke() }) {
+                    Icon(
+                        imageVector = Icons.Default.Notifications,
+                        contentDescription = "Set Reminder",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                if (existingEvent != null) {
+                    IconButton(onClick = { onDeleteClick?.invoke() }) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Event",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
             }
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 

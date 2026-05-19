@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -107,6 +108,7 @@ fun CalendarScreen(
     onSignInClick: (Intent) -> Unit,
     onAddEventClick: (Long) -> Unit,
     onDeleteEventClick: (String) -> Unit,
+    onEditEventClick: (Event) -> Unit,
     chatRepository: ChatRepository,
     myUid: String
 ) {
@@ -357,6 +359,7 @@ fun CalendarScreen(
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onEditClick = { onEditEventClick(event) },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
@@ -392,6 +395,7 @@ fun CalendarScreen(
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onEditClick = { onEditEventClick(event) },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
@@ -463,6 +467,7 @@ fun CalendarScreen(
                                 userProfile = userProfile,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onEditClick = { onEditEventClick(event) },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
@@ -933,12 +938,11 @@ fun ReminderDialog(
 @Composable
 fun AgendaItem(
     event: Event, userProfile: UserProfile?, canDelete: Boolean = false,
-    onDeleteClick: () -> Unit = {}, onShareClick: () -> Unit = {}, onSetReminder: (Event) -> Unit = {}
+    onDeleteClick: () -> Unit = {}, onEditClick: () -> Unit = {}, onShareClick: () -> Unit = {}, onSetReminder: (Event) -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
     val eventColor = Color(0xFF4285F4)
-    var showMenu by remember { mutableStateOf(false) }
     val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) ?: false
     var optimisticIsBookmarked by remember(event.id, isBookmarked) { mutableStateOf(isBookmarked) }
 
@@ -961,6 +965,13 @@ fun AgendaItem(
                         Text(event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                         if (!event.location.isNullOrEmpty()) Text(event.location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+
+                    if (canDelete) {
+                        IconButton(onClick = onEditClick) {
+                            Icon(Icons.Default.Edit, "Edit event", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+
                     IconButton(onClick = {
                         val uid = FirebaseAuth.getInstance().currentUser?.uid
                         if (uid != null) {
@@ -979,23 +990,15 @@ fun AgendaItem(
                         Icon(
                             imageVector = if (optimisticIsBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                             contentDescription = "Bookmark",
-                            tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray
+                            tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     IconButton(onClick = { onSetReminder(event) }) {
                         Icon(Icons.Default.Notifications, "Set Reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     }
                     IconButton(onClick = onShareClick) {
-                        Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary)
-                    }
-
-                    if (canDelete) {
-                        Box {
-                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "More options") }
-                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDeleteClick() })
-                            }
-                        }
+                        Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
                     }
                 }
             }
