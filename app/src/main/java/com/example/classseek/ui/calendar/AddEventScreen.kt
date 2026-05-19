@@ -9,9 +9,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,6 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
 import com.example.classseek.models.ClassSchedule
 import java.util.*
@@ -31,10 +35,10 @@ import java.text.SimpleDateFormat
 fun AddEventScreen(
     initialDateMillis: Long? = null,
     existingEvent: com.google.api.services.calendar.model.Event? = null,
+    initialReminders: List<Int> = emptyList(),
     onBackClick: () -> Unit,
     onSaveClick: (ClassSchedule) -> Unit,
-    onDeleteClick: (() -> Unit)? = null,
-    onSetReminderClick: (() -> Unit)? = null
+    onDeleteClick: (() -> Unit)? = null
 ) {
     var eventName by remember { mutableStateOf(existingEvent?.summary ?: "") }
     var location by remember { mutableStateOf(existingEvent?.location ?: "") }
@@ -96,6 +100,12 @@ fun AddEventScreen(
 
     var showStartTimePicker by remember { mutableStateOf(false) }
     var showEndTimePicker by remember { mutableStateOf(false) }
+    var showReminderMenu by remember { mutableStateOf(false) }
+
+    // Use a key to re-initialize when initialReminders change (important for new events after they get an ID)
+    var selectedReminders by remember(initialReminders) { 
+        mutableStateOf(initialReminders)
+    }
 
     val days = listOf("M", "T", "W", "T", "F", "S", "S")
     val dayValues = listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY, Calendar.SUNDAY)
@@ -127,7 +137,8 @@ fun AddEventScreen(
                                     endTime = endTime,
                                     location = location,
                                     startDate = startDate,
-                                    endDate = if (selectedDays.isEmpty()) startDate else endDate
+                                    endDate = if (selectedDays.isEmpty()) startDate else endDate,
+                                    reminders = selectedReminders
                                 )
                             )
                         },
@@ -161,43 +172,6 @@ fun AddEventScreen(
                 label = { Text("Location (Optional)") },
                 modifier = Modifier.fillMaxWidth()
             )
-
-            HorizontalDivider()
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    days.forEachIndexed { index, day ->
-                        val dayValue = dayValues[index]
-                        val isSelected = selectedDays.contains(dayValue)
-                        
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable {
-                                    selectedDays = if (isSelected) {
-                                        selectedDays - dayValue
-                                    } else {
-                                        selectedDays + dayValue
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = day,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
-                        }
-                    }
-                }
-            }
 
             HorizontalDivider()
 
@@ -261,6 +235,43 @@ fun AddEventScreen(
                 }
             }
 
+            HorizontalDivider()
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    days.forEachIndexed { index, day ->
+                        val dayValue = dayValues[index]
+                        val isSelected = selectedDays.contains(dayValue)
+                        
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable {
+                                    selectedDays = if (isSelected) {
+                                        selectedDays - dayValue
+                                    } else {
+                                        selectedDays + dayValue
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = day,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             if (selectedDays.isNotEmpty()) {
                 OutlinedCard(
                     onClick = { showEndDatePicker = true },
@@ -280,23 +291,130 @@ fun AddEventScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            HorizontalDivider()
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = { onSetReminderClick?.invoke() }) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showReminderMenu = true }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
-                        imageVector = Icons.Default.Notifications,
-                        contentDescription = "Set Reminder",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
+                        imageVector = Icons.Outlined.Notifications,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "Add Notification",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Color.White
                     )
                 }
 
-                if (existingEvent != null) {
+                if (showReminderMenu) {
+                    BasicAlertDialog(
+                        onDismissRequest = { showReminderMenu = false }
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = Color(0xFF4E4D52),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(28.dp))
+                                    .padding(vertical = 8.dp)
+                            ) {
+                                val options = listOf(
+                                    0 to "At time of event",
+                                    5 to "5 minutes before",
+                                    10 to "10 minutes before",
+                                    15 to "15 minutes before",
+                                    30 to "30 minutes before",
+                                    60 to "1 hour before",
+                                    -1 to "Custom..."
+                                )
+
+                                options.forEach { (minutes, label) ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                if (minutes == -1) {
+                                                    if (!selectedReminders.contains(120)) {
+                                                        selectedReminders = (selectedReminders + 120).sortedDescending()
+                                                    }
+                                                } else {
+                                                    if (!selectedReminders.contains(minutes)) {
+                                                        selectedReminders = (selectedReminders + minutes).sortedDescending()
+                                                    }
+                                                }
+                                                showReminderMenu = false
+                                            }
+                                            .padding(vertical = 14.dp, horizontal = 24.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .border(
+                                                    width = 2.dp,
+                                                    color = Color.White,
+                                                    shape = CircleShape
+                                                )
+                                        )
+                                        Spacer(Modifier.width(16.dp))
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                selectedReminders.forEach { minutes ->
+                    val label = when (minutes) {
+                        0 -> "At time of event"
+                        60 -> "1 hour before"
+                        in 1..59 -> "$minutes minutes before"
+                        else -> "${minutes / 60} hours before"
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 36.dp, top = 4.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(label, style = MaterialTheme.typography.bodyMedium)
+                        IconButton(
+                            onClick = { selectedReminders = selectedReminders - minutes },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Remove reminder", modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            if (existingEvent != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     IconButton(onClick = { onDeleteClick?.invoke() }) {
                         Icon(
                             imageVector = Icons.Default.Delete,

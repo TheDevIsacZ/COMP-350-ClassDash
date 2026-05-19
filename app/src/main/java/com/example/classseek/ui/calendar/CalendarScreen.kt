@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Bookmark
@@ -121,8 +120,6 @@ fun CalendarScreen(
     var showStarredOnly by remember { mutableStateOf(false) }
     var showChatPicker by remember { mutableStateOf(false) }
     var selectedEventForSharing by remember { mutableStateOf<Event?>(null) }
-    var showReminderDialog by remember { mutableStateOf(false) }
-    var selectedEventForReminder by remember { mutableStateOf<Event?>(null) }
     var userReminders by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var reminderPreferences by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
@@ -363,10 +360,6 @@ fun CalendarScreen(
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -399,10 +392,6 @@ fun CalendarScreen(
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -471,10 +460,6 @@ fun CalendarScreen(
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -635,87 +620,6 @@ fun CalendarScreen(
         }
     }
 
-    if (showReminderDialog && selectedEventForReminder != null) {
-        val eventId = selectedEventForReminder?.id ?: ""
-        val savedPreference = reminderPreferences[eventId] ?: 15
-
-        ReminderDialog(
-            eventTitle = selectedEventForReminder?.summary ?: "Untitled Event",
-            initialSelectedMinutes = savedPreference,  
-            onDismiss = {
-                showReminderDialog = false
-                selectedEventForReminder = null
-            },
-            onSetReminder = { minutes ->
-                val uid = FirebaseAuth.getInstance().currentUser?.uid
-                val event = selectedEventForReminder
-                if (uid != null && event != null) {
-                    val eventTimeMillis = event.start?.dateTime?.value
-                        ?: event.start?.date?.value
-                        ?: System.currentTimeMillis()
-
-                    // Format the event time for notification
-                    val eventDate = Date(eventTimeMillis)
-                    val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
-                    val dateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-                    val formattedTime = timeFormatter.format(eventDate)
-                    val formattedDate = dateFormatter.format(eventDate)
-
-                    // Calculate reminder time (when to send the notification)
-                    val reminderTimeInMillis = eventTimeMillis - (minutes * 60 * 1000L)
-
-                    val reminderData = hashMapOf(
-                        "eventId" to (event.id ?: "test"),
-                        "eventTitle" to (event.summary ?: "Test Event"),
-                        "eventTime" to eventTimeMillis,
-                        "eventTimeFormatted" to formattedTime,
-                        "eventDateFormatted" to formattedDate,
-                        "reminderMinutes" to minutes,
-                        "reminderTime" to reminderTimeInMillis,
-                        "notificationSent" to false,
-                    )
-
-                    Log.d("REMINDER_DEBUG", "Saving reminder: $reminderData")
-
-                    // Save the reminder
-                    FirebaseFirestore.getInstance()
-                        .collection("users")
-                        .document(uid)
-                        .collection("reminders")
-                        .document(event.id ?: "test")
-                        .set(reminderData)
-                        .addOnSuccessListener {
-                            Log.d("REMINDER_DEBUG", "✅ Reminder saved successfully!")
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e("REMINDER_DEBUG", "❌ Failed to save reminder: ${e.message}", e)
-                        }
-
-                    // Save the user's preference for this event
-                    val preferenceData = hashMapOf(
-                        "eventId" to (event.id ?: ""),
-                        "selectedMinutes" to minutes,
-                        "lastUpdated" to System.currentTimeMillis()
-                    )
-
-                    FirebaseFirestore.getInstance()
-                        .collection("users")
-                        .document(uid)
-                        .collection("reminderPreferences")
-                        .document(event.id ?: "")
-                        .set(preferenceData)
-                        .addOnSuccessListener {
-                            Log.d("REMINDER_DEBUG", "✅ Reminder preference saved for event ${event.id}")
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e("REMINDER_DEBUG", "❌ Failed to save reminder preference: ${e.message}", e)
-                        }
-                }
-                showReminderDialog = false
-                selectedEventForReminder = null
-            }
-        )
-    }
 }
 
 @Composable
@@ -875,70 +779,11 @@ private fun dayKey(millis: Long): String {
     return "${cal.get(JavaCalendar.YEAR)}-${cal.get(JavaCalendar.MONTH)}-${cal.get(JavaCalendar.DAY_OF_MONTH)}"
 }
 
-@Composable
-fun ReminderDialog(
-    eventTitle: String,
-    initialSelectedMinutes: Int = 15,  // Add this parameter
-    onDismiss: () -> Unit,
-    onSetReminder: (Int) -> Unit
-) {
-    var selectedMinutes by remember(initialSelectedMinutes) { mutableStateOf(initialSelectedMinutes) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Set Reminder for") },
-        text = {
-            Column {
-                Text(eventTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Remind me:", style = MaterialTheme.typography.labelLarge)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                val reminderOptions = listOf(
-                    0 to "At time of event",
-                    5 to "5 minutes before",
-                    15 to "15 minutes before",
-                    30 to "30 minutes before",
-                    60 to "1 hour before",
-                    120 to "2 hours before",
-                    1440 to "1 day before"
-                )
-
-                reminderOptions.forEach { (minutes, label) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectedMinutes = minutes }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = selectedMinutes == minutes,
-                            onClick = { selectedMinutes = minutes }
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(label, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSetReminder(selectedMinutes) }) {
-                Text("Set Reminder")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        }
-    )
-}
 
 @Composable
 fun AgendaItem(
     event: Event, userProfile: UserProfile?, canDelete: Boolean = false,
-    onDeleteClick: () -> Unit = {}, onEditClick: () -> Unit = {}, onShareClick: () -> Unit = {}, onSetReminder: (Event) -> Unit = {}
+    onDeleteClick: () -> Unit = {}, onEditClick: () -> Unit = {}, onShareClick: () -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
@@ -981,7 +826,7 @@ fun AgendaItem(
 
                             if (wasBookmarked) {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayRemove(event.id))
-                                FirebaseFirestore.getInstance().collection("users").document(uid).collection("reminders").document(event.id ?: "").delete()
+                                deleteReminderFromFirestore(uid, event.id ?: "")
                             } else {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayUnion(event.id))
                             }
@@ -993,9 +838,6 @@ fun AgendaItem(
                             tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray,
                             modifier = Modifier.size(20.dp)
                         )
-                    }
-                    IconButton(onClick = { onSetReminder(event) }) {
-                        Icon(Icons.Default.Notifications, "Set Reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
                     }
                     IconButton(onClick = onShareClick) {
                         Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
