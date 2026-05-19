@@ -1314,23 +1314,6 @@ fun ClassSeekApp(
                 null
             }
         )
-    } else if (isAddingEvent) {
-        AddEventScreen(
-            initialDateMillis = initialDateForNewEvent,
-            onBackClick = { isAddingEvent = false },
-            onSaveClick = { schedule ->
-                scope.launch {
-                    signedInAccount?.let { account ->
-                        val success = activity?.addEventToCalendar(account, schedule) ?: false
-                        if (success) {
-                            val events = activity?.getCalendarEvents(account)
-                            if (events != null) calendarEvents = events
-                            isAddingEvent = false
-                        }
-                    }
-                }
-            }
-        )
     } else {
         NavigationSuiteScaffold(
             navigationSuiteItems = {
