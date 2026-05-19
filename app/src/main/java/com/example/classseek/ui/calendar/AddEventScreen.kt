@@ -375,8 +375,30 @@ fun AddEventScreen(
     if (showStartTimePicker) {
         TimePickerDialog(
             initialTime = startTime,
-            onTimeSelected = {
-                startTime = it
+            onTimeSelected = { newStartTime ->
+                startTime = newStartTime
+                
+                // Calculate end time as 1 hour after start time
+                val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                try {
+                    val date = sdf.parse(newStartTime)
+                    if (date != null) {
+                        val cal = Calendar.getInstance().apply {
+                            time = date
+                        }
+                        
+                        val hour = cal.get(Calendar.HOUR_OF_DAY)
+                        if (hour == 23) {
+                            endTime = "11:59 PM"
+                        } else {
+                            cal.add(Calendar.HOUR_OF_DAY, 1)
+                            endTime = sdf.format(cal.time)
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Fallback or ignore if parsing fails
+                }
+
                 showStartTimePicker = false
             },
             onDismiss = { showStartTimePicker = false }
