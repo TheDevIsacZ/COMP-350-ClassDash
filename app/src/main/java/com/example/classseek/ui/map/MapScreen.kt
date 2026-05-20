@@ -29,6 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -176,7 +177,13 @@ fun MapScreen(
         val bookmarkedIds = userProfile?.bookmarkedEventIds ?: emptyList()
         calendarEvents.filter { it.id in bookmarkedIds && !it.location.isNullOrEmpty() }
             .mapNotNull { event ->
-                val eventLoc = event.location.lowercase()
+                val rawLoc = event.location.lowercase()
+                val eventLoc = if (rawLoc.contains("bell tower")) {
+                    val roomPart = rawLoc.substringAfter("bell tower").trim()
+                    if (roomPart.startsWith("2")) "west bell tower" else "east bell tower"
+                } else {
+                    rawLoc
+                }
 
                 // 1. Try exact or partial match with building names
                 var match = places.find { place ->
@@ -215,7 +222,12 @@ fun MapScreen(
     val scheduleMarkers = remember(calendarEvents, userProfile?.classes, places) {
         val classList = userProfile?.classes ?: emptyList()
         classList.mapNotNull { classInfo ->
-            val buildingInput = classInfo.building.lowercase()
+            val rawBuilding = classInfo.building.lowercase()
+            val buildingInput = if (rawBuilding == "bell tower") {
+                if (classInfo.roomNumber.startsWith("2")) "west bell tower" else "east bell tower"
+            } else {
+                rawBuilding
+            }
 
             // Re-use robust matching logic
             var match = places.find { place ->
@@ -383,13 +395,17 @@ fun MapScreen(
         }
     }
 
-    // Handle initial shared location from DM
+    // Handle initial shared location from DM but only pan once per unique shared location
+    var hasPannedToSharedLocation by rememberSaveable(sharedLocation) { mutableStateOf(false) }
+
     LaunchedEffect(sharedLocation, isMapReady) {
-        if (sharedLocation != null) {
+        if (sharedLocation != null && !hasPannedToSharedLocation) {
             if (isMapReady) {
                 cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(sharedLocation, 18f))
+                hasPannedToSharedLocation = true
             } else {
                 cameraPositionState.position = CameraPosition.fromLatLngZoom(sharedLocation, 18f)
+                // Don't set hasPanned to true here because isMapReady is false.
             }
             selectedPlace = incomingSharedMarker.firstOrNull()
         }
