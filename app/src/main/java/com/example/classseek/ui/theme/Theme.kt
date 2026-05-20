@@ -1,7 +1,5 @@
 package com.example.classseek.ui.theme
 
-import android.app.Activity
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -42,6 +40,10 @@ private val LightColorScheme = lightColorScheme(
 val AppPrimary: Color
     @Composable
     get() = MaterialTheme.colorScheme.primary
+
+val AppQuaternary: Color
+    @Composable
+    get() = if (isSystemInDarkTheme()) White else Black
 
 @Composable
 fun ClassSeekTheme(

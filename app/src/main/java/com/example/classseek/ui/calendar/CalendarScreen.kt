@@ -208,7 +208,10 @@ fun CalendarScreen(
                     arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
                 )
             }) {
-                Text("Grant Calendar Permissions")
+                Text(
+                    text = "Grant Calendar Permissions",
+                    color = Color.Black
+                )
             }
         }
     } else if (signedInAccount == null) {

@@ -495,6 +495,10 @@ fun AddEventScreen(
         ) {
             val colors = DatePickerDefaults.colors(
                 containerColor = Grey,
+                titleContentColor = Color.White,
+                headlineContentColor = Color.White,
+                subheadContentColor = Color.White,
+                navigationContentColor = Color.White,
                 dayContentColor = Color.White,
                 weekdayContentColor = Color.White,
                 todayContentColor = Color(0xFF4CAF50), // Standard Green
@@ -529,6 +533,10 @@ fun AddEventScreen(
         ) {
             val colors = DatePickerDefaults.colors(
                 containerColor = Grey,
+                titleContentColor = Color.White,
+                headlineContentColor = Color.White,
+                subheadContentColor = Color.White,
+                navigationContentColor = Color.White,
                 dayContentColor = Color.White,
                 weekdayContentColor = Color.White,
                 todayContentColor = Color(0xFF4CAF50),
