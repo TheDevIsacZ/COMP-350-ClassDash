@@ -41,6 +41,7 @@ fun AddEventScreen(
     initialDateMillis: Long? = null,
     existingEvent: com.google.api.services.calendar.model.Event? = null,
     initialReminders: List<Int> = emptyList(),
+    initialReminderUnits: Map<Int, String> = emptyMap(),
     onBackClick: () -> Unit,
     onSaveClick: (ClassSchedule) -> Unit,
     onDeleteClick: (() -> Unit)? = null
@@ -113,6 +114,10 @@ fun AddEventScreen(
         mutableStateOf(initialReminders)
     }
 
+    var selectedReminderUnits by remember(initialReminderUnits) {
+        mutableStateOf(initialReminderUnits)
+    }
+
     val days = listOf("M", "T", "W", "T", "F", "S", "S")
     val dayValues = listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY, Calendar.SUNDAY)
 
@@ -144,7 +149,8 @@ fun AddEventScreen(
                                     location = location,
                                     startDate = startDate,
                                     endDate = if (selectedDays.isEmpty()) startDate else endDate,
-                                    reminders = selectedReminders
+                                    reminders = selectedReminders,
+                                    reminderUnits = selectedReminderUnits
                                 )
                             )
                         },
@@ -394,9 +400,10 @@ fun AddEventScreen(
                 if (showCustomReminderDialog) {
                     CustomReminderDialog(
                         onDismiss = { showCustomReminderDialog = false },
-                        onConfirm = { minutes ->
+                        onConfirm = { minutes, unit ->
                             if (!selectedReminders.contains(minutes)) {
                                 selectedReminders = (selectedReminders + minutes).sortedDescending()
+                                selectedReminderUnits = selectedReminderUnits + (minutes to unit)
                             }
                             showCustomReminderDialog = false
                         }
@@ -404,11 +411,29 @@ fun AddEventScreen(
                 }
 
                 selectedReminders.forEach { minutes ->
-                    val label = when (minutes) {
-                        0 -> "At time of event"
-                        60 -> "1 hour before"
-                        in 1..59 -> "$minutes minutes before"
-                        else -> "${minutes / 60} hours before"
+                    val savedUnit = selectedReminderUnits[minutes]
+                    val label = when {
+                        minutes == 0 -> "At time of event"
+                        savedUnit != null -> {
+                            val amount = when (savedUnit) {
+                                "Hours" -> minutes / 60
+                                "Days" -> minutes / 1440
+                                else -> minutes
+                            }
+                            val unitLabel = when {
+                                savedUnit == "Hours" && amount == 1 -> "hour"
+                                savedUnit == "Hours" -> "hours"
+                                savedUnit == "Days" && amount == 1 -> "day"
+                                savedUnit == "Days" -> "days"
+                                amount == 1 -> "minute"
+                                else -> "minutes"
+                            }
+                            "$amount $unitLabel before"
+                        }
+                        minutes == 60 -> "1 hour before"
+                        minutes % 1440 == 0 -> "${minutes / 1440} days before"
+                        minutes % 60 == 0 -> "${minutes / 60} hours before"
+                        else -> "$minutes minutes before"
                     }
                     Row(
                         modifier = Modifier
@@ -644,7 +669,7 @@ private fun formatDate(timestamp: Long): String {
 @Composable
 fun CustomReminderDialog(
     onDismiss: () -> Unit,
-    onConfirm: (Int) -> Unit
+    onConfirm: (Int, String) -> Unit
 ) {
     var amountText by remember { mutableStateOf("10") }
     var selectedUnit by remember { mutableStateOf("Minutes before") }
@@ -747,7 +772,7 @@ fun CustomReminderDialog(
                                 "Days" -> amount * 60 * 24
                                 else -> amount
                             }
-                            onConfirm(minutes)
+                            onConfirm(minutes, selectedUnit)
                         }
                     ) {
                         Text("OK", color = purpleColor, style = MaterialTheme.typography.bodyLarge)

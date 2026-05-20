@@ -364,6 +364,22 @@ fun SettingsProfileScreen(
         }
 
         item { Spacer(modifier = Modifier.height(16.dp)) }
+
+        // Calendar Settings
+        item {
+            SettingsSectionCard(title = "Calendar") {
+                Column {
+                    SettingsSwitchRow(
+                        title = "Hide Campus Events",
+                        subtitle = "Hide unbookmarked campus events",
+                        checked = userProfile.hideCampusEvents,
+                        onCheckedChange = { onUpdateSettings(mapOf("hideCampusEvents" to it)) }
+                    )
+                }
+            }
+        }
+
+        item { Spacer(modifier = Modifier.height(16.dp)) }
         item { SettingsActionsCard(onEditProfile, onSignOut) { showDeleteConfirmDialog = true } }
     }
 

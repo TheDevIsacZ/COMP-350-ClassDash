@@ -31,7 +31,8 @@ data class UserProfile(
     val friendRequestNotificationsEnabled: Boolean = true,
     val showOnlineStatus: Boolean = true,
     val profileVisibility: String = "Public", // "Public" or "Friends Only"
-    val shareLocation: Boolean = true
+    val shareLocation: Boolean = true,
+    val hideCampusEvents: Boolean = false
 ) {
     val isProfileComplete: Boolean
         get() = name.isNotBlank() && major.isNotBlank()

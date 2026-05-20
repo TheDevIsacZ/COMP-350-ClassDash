@@ -11,7 +11,8 @@ fun saveRemindersToFirestore(
     eventId: String,
     eventTitle: String,
     eventTimeMillis: Long,
-    reminders: List<Int>
+    reminders: List<Int>,
+    reminderUnits: Map<Int, String> = emptyMap()
 ) {
     val db = FirebaseFirestore.getInstance()
     val userRef = db.collection("users").document(uid)
@@ -55,10 +56,11 @@ fun saveRemindersToFirestore(
             }
         }
 
-    // 3. Save the user's preferences (the list of minutes)
+    // 3. Save the user's preferences (the list of minutes and units)
     val preferenceData = hashMapOf(
         "eventId" to eventId,
         "selectedMinutesList" to reminders,
+        "reminderUnits" to reminderUnits.mapKeys { it.key.toString() }, // Firestore keys must be strings
         "lastUpdated" to System.currentTimeMillis()
     )
 

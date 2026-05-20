@@ -100,6 +100,11 @@ import androidx.compose.material3.MaterialTheme
 private const val schoolCalendarID =
     "c_d51f6135decfa961f6e26e7b759dd6d102ec5eb050afb040b211b749b04c0084@group.calendar.google.com"
 
+data class CalendarFetchResult(
+    val events: List<Event>,
+    val schoolEventIds: Set<String>
+)
+
 class ClassSeekActivity : ComponentActivity() {
 
     private var launchChatIdState = mutableStateOf<String?>(null)
@@ -180,7 +185,7 @@ class ClassSeekActivity : ComponentActivity() {
         val navigateTo = intent?.getStringExtra(MyFirebaseMessagingService.EXTRA_NAVIGATE_TO)
     }
 
-    suspend fun getCalendarEvents(account: GoogleSignInAccount): List<Event>? {
+    suspend fun getCalendarEvents(account: GoogleSignInAccount): CalendarFetchResult? {
         return withContext(Dispatchers.IO) {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
@@ -225,7 +230,10 @@ class ClassSeekActivity : ComponentActivity() {
                     emptyList()
                 }
 
-                (eventsResult.items ?: emptyList()) + schoolEvents
+                CalendarFetchResult(
+                    events = (eventsResult.items ?: emptyList()) + schoolEvents,
+                    schoolEventIds = schoolEvents.mapNotNull { it.id }.toSet()
+                )
             } catch (e: Exception) {
                 Log.e("CALENDAR_DEBUG", "getCalendarEvents: ERROR", e)
                 null
@@ -584,6 +592,7 @@ fun ClassSeekApp(
     val activity = remember(context) { context as? ClassSeekActivity }
 
     var calendarEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
+    var schoolEventIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var sharedEvents by remember { mutableStateOf<List<Event>>(emptyList()) }
     var signedInAccount by remember { mutableStateOf<GoogleSignInAccount?>(null) }
 
@@ -594,6 +603,7 @@ fun ClassSeekApp(
     var routedChatTitle by remember { mutableStateOf<String?>(null) }
 
     var reminderPreferences by remember { mutableStateOf<Map<String, List<Int>>>(emptyMap()) }
+    var reminderUnitsMap by remember { mutableStateOf<Map<String, Map<Int, String>>>(emptyMap()) }
 
     val profileFriends = remember { mutableStateListOf<UserSearchItem>() }
     val temporaryMarkers = remember { mutableStateListOf<MapPlace>() }
@@ -634,6 +644,7 @@ fun ClassSeekApp(
         firebaseUser = null
         signedInAccount = null
         calendarEvents = emptyList()
+        schoolEventIds = emptySet()
         reminderPreferences = emptyMap()
         userProfile = null
         isEditingProfile = false
@@ -688,14 +699,21 @@ fun ClassSeekApp(
                 .addSnapshotListener { snapshot, _ ->
                     if (snapshot != null) {
                         val prefs = mutableMapOf<String, List<Int>>()
+                        val units = mutableMapOf<String, Map<Int, String>>()
                         snapshot.documents.forEach { doc ->
                             val eventId = doc.id
                             @Suppress("UNCHECKED_CAST")
                             val minutesList = doc.get("selectedMinutesList") as? List<Long>
                             val minutes = minutesList?.map { it.toInt() } ?: emptyList()
                             prefs[eventId] = minutes
+
+                            @Suppress("UNCHECKED_CAST")
+                            val rawUnits = doc.get("reminderUnits") as? Map<String, String>
+                            val eventUnits = rawUnits?.mapKeys { it.key.toInt() } ?: emptyMap()
+                            units[eventId] = eventUnits
                         }
                         reminderPreferences = prefs
+                        reminderUnitsMap = units
                     }
                 }
         }
@@ -934,16 +952,22 @@ fun ClassSeekApp(
                 val account = task.result
                 signedInAccount = account
                 scope.launch {
-                    val events = activity?.getCalendarEvents(account)
-                    if (events != null) calendarEvents = events
+                    val result = activity?.getCalendarEvents(account)
+                    if (result != null) {
+                        calendarEvents = result.events
+                        schoolEventIds = result.schoolEventIds
+                    }
                 }
             } else {
                 val account = GoogleSignIn.getLastSignedInAccount(context)
                 if (account != null) {
                     signedInAccount = account
                     scope.launch {
-                        val events = activity?.getCalendarEvents(account)
-                        if (events != null) calendarEvents = events
+                        val result = activity?.getCalendarEvents(account)
+                        if (result != null) {
+                            calendarEvents = result.events
+                            schoolEventIds = result.schoolEventIds
+                        }
                     }
                 }
             }
@@ -965,8 +989,11 @@ fun ClassSeekApp(
                         firebaseUser = authResult.user
                         saveCurrentFcmTokenForUser()
 
-                        val events = activity?.getCalendarEvents(account)
-                        if (events != null) calendarEvents = events
+                        val result = activity?.getCalendarEvents(account)
+                        if (result != null) {
+                            calendarEvents = result.events
+                            schoolEventIds = result.schoolEventIds
+                        }
                     } catch (e: Exception) {
                         Log.e("AUTH_DEBUG", "Firebase auth failed", e)
                     }
@@ -1399,7 +1426,8 @@ fun ClassSeekApp(
                             "chatNotificationsEnabled" to profileWithId.chatNotificationsEnabled,
                             "calendarRemindersEnabled" to profileWithId.calendarRemindersEnabled,
                             "eventNotificationsEnabled" to profileWithId.eventNotificationsEnabled,
-                            "friendRequestNotificationsEnabled" to profileWithId.friendRequestNotificationsEnabled
+                            "friendRequestNotificationsEnabled" to profileWithId.friendRequestNotificationsEnabled,
+                            "hideCampusEvents" to profileWithId.hideCampusEvents
                         )
 
                         db.collection("users")
@@ -1431,11 +1459,18 @@ fun ClassSeekApp(
         } else {
             emptyList()
         }
+        
+        val savedUnits = if (eventId != null) {
+            (reminderUnitsMap[eventId] ?: reminderUnitsMap[recurringEventId]) ?: emptyMap()
+        } else {
+            emptyMap()
+        }
 
         AddEventScreen(
             initialDateMillis = initialDateForNewEvent,
             existingEvent = selectedEventToEdit,
             initialReminders = savedReminders,
+            initialReminderUnits = savedUnits,
             onBackClick = { 
                 isAddingEvent = false
                 selectedEventToEdit = null
@@ -1473,15 +1508,19 @@ fun ClassSeekApp(
                                         eventId = savedEventId,
                                         eventTitle = schedule.className,
                                         eventTimeMillis = startCal.timeInMillis,
-                                        reminders = schedule.reminders
+                                        reminders = schedule.reminders,
+                                        reminderUnits = schedule.reminderUnits
                                     )
                                 } else {
                                     deleteReminderFromFirestore(uid, savedEventId)
                                 }
                             }
 
-                            val events = activity?.getCalendarEvents(account)
-                            if (events != null) calendarEvents = events
+                            val result = activity?.getCalendarEvents(account)
+                            if (result != null) {
+                                calendarEvents = result.events
+                                schoolEventIds = result.schoolEventIds
+                            }
                             isAddingEvent = false
                             selectedEventToEdit = null
                         }
@@ -1500,8 +1539,11 @@ fun ClassSeekApp(
                                     deleteReminderFromFirestore(uid, eventId)
                                 }
 
-                                val events = activity?.getCalendarEvents(account)
-                                if (events != null) calendarEvents = events
+                                val result = activity?.getCalendarEvents(account)
+                                if (result != null) {
+                                    calendarEvents = result.events
+                                    schoolEventIds = result.schoolEventIds
+                                }
                                 selectedEventToEdit = null
                                 isAddingEvent = false
                             }
@@ -1530,6 +1572,7 @@ fun ClassSeekApp(
                             CalendarScreen(
                                 signedInAccount = signedInAccount,
                                 calendarEvents = displayedEvents,
+                                schoolEventIds = schoolEventIds,
                                 userProfile = userProfile,
                                 onSignInClick = { intent -> signInLauncher.launch(intent) },
                                 onAddEventClick = { dateMillis ->
@@ -1541,8 +1584,11 @@ fun ClassSeekApp(
                                         signedInAccount?.let { account ->
                                             val success = activity?.deleteEventFromCalendar(account, eventId) ?: false
                                             if (success) {
-                                                val events = activity?.getCalendarEvents(account)
-                                                if (events != null) calendarEvents = events
+                                            val result = activity?.getCalendarEvents(account)
+                                            if (result != null) {
+                                                calendarEvents = result.events
+                                                schoolEventIds = result.schoolEventIds
+                                            }
                                             }
                                         }
                                     }
