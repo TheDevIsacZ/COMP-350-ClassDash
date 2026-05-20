@@ -316,7 +316,7 @@ fun AddEventScreen(
                     Text(
                         "Add Notification",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
 
