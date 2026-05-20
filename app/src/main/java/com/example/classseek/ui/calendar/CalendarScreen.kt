@@ -80,6 +80,7 @@ import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.friends.SearchBar
 import com.example.classseek.ui.calendar.UserReminderPreference
+import com.example.classseek.ui.theme.AppPrimary
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -197,7 +198,7 @@ fun CalendarScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(Icons.Default.DateRange, contentDescription = "Calendar Icon", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.DateRange, contentDescription = "Calendar Icon", modifier = Modifier.size(64.dp), tint = AppPrimary)
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Calendar access is required to sync your schedule.", style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(16.dp))
@@ -218,7 +219,7 @@ fun CalendarScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(Icons.Default.AccountCircle, contentDescription = "Sign In Icon", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.AccountCircle, contentDescription = "Sign In Icon", modifier = Modifier.size(64.dp), tint = AppPrimary)
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Sign in to Google to view your events.", style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(16.dp))
@@ -335,7 +336,7 @@ fun CalendarScreen(
                         Text(
                             text = todayLabel,
                             style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = AppPrimary,
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
                         if (groupedEvents[todayLabel] == null) {
@@ -378,7 +379,7 @@ fun CalendarScreen(
                             Text(
                                 text = dateLabel,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = AppPrimary,
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
@@ -745,7 +746,7 @@ private fun CalendarDayCell(
 
     Box(
         modifier = modifier.height(44.dp).padding(2.dp).clip(CircleShape)
-            .background(when { isSelected -> MaterialTheme.colorScheme.primary; hasEvent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f); else -> Color.Transparent })
+            .background(when { isSelected -> AppPrimary; hasEvent -> AppPrimary.copy(alpha = 0.18f); else -> Color.Transparent })
             .clickable { onDateSelected(dayMillis) },
         contentAlignment = Alignment.Center
     ) {
@@ -755,7 +756,7 @@ private fun CalendarDayCell(
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal)
             if (hasEvent) Box(modifier = Modifier.size(4.dp).clip(CircleShape)
-                .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
+                .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else AppPrimary))
             else Spacer(modifier = Modifier.height(4.dp))
         }
     }
@@ -813,7 +814,7 @@ fun AgendaItem(
 
                     if (canDelete) {
                         IconButton(onClick = onEditClick) {
-                            Icon(Icons.Default.Edit, "Edit event", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Edit, "Edit event", tint = AppPrimary, modifier = Modifier.size(20.dp))
                         }
                     }
 
@@ -840,7 +841,7 @@ fun AgendaItem(
                         )
                     }
                     IconButton(onClick = onShareClick) {
-                        Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Share, "Share event", tint = AppPrimary, modifier = Modifier.size(20.dp))
                     }
                 }
             }

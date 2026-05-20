@@ -26,7 +26,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import com.example.classseek.models.ClassSchedule
+import com.example.classseek.ui.theme.AppPrimary
+import com.example.classseek.ui.theme.Grey
 import java.util.*
 import java.text.SimpleDateFormat
 
@@ -101,6 +106,7 @@ fun AddEventScreen(
     var showStartTimePicker by remember { mutableStateOf(false) }
     var showEndTimePicker by remember { mutableStateOf(false) }
     var showReminderMenu by remember { mutableStateOf(false) }
+    var showCustomReminderDialog by remember { mutableStateOf(false) }
 
     // Use a key to re-initialize when initialReminders change (important for new events after they get an ID)
     var selectedReminders by remember(initialReminders) { 
@@ -226,10 +232,10 @@ fun AddEventScreen(
                     modifier = Modifier.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.DateRange, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.DateRange, contentDescription = null, tint = AppPrimary)
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text("Date", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Text("Date", style = MaterialTheme.typography.labelMedium, color = AppPrimary)
                         Text(formatDate(startDate), style = MaterialTheme.typography.bodyLarge)
                     }
                 }
@@ -251,7 +257,7 @@ fun AddEventScreen(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
-                                .background(if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                                .background(if (isSelected) AppPrimary else MaterialTheme.colorScheme.surfaceVariant)
                                 .clickable {
                                     selectedDays = if (isSelected) {
                                         selectedDays - dayValue
@@ -304,7 +310,7 @@ fun AddEventScreen(
                     Icon(
                         imageVector = Icons.Outlined.Notifications,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = AppPrimary
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(
@@ -320,7 +326,7 @@ fun AddEventScreen(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(28.dp),
-                            color = Color(0xFF4E4D52),
+                            color = Grey,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
@@ -341,15 +347,17 @@ fun AddEventScreen(
                                     -1 to "Custom..."
                                 )
 
-                                options.forEach { (minutes, label) ->
+                                val filteredOptions = options.filter { (minutes, _) ->
+                                    minutes == -1 || !selectedReminders.contains(minutes)
+                                }
+
+                                filteredOptions.forEach { (minutes, label) ->
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clickable {
                                                 if (minutes == -1) {
-                                                    if (!selectedReminders.contains(120)) {
-                                                        selectedReminders = (selectedReminders + 120).sortedDescending()
-                                                    }
+                                                    showCustomReminderDialog = true
                                                 } else {
                                                     if (!selectedReminders.contains(minutes)) {
                                                         selectedReminders = (selectedReminders + minutes).sortedDescending()
@@ -380,6 +388,18 @@ fun AddEventScreen(
                             }
                         }
                     }
+                }
+
+                if (showCustomReminderDialog) {
+                    CustomReminderDialog(
+                        onDismiss = { showCustomReminderDialog = false },
+                        onConfirm = { minutes ->
+                            if (!selectedReminders.contains(minutes)) {
+                                selectedReminders = (selectedReminders + minutes).sortedDescending()
+                            }
+                            showCustomReminderDialog = false
+                        }
+                    )
                 }
 
                 selectedReminders.forEach { minutes ->
@@ -442,11 +462,15 @@ fun AddEventScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showStartDatePicker = false }) { Text("Cancel") }
-            }
+            },
+            colors = DatePickerDefaults.colors(
+                containerColor = Grey
+            )
         ) {
             val colors = DatePickerDefaults.colors(
-                dayContentColor = Color.Black,
-                weekdayContentColor = Color.Black,
+                containerColor = Grey,
+                dayContentColor = Color.White,
+                weekdayContentColor = Color.White,
                 todayContentColor = Color(0xFF4CAF50), // Standard Green
                 todayDateBorderColor = Color(0xFF4CAF50)
             )
@@ -472,11 +496,15 @@ fun AddEventScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showEndDatePicker = false }) { Text("Cancel") }
-            }
+            },
+            colors = DatePickerDefaults.colors(
+                containerColor = Grey
+            )
         ) {
             val colors = DatePickerDefaults.colors(
-                dayContentColor = Color.Black,
-                weekdayContentColor = Color.Black,
+                containerColor = Grey,
+                dayContentColor = Color.White,
+                weekdayContentColor = Color.White,
                 todayContentColor = Color(0xFF4CAF50),
                 todayDateBorderColor = Color(0xFF4CAF50)
             )
@@ -609,4 +637,122 @@ fun TimePickerDialog(
 private fun formatDate(timestamp: Long): String {
     val sdf = SimpleDateFormat("EEEE, MMM dd, yyyy", Locale.getDefault())
     return sdf.format(Date(timestamp))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CustomReminderDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var amountText by remember { mutableStateOf("10") }
+    var selectedUnit by remember { mutableStateOf("Minutes before") }
+    val units = listOf("Minutes before", "Hours", "Days")
+    val purpleColor = AppPrimary
+
+    BasicAlertDialog(
+        onDismissRequest = onDismiss
+    ) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = Grey,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Custom notification",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Color.White,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                OutlinedTextField(
+                    value = amountText,
+                    onValueChange = { if (it.all { char -> char.isDigit() }) amountText = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center, color = Color.White),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = purpleColor,
+                        unfocusedBorderColor = Color.White,
+                        cursorColor = purpleColor
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                units.forEach { unit ->
+                    val isSelected = selectedUnit == unit
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedUnit = unit }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .border(
+                                    width = 2.dp,
+                                    color = if (isSelected) purpleColor else Color.White,
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(purpleColor)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = unit,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = purpleColor)
+                    }
+                    TextButton(
+                        onClick = {
+                            val amount = amountText.toIntOrNull() ?: 10
+                            val minutes = when (selectedUnit) {
+                                "Minutes before" -> amount
+                                "Hours" -> amount * 60
+                                "Days" -> amount * 60 * 24
+                                else -> amount
+                            }
+                            onConfirm(minutes)
+                        }
+                    ) {
+                        Text("OK", color = purpleColor)
+                    }
+                }
+            }
+        }
+    }
 }
