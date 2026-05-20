@@ -190,19 +190,27 @@ fun ScheduleEditScreen(
                         }
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        val daysList = listOf("M", "T", "W", "TH", "F", "SA", "SU")
+                        val daysMap = listOf(
+                            "SU" to "S",
+                            "M" to "M",
+                            "T" to "T",
+                            "W" to "W",
+                            "TH" to "T",
+                            "F" to "F",
+                            "SA" to "S"
+                        )
                         val selectedDays = classInfo.dayOfWeek.split(",").filter { it.isNotBlank() }.toMutableList()
 
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            daysList.forEach { day ->
-                                val isSelected = selectedDays.contains(day)
+                            daysMap.forEach { (value, label) ->
+                                val isSelected = selectedDays.contains(value)
                                 FilterChip(
                                     selected = isSelected,
                                     onClick = {
-                                        if (isSelected) selectedDays.remove(day) else selectedDays.add(day)
+                                        if (isSelected) selectedDays.remove(value) else selectedDays.add(value)
                                         classes[index] = classInfo.copy(dayOfWeek = selectedDays.joinToString(","))
                                     },
-                                    label = { Text(day, fontSize = 9.sp) },
+                                    label = { Text(label, fontSize = 9.sp) },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
