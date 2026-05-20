@@ -541,26 +541,6 @@ fun MapScreen(
                             }
                         )
                     } else {
-                        // Separate unclickable marker for the name label
-                        MarkerComposable(
-                            state = rememberMarkerState(position = place.location),
-                            alpha = markerAlpha,
-                            anchor = Offset(0.5f, 2.4f), // Positioned above the icon
-                            onClick = { false } // Clicks on the name do not select the building
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(3.3.dp),
-                                color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                            ) {
-                                Text(
-                                    text = place.name,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                    modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
-                                    color = Color.Black
-                                )
-                            }
-                        }
-
                         // Clickable marker for the icon and badges
                         MarkerComposable(
                             state = rememberMarkerState(position = place.location),
@@ -573,7 +553,7 @@ fun MapScreen(
                         ) {
                             Box(
                                 contentAlignment = Alignment.Center,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 0.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -594,7 +574,7 @@ fun MapScreen(
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
-                                            .offset(x = 7.dp, y = 0.dp)
+                                            .offset(x = 6.dp, y = 0.dp)
                                             .background(Color.White, CircleShape)
                                             .border(1.dp, MarkerCategory.CLASS.color, CircleShape)
                                             .padding(2.dp)
@@ -612,7 +592,7 @@ fun MapScreen(
                                     Box(
                                         modifier = Modifier
                                             .align(if (classesHere.isNotEmpty()) Alignment.BottomStart else Alignment.BottomEnd)
-                                            .offset(x = if (classesHere.isNotEmpty()) (-7).dp else 7.dp, y = 0.dp)
+                                            .offset(x = if (classesHere.isNotEmpty()) (-6).dp else 6.dp, y = 0.dp)
                                             .background(Color.White, CircleShape)
                                             .border(1.dp, MarkerCategory.BOOKMARK.color, CircleShape)
                                             .padding(2.dp)
@@ -625,6 +605,27 @@ fun MapScreen(
                                         )
                                     }
                                 }
+                            }
+                        }
+
+                        // Separate unclickable marker for the name label
+                        MarkerComposable(
+                            state = rememberMarkerState(position = place.location),
+                            alpha = markerAlpha,
+                            anchor = Offset(0.5f, 2.4f),
+                            zIndex = 1f,
+                            onClick = { false }
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(3.3.dp),
+                                color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                            ) {
+                                Text(
+                                    text = place.name,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                    modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
+                                    color = Color.Black
+                                )
                             }
                         }
                     }
