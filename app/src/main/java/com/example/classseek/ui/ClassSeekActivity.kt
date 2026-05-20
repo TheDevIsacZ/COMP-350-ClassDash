@@ -417,6 +417,35 @@ class ClassSeekActivity : ComponentActivity() {
         }
     }
 
+    suspend fun addEventToGoogleCalendar(
+        account: GoogleSignInAccount,
+        event: Event
+    ): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val calendarScope = "https://www.googleapis.com/auth/calendar"
+                val credential = GoogleAccountCredential.usingOAuth2(
+                    this@ClassSeekActivity,
+                    listOf(calendarScope)
+                )
+                credential.selectedAccountName = account.email
+
+                val service = Calendar.Builder(
+                    NetHttpTransport(),
+                    GsonFactory.getDefaultInstance(),
+                    credential
+                ).setApplicationName("ClassSeek").build()
+
+                val createdEvent = service.events().insert("primary", event).execute()
+                Log.d("CALENDAR_DEBUG", "Shared event added to Google Calendar: ${createdEvent.id}")
+                createdEvent.id
+            } catch (e: Exception) {
+                Log.e("CALENDAR_DEBUG", "addEventToGoogleCalendar: ERROR", e)
+                null
+            }
+        }
+    }
+
     private fun getFirstOccurrence(schedule: ClassSchedule): java.util.Calendar {
         val cal = java.util.Calendar.getInstance()
         cal.timeInMillis = schedule.startDate
@@ -1136,7 +1165,10 @@ fun ClassSeekApp(
 
         val bookmarkedSharedEvents = sharedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
 
-        calendarEvents + virtualEvents + bookmarkedSharedEvents
+        val calendarIds = calendarEvents.mapNotNull { it.id }.toSet()
+        val uniqueSharedEvents = bookmarkedSharedEvents.filter { it.id !in calendarIds }
+
+        calendarEvents + virtualEvents + uniqueSharedEvents
     }
 
     val myBookmarkedEvents = displayedEvents.filter { userProfile?.bookmarkedEventIds?.contains(it.id) == true }
@@ -1334,6 +1366,80 @@ fun ClassSeekApp(
                 consumeRoutedChat()
                 consumePendingNotificationChat()
                 currentDestination = AppDestinations.MAP
+            },
+            onAddEventToCalendar = { eventMsg ->
+                if (firebaseUser?.uid != null && eventMsg.eventId != null) {
+                    val currentUid = firebaseUser!!.uid
+                    
+                    scope.launch {
+                        signedInAccount?.let { account ->
+                            val googleEvent = Event().apply {
+                                summary = eventMsg.eventTitle ?: "Shared Event"
+                                location = eventMsg.eventLocation
+                                description = "Added from ClassSeek chat"
+                                
+                                val fullSdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+                                val dateSdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                                
+                                start = EventDateTime().apply {
+                                    val date = try { fullSdf.parse(eventMsg.eventStart ?: "") } 
+                                              catch (e: Exception) { try { dateSdf.parse(eventMsg.eventStart ?: "") } catch (e: Exception) { null } }
+                                    if (date != null) {
+                                        val cal = java.util.Calendar.getInstance().apply { time = date }
+                                        if (cal.get(java.util.Calendar.YEAR) == 1970) {
+                                            cal.set(java.util.Calendar.YEAR, java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+                                        }
+                                        dateTime = DateTime(cal.time)
+                                    }
+                                }
+                                
+                                end = EventDateTime().apply {
+                                    val date = try { fullSdf.parse(eventMsg.eventEnd ?: "") } 
+                                              catch (e: Exception) { try { dateSdf.parse(eventMsg.eventEnd ?: "") } catch (e: Exception) { null } }
+                                    if (date != null) {
+                                        val cal = java.util.Calendar.getInstance().apply { time = date }
+                                        if (cal.get(java.util.Calendar.YEAR) == 1970) {
+                                            cal.set(java.util.Calendar.YEAR, java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+                                        }
+                                        dateTime = DateTime(cal.time)
+                                    }
+                                }
+                            }
+                            
+                            val successId = activity?.addEventToGoogleCalendar(account, googleEvent)
+                            
+                            if (successId != null) {
+                                val eventData = hashMapOf(
+                                    "eventId" to successId,
+                                    "title" to (eventMsg.eventTitle ?: "Event"),
+                                    "start" to (eventMsg.eventStart ?: ""),
+                                    "end" to (eventMsg.eventEnd ?: ""),
+                                    "location" to (eventMsg.eventLocation ?: ""),
+                                    "savedAt" to FieldValue.serverTimestamp()
+                                )
+
+                                db.collection("users")
+                                    .document(currentUid)
+                                    .collection("sharedEvents")
+                                    .document(successId)
+                                    .set(eventData)
+
+                                db.collection("users")
+                                    .document(currentUid)
+                                    .update(
+                                        "bookmarkedEventIds",
+                                        FieldValue.arrayUnion(successId)
+                                    )
+
+                                val result = activity?.getCalendarEvents(account)
+                                if (result != null) {
+                                    calendarEvents = result.events
+                                    schoolEventIds = result.schoolEventIds
+                                }
+                            }
+                        }
+                    }
+                }
             },
             repo = repo,
             auth = auth

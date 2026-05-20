@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.ui.theme.AppPrimary
+//import com.example.classseek.ui.theme.AppQuaternary
 import com.example.classseek.ui.theme.Grey
 import java.util.*
 import java.text.SimpleDateFormat
@@ -324,6 +325,7 @@ fun AddEventScreen(
                         "Add notification",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Color.White
+                        //color = Color.AppQuaternary
                     )
                 }
 
