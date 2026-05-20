@@ -335,15 +335,12 @@ fun SettingsProfileScreen(
                         onCheckedChange = { onUpdateSettings(mapOf("showOnlineStatus" to it)) }
                     )
                     HorizontalDivider(color = ProfileTheme.Border)
-                    /*
                     SettingsSwitchRow(
                         title = "Location Sharing",
-                        subtitle = "Allow sharing location in chats",
+                        subtitle = "Allow location sharing on map",
                         checked = userProfile.shareLocation,
                         onCheckedChange = { onUpdateSettings(mapOf("shareLocation" to it)) }
                     )
-
-                     */
                     HorizontalDivider(color = ProfileTheme.Border)
                     Column(modifier = Modifier.padding(vertical = 12.dp)) {
                         Text("Profile Visibility", style = MaterialTheme.typography.titleSmall, color = ProfileTheme.Primary)
@@ -1137,15 +1134,17 @@ fun ScheduleSection(
                     onClick = onEditClick,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
+                        .size(28.dp)
                         .background(
-                            MaterialTheme.colorScheme.surfaceVariant,
+                            MaterialTheme.colorScheme.secondaryContainer,
                             CircleShape
                         )
                 ) {
                     Icon(
                         Icons.Default.Edit,
                         contentDescription = "Edit Schedule",
-                        tint = ProfileTheme.MutedForeground
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                 }
             }

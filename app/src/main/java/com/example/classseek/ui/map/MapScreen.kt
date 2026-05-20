@@ -950,7 +950,7 @@ fun MapScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            if (hasPermission) {
+            if (hasPermission && userProfile?.shareLocation != false) {
                 FloatingActionButton(
                     onClick = {
                         if (location != null) {
