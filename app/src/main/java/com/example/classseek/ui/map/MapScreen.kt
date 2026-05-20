@@ -109,6 +109,7 @@ fun MapScreen(
     val userProfiles = remember { mutableStateMapOf<String, UserProfile>() }
 
     var searchQuery by remember { mutableStateOf("") }
+    var showSuggestions by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf(MarkerCategory.ALL) }
     var isListVisible by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
@@ -459,11 +460,15 @@ fun MapScreen(
 
             baseMarkers.forEach { place ->
                 val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
-                val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
 
                 // Find events/classes at this specific location to show as badges
                 val classesHere = scheduleMarkers.filter { it.location == place.location }
                 val eventsHere = bookmarkMarkers.filter { it.location == place.location }
+
+                val isInSelectedCategory = selectedCategory == MarkerCategory.ALL ||
+                        place.category == selectedCategory ||
+                        (selectedCategory == MarkerCategory.CLASS && classesHere.isNotEmpty()) ||
+                        (selectedCategory == MarkerCategory.BOOKMARK && eventsHere.isNotEmpty())
 
                 val markerAlpha = if (selectedPlace != null) {
                     if (isSelected) 1.0f else 0.35f
@@ -795,26 +800,22 @@ fun MapScreen(
                     value = searchQuery,
                     onValueChange = { newValue ->
                         searchQuery = newValue
-                        allMarkers.find { it.name.contains(newValue, ignoreCase = true) }?.let { match ->
-                            // Resolve to base marker if a class or event is found
-                            val finalMatch = if (match.category == MarkerCategory.CLASS || match.category == MarkerCategory.BOOKMARK) {
-                                places.find { it.location == match.location } ?: match
-                            } else match
-
-                            selectedPlace = finalMatch
-                            scope.launch {
-                                if (isMapReady) {
-                                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(finalMatch.location, 18f))
-                                } else {
-                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(finalMatch.location, 18f)
-                                }
-                            }
-                        }
+                        showSuggestions = newValue.isNotEmpty()
                     },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Search facilities...") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = ""; selectedPlace = null }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = {
+                                searchQuery = ""
+                                selectedPlace = null
+                                showSuggestions = false
+                            }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                            }
+                        }
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(24.dp),
                     colors = TextFieldDefaults.colors(
@@ -890,6 +891,62 @@ fun MapScreen(
                     }
                 }
             }
+
+            // Search Suggestions Card
+            if (showSuggestions && searchQuery.isNotBlank()) {
+                val suggestions = allMarkers.filter {
+                    it.name.contains(searchQuery, ignoreCase = true) ||
+                    it.description.contains(searchQuery, ignoreCase = true)
+                }.take(5)
+
+                if (suggestions.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = 64.dp), // Align with search bar width (approx)
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.95f))
+                    ) {
+                        Column {
+                            suggestions.forEach { place ->
+                                ListItem(
+                                    headlineContent = { Text(place.name, style = MaterialTheme.typography.bodyMedium) },
+                                    supportingContent = { Text(place.category.label, style = MaterialTheme.typography.labelSmall) },
+                                    leadingContent = {
+                                        Icon(
+                                            imageVector = place.category.icon,
+                                            contentDescription = null,
+                                            tint = place.category.color,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    },
+                                    modifier = Modifier.clickable {
+                                        searchQuery = place.name
+                                        showSuggestions = false
+
+                                        // Resolve to base marker if a class or event is found
+                                        val finalMatch = if (place.category == MarkerCategory.CLASS || place.category == MarkerCategory.BOOKMARK) {
+                                            places.find { it.location == place.location } ?: place
+                                        } else place
+
+                                        selectedPlace = finalMatch
+                                        scope.launch {
+                                            if (isMapReady) {
+                                                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(finalMatch.location, 18f))
+                                            } else {
+                                                cameraPositionState.position = CameraPosition.fromLatLngZoom(finalMatch.location, 18f)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
 
             Spacer(Modifier.height(8.dp))
 
