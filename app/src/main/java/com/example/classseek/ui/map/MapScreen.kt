@@ -610,13 +610,16 @@ fun MapScreen(
                             }
                         }
 
-                        // Separate unclickable marker for the name label
+                        // Separate clickable marker for the name label - Rendered last to be on top
                         MarkerComposable(
                             state = rememberMarkerState(position = place.location),
                             alpha = markerAlpha,
-                            anchor = Offset(0.5f, 2.4f),
-                            zIndex = 1f,
-                            onClick = { false }
+                            anchor = Offset(0.5f, 2.4f), // Positioned above the icon
+                            zIndex = 1f, // Ensure text is drawn over the icons
+                            onClick = {
+                                selectedPlace = place
+                                true
+                            }
                         ) {
                             Surface(
                                 shape = RoundedCornerShape(3.3.dp),
@@ -726,7 +729,7 @@ fun MapScreen(
                                 "Classes:",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MarkerCategory.CLASS.color
+                                color = Color(0xFF1B5E20) 
                             )
                             classesHere.forEach { cls ->
                                 val roomPart = cls.description.substringAfterLast(" ", "")
@@ -744,7 +747,7 @@ fun MapScreen(
                                 "Events:",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MarkerCategory.BOOKMARK.color
+                                color = Color(0xFFBF8F00) 
                             )
                             eventsHere.forEach { ev ->
                                 Text(
@@ -1216,22 +1219,22 @@ private fun formatEventDateTime(dateTime: EventDateTime?): String {
     }
 
     val cal = java.util.Calendar.getInstance().apply { time = date }
-    val dayInitial = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
-        java.util.Calendar.SUNDAY -> "S"
+    val dayLabel = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
+        java.util.Calendar.SUNDAY -> "SU"
         java.util.Calendar.MONDAY -> "M"
-        java.util.Calendar.TUESDAY -> "T"
+        java.util.Calendar.TUESDAY -> "Tu"
         java.util.Calendar.WEDNESDAY -> "W"
-        java.util.Calendar.THURSDAY -> "T"
+        java.util.Calendar.THURSDAY -> "TH"
         java.util.Calendar.FRIDAY -> "F"
-        java.util.Calendar.SATURDAY -> "S"
+        java.util.Calendar.SATURDAY -> "SA"
         else -> ""
     }
 
     return if (dateTime.dateTime != null) {
         val timeSdf = SimpleDateFormat("h:mm a", Locale.getDefault())
-        "$dayInitial ${timeSdf.format(date)}"
+        "$dayLabel ${timeSdf.format(date)}"
     } else {
-        dayInitial
+        dayLabel
     }
 }
 
