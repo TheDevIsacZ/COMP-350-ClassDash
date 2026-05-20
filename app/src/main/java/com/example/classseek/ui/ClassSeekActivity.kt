@@ -1056,7 +1056,7 @@ fun ClassSeekApp(
         }
     }
 
-    val displayedEvents = remember(calendarEvents, userProfile?.classes, sharedEvents) {
+    val displayedEvents = remember(calendarEvents, userProfile?.classes, sharedEvents, userProfile?.bookmarkedEventIds) {
         val virtualEvents = userProfile?.classes?.flatMap { classInfo: ClassInfo ->
             val daysMap = mapOf(
                 "Monday" to java.util.Calendar.MONDAY,
