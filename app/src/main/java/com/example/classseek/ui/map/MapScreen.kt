@@ -47,6 +47,7 @@ import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.theme.AppPrimary
 import com.google.android.gms.location.*
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -769,7 +770,7 @@ fun MapScreen(
                         onClick = { isFilterMenuExpanded = true },
                         modifier = Modifier.size(55.dp),
                         containerColor = Color.White.copy(alpha = 0.9f),
-                        contentColor = MaterialTheme.colorScheme.primary,
+                        contentColor = AppPrimary,
                         shape = RoundedCornerShape(18.dp),
                         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
                     ) {
@@ -832,7 +833,7 @@ fun MapScreen(
                     }
                 },
                 modifier = Modifier.size(48.dp),
-                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                containerColor = AppPrimary.copy(alpha = 0.9f),
                 contentColor = Color.White,
                 shape = RoundedCornerShape(12.dp)
             ) {
@@ -931,7 +932,7 @@ fun MapScreen(
                             }
                         },
                         containerColor = if (mapType == MapType.SATELLITE) {
-                            MaterialTheme.colorScheme.primary
+                            AppPrimary
                         } else {
                             Color.White
                         },

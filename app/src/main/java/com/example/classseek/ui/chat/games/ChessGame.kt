@@ -19,6 +19,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.GameState
+import com.example.classseek.ui.theme.AppPrimary
 import kotlinx.coroutines.launch
 import com.github.bhlangonijr.chesslib.Board
 import com.github.bhlangonijr.chesslib.Square
@@ -218,14 +219,14 @@ fun ChessGameOverlay(
                         Text(
                             text = resultText,
                             style = MaterialTheme.typography.headlineSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = AppPrimary,
                             fontWeight = FontWeight.Bold
                         )
                     } else {
                         Text(
                             text = if (isMyTurn) "Your Turn" else "Opponent's Turn",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (isMyTurn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            color = if (isMyTurn) AppPrimary else MaterialTheme.colorScheme.onSurface
                         )
                     }
 

@@ -7,5 +7,6 @@ data class ClassSchedule(
     val endTime: String,   // "hh:mm a"
     val location: String = "",
     val startDate: Long,    // timestamp
-    val endDate: Long       // timestamp
+    val endDate: Long,       // timestamp
+    val reminders: List<Int> = emptyList() // list of minutes before event
 )

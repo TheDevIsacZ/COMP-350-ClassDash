@@ -87,6 +87,7 @@ import com.example.classseek.data.ChatRepository
 import com.example.classseek.data.GroupMember
 import com.example.classseek.data.Message
 import com.example.classseek.ui.chat.games.ChessGameOverlay
+import com.example.classseek.ui.theme.AppPrimary
 import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
@@ -1595,7 +1596,7 @@ private fun ChatMessageInputBar(
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = "Games",
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = AppPrimary
                     )
                 }
 
@@ -1743,7 +1744,7 @@ private fun MessageRow(
                                 Icon(
                                     Icons.Default.Map,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+                                    tint = AppPrimary
                                 )
 
                                 Spacer(Modifier.width(8.dp))
@@ -1797,7 +1798,7 @@ private fun MessageRow(
                                         Icon(
                                             imageVector = Icons.Default.BookmarkAdd,
                                             contentDescription = "Add to Calendar",
-                                            tint = MaterialTheme.colorScheme.primary
+                                            tint = AppPrimary
                                         )
                                     }
                                 }
@@ -1832,7 +1833,7 @@ private fun MessageRow(
                                         msg.text?.contains("won") == true ||
                                         msg.text?.contains("Draw") == true
                                     ) {
-                                        MaterialTheme.colorScheme.primary
+                                        AppPrimary
                                     } else {
                                         MaterialTheme.colorScheme.onSurfaceVariant
                                     }
