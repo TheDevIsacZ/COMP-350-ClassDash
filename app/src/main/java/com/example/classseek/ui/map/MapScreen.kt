@@ -389,7 +389,7 @@ fun MapScreen(
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
             val locationCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
-                    if (userProfile?.shareLocation == false) return
+                    if (currentUserProfile?.shareLocation == false) return
 
                     result.lastLocation?.let { newLoc ->
                         location = newLoc
@@ -422,22 +422,27 @@ fun MapScreen(
             onMapClick = { selectedPlace = null }
         ) {
             val profilePicUrl = currentUserProfile?.profilePictureUrl
+            val userMarkerState = rememberMarkerState()
+
+            // Update user marker position when location changes
+            LaunchedEffect(location) {
+                location?.let {
+                    userMarkerState.position = LatLng(it.latitude, it.longitude)
+                }
+            }
+
+            // Fetch the bitmap whenever the profile picture URL changes
+            LaunchedEffect(profilePicUrl) {
+                if (!profilePicUrl.isNullOrBlank()) {
+                    userMarkerIcon = loadMarkerBitmap(context, profilePicUrl)
+                }
+            }
 
             // User Location Marker - only if location is available
-            location?.let { loc ->
-                val currentLatLng = LatLng(loc.latitude, loc.longitude)
-
-                // Fetch the bitmap whenever the profile picture URL changes
-                LaunchedEffect(profilePicUrl) {
-                    Log.d("MapScreen", "User profilePicUrl updated in MapScreen: '$profilePicUrl'")
-                    if (!profilePicUrl.isNullOrBlank()) {
-                        userMarkerIcon = loadMarkerBitmap(context, profilePicUrl)
-                    }
-                }
-
-                // Only draw the marker once the icon is ready OR use a fallback
+            if (location != null) {
+                val currentLatLng = LatLng(location!!.latitude, location!!.longitude)
                 Marker(
-                    state = rememberMarkerState(position = currentLatLng),
+                    state = userMarkerState,
                     icon = userMarkerIcon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
                     anchor = Offset(0.5f, 0.5f),
                     title = "My Location",
@@ -483,81 +488,88 @@ fun MapScreen(
                             }
                         )
                     } else {
+                        // Separate unclickable marker for the name label
                         MarkerComposable(
                             state = rememberMarkerState(position = place.location),
                             alpha = markerAlpha,
-                            anchor = Offset(0.5f, 1.0f),
+                            anchor = Offset(0.5f, 2.4f), // Positioned above the icon
+                            onClick = { false } // Clicks on the name do not select the building
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(3.3.dp),
+                                color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                            ) {
+                                Text(
+                                    text = place.name,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                    modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
+                                    color = Color.Black
+                                )
+                            }
+                        }
+
+                        // Clickable marker for the icon and badges
+                        MarkerComposable(
+                            state = rememberMarkerState(position = place.location),
+                            alpha = markerAlpha,
+                            anchor = Offset(0.5f, 0.96f), // Adjusted for padding
                             onClick = {
                                 selectedPlace = place
                                 true
                             }
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Surface(
-                                        shape = RoundedCornerShape(3.3.dp),
-                                        color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                        modifier = Modifier.padding(bottom = 1.4.dp)
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 0.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color.White, CircleShape)
+                                        .border(2.dp, place.category.color, CircleShape)
+                                        .padding(3.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = place.category.icon,
+                                        contentDescription = null,
+                                        tint = place.category.color,
+                                        modifier = Modifier.size(19.8.dp)
+                                    )
+                                }
+
+                                // Overlay badges for Classes (Right) and Events (Left)
+                                if (classesHere.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .offset(x = 7.dp, y = 0.dp)
+                                            .background(Color.White, CircleShape)
+                                            .border(1.dp, MarkerCategory.CLASS.color, CircleShape)
+                                            .padding(2.dp)
                                     ) {
-                                        Text(
-                                            text = place.name,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                            modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
-                                            color = Color.Black
+                                        Icon(
+                                            imageVector = MarkerCategory.CLASS.icon,
+                                            contentDescription = null,
+                                            tint = MarkerCategory.CLASS.color,
+                                            modifier = Modifier.size(10.dp)
                                         )
                                     }
+                                }
 
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color.White, CircleShape)
-                                                .border(2.dp, place.category.color, CircleShape)
-                                                .padding(3.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = place.category.icon,
-                                                contentDescription = null,
-                                                tint = place.category.color,
-                                                modifier = Modifier.size(19.8.dp)
-                                            )
-                                        }
-
-                                        // Overlay badges for Classes (Right) and Events (Left)
-                                        if (classesHere.isNotEmpty()) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.BottomEnd)
-                                                    .offset(x = 1.dp, y = 0.dp)
-                                                    .background(Color.White, CircleShape)
-                                                    .border(1.dp, MarkerCategory.CLASS.color, CircleShape)
-                                                    .padding(2.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = MarkerCategory.CLASS.icon,
-                                                    contentDescription = null,
-                                                    tint = MarkerCategory.CLASS.color,
-                                                    modifier = Modifier.size(10.dp)
-                                                )
-                                            }
-                                        }
-
-                                        if (eventsHere.isNotEmpty()) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(if (classesHere.isNotEmpty()) Alignment.BottomStart else Alignment.BottomEnd)
-                                                    .offset(x = if (classesHere.isNotEmpty()) (-1).dp else 1.dp, y = 0.dp)
-                                                    .background(Color.White, CircleShape)
-                                                    .border(1.dp, MarkerCategory.BOOKMARK.color, CircleShape)
-                                                    .padding(2.dp)
-                                            ) {
-                                                Icon(
-                                                    imageVector = MarkerCategory.BOOKMARK.icon,
-                                                    contentDescription = null,
-                                                    tint = MarkerCategory.BOOKMARK.color,
-                                                    modifier = Modifier.size(10.dp)
-                                                )
-                                            }
-                                        }
+                                if (eventsHere.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(if (classesHere.isNotEmpty()) Alignment.BottomStart else Alignment.BottomEnd)
+                                            .offset(x = if (classesHere.isNotEmpty()) (-7).dp else 7.dp, y = 0.dp)
+                                            .background(Color.White, CircleShape)
+                                            .border(1.dp, MarkerCategory.BOOKMARK.color, CircleShape)
+                                            .padding(2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = MarkerCategory.BOOKMARK.icon,
+                                            contentDescription = null,
+                                            tint = MarkerCategory.BOOKMARK.color,
+                                            modifier = Modifier.size(10.dp)
+                                        )
                                     }
                                 }
                             }
