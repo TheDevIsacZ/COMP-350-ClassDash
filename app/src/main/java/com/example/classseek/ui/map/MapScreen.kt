@@ -47,6 +47,7 @@ import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.SearchBar
 import com.example.classseek.ui.theme.AppPrimary
 import com.google.android.gms.location.*
 import com.google.android.gms.maps.CameraUpdateFactory
@@ -125,6 +126,7 @@ fun MapScreen(
     var showShareDialog by remember { mutableStateOf(false) }
     var myChats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
     var selectedChatFilter by remember { mutableStateOf("All") }
+    var shareSearchQuery by remember { mutableStateOf("") }
 
     // State for compass heading
     var heading by remember { mutableStateOf(0f) }
@@ -760,7 +762,10 @@ fun MapScreen(
         if (showShareDialog) {
             val shareSheetState = rememberModalBottomSheetState()
             ModalBottomSheet(
-                onDismissRequest = { showShareDialog = false },
+                onDismissRequest = { 
+                    showShareDialog = false
+                    shareSearchQuery = ""
+                },
                 sheetState = shareSheetState
             ) {
                 Column(
@@ -772,6 +777,13 @@ fun MapScreen(
                         text = "Share with...",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    SearchBar(
+                        query = shareSearchQuery,
+                        onQueryChange = { shareSearchQuery = it },
+                        placeholder = "Search friends...",
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
 
@@ -807,11 +819,16 @@ fun MapScreen(
                         )
                     }
 
-                    val filteredChats = remember(myChats, selectedChatFilter) {
-                        when (selectedChatFilter) {
+                    val filteredChats = remember(myChats, selectedChatFilter, shareSearchQuery) {
+                        val typeFiltered = when (selectedChatFilter) {
                             "DMs" -> myChats.filter { it.type == "dm" }
                             "Groups" -> myChats.filter { it.type == "group" }
                             else -> myChats
+                        }
+                        if (shareSearchQuery.isBlank()) {
+                            typeFiltered
+                        } else {
+                            typeFiltered.filter { it.title.contains(shareSearchQuery, ignoreCase = true) }
                         }
                     }
 
@@ -898,8 +915,8 @@ fun MapScreen(
                         showSuggestions = newValue.isNotEmpty()
                     },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search facilities...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    placeholder = { Text("Search facilities...", color = Color.DarkGray) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.DarkGray) },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = {
