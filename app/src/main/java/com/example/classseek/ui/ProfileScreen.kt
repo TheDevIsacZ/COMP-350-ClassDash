@@ -1179,9 +1179,12 @@ fun ScheduleSection(
                     val activeClasses = userProfile.classes.filter { it.className.isNotBlank() }
 
                     activeClasses.forEachIndexed { index, classInfo ->
-                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 52.dp)
+                                    .padding(vertical = 10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -1226,10 +1229,7 @@ fun ScheduleSection(
                             }
 
                             if (index != activeClasses.lastIndex) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(vertical = 8.dp),
-                                    color = ProfileTheme.Border
-                                )
+                                HorizontalDivider(color = ProfileTheme.Border)
                             }
                         }
                     }
