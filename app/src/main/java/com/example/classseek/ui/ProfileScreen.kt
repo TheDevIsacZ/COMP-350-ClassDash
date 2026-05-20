@@ -1245,27 +1245,32 @@ fun BookmarkedEventsSection(
     events: List<Event>,
     onRemoveBookmark: (Event) -> Unit
 ) {
-    ProfileModuleSurface {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Bookmarked Events",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = ProfileTheme.Primary
-            )
+    var isExpanded by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
 
-            Icon(
-                imageVector = Icons.Default.Bookmark,
-                contentDescription = null,
-                tint = Color.Gray
-            )
+    val normalizedQuery = searchQuery.trim()
+
+    val filteredEvents = if (normalizedQuery.isBlank()) {
+        events
+    } else {
+        events.filter { event ->
+            (event.summary ?: "").contains(normalizedQuery, ignoreCase = true) ||
+                    (event.location ?: "").contains(normalizedQuery, ignoreCase = true)
         }
+    }
 
-        Spacer(modifier = Modifier.height(8.dp))
+    val previewEvents = events.take(3)
+
+    SettingsSectionCard(title = "Bookmarked Events") {
+        if (isExpanded) {
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                placeholder = "Search bookmarks"
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         if (events.isEmpty()) {
             Text(
@@ -1274,65 +1279,113 @@ fun BookmarkedEventsSection(
                 color = ProfileTheme.MutedForeground,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
-        } else {
-            events.forEachIndexed { index, event ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = event.summary ?: "(No Title)",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = ProfileTheme.Primary
-                        )
-
-                        val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
-                        if (dateText.isNotEmpty()) {
-                            Text(
-                                text = dateText,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = ProfileTheme.MutedForeground
-                            )
-                        }
-
-                        if (!event.location.isNullOrBlank()) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.LocationOn,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = ProfileTheme.MutedForeground
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = event.location,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = ProfileTheme.MutedForeground,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-
-                    IconButton(onClick = { onRemoveBookmark(event) }) {
-                        Icon(
-                            imageVector = Icons.Default.Bookmark,
-                            contentDescription = "Remove Bookmark",
-                            tint = Color(0xFFFFD700)
-                        )
-                    }
-                }
-
-                if (index != events.lastIndex) {
+        } else if (isExpanded && filteredEvents.isEmpty()) {
+            Text(
+                text = "No matching events.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ProfileTheme.MutedForeground,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+        } else if (isExpanded) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+            ) {
+                items(filteredEvents) { event ->
+                    ProfileEventItem(
+                        event = event,
+                        onRemoveBookmark = { onRemoveBookmark(event) }
+                    )
                     HorizontalDivider(color = ProfileTheme.Border)
                 }
             }
+        } else {
+            previewEvents.forEachIndexed { index, event ->
+                ProfileEventItem(
+                    event = event,
+                    onRemoveBookmark = { onRemoveBookmark(event) }
+                )
+
+                if (index != previewEvents.lastIndex) {
+                    HorizontalDivider(color = ProfileTheme.Border)
+                }
+            }
+        }
+
+        if (events.size > 3) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            TextButton(
+                onClick = {
+                    isExpanded = !isExpanded
+                    if (!isExpanded) {
+                        searchQuery = ""
+                    }
+                },
+                modifier = Modifier.align(Alignment.Start)
+            ) {
+                Text(if (isExpanded) "Show less" else "View all")
+            }
+        }
+    }
+}
+
+@Composable
+fun ProfileEventItem(
+    event: Event,
+    onRemoveBookmark: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = event.summary ?: "(No Title)",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = ProfileTheme.Primary
+            )
+
+            val dateText = formatEventDate(event.start?.dateTime ?: event.start?.date)
+            if (dateText.isNotEmpty()) {
+                Text(
+                    text = dateText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ProfileTheme.MutedForeground
+                )
+            }
+
+            if (!event.location.isNullOrBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = ProfileTheme.MutedForeground
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = event.location,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ProfileTheme.MutedForeground,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        IconButton(onClick = onRemoveBookmark) {
+            Icon(
+                imageVector = Icons.Default.Bookmark,
+                contentDescription = "Remove Bookmark",
+                tint = Color(0xFFFFD700)
+            )
         }
     }
 }
