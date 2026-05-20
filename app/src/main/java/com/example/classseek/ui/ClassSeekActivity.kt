@@ -51,6 +51,8 @@ import com.example.classseek.models.ClassInfo
 import com.example.classseek.models.ClassSchedule
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.calendar.AddEventScreen
+import com.example.classseek.ui.calendar.saveRemindersToFirestore
+import com.example.classseek.ui.calendar.deleteReminderFromFirestore
 import com.example.classseek.ui.calendar.CalendarScreen
 import com.example.classseek.ui.chat.ChatScreen
 import com.example.classseek.ui.friends.FriendsScreen
@@ -73,6 +75,7 @@ import com.google.api.client.util.DateTime
 import com.google.api.services.calendar.Calendar
 import com.google.api.services.calendar.model.Event
 import com.google.api.services.calendar.model.EventDateTime
+import com.google.api.services.calendar.model.EventReminder
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
@@ -233,7 +236,7 @@ class ClassSeekActivity : ComponentActivity() {
     suspend fun addEventToCalendar(
         account: GoogleSignInAccount,
         schedule: ClassSchedule
-    ): Boolean {
+    ): String? {
         return withContext(Dispatchers.IO) {
             try {
                 val calendarScope = "https://www.googleapis.com/auth/calendar"
@@ -290,12 +293,15 @@ class ClassSeekActivity : ComponentActivity() {
                     event.recurrence = listOf("RRULE:FREQ=WEEKLY;BYDAY=$byDay;UNTIL=$untilDate")
                 }
 
+                // Explicitly disable reminders in Google Calendar as per user request
+                event.reminders = Event.Reminders().setUseDefault(false).setOverrides(emptyList())
+
                 val createdEvent = service.events().insert("primary", event).execute()
                 Log.d("CALENDAR_DEBUG", "Event created successfully: ${createdEvent.htmlLink}")
-                true
+                createdEvent.id
             } catch (e: Exception) {
                 Log.e("CALENDAR_DEBUG", "addEventToCalendar: ERROR", e)
-                false
+                null
             }
         }
     }
@@ -324,6 +330,81 @@ class ClassSeekActivity : ComponentActivity() {
             } catch (e: Exception) {
                 Log.e("CALENDAR_DEBUG", "deleteEventFromCalendar: ERROR", e)
                 false
+            }
+        }
+    }
+
+    suspend fun updateEventInCalendar(
+        account: GoogleSignInAccount,
+        eventId: String,
+        schedule: ClassSchedule
+    ): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val calendarScope = "https://www.googleapis.com/auth/calendar"
+                val credential = GoogleAccountCredential.usingOAuth2(
+                    this@ClassSeekActivity,
+                    listOf(calendarScope)
+                )
+                credential.selectedAccountName = account.email
+
+                val service = Calendar.Builder(
+                    NetHttpTransport(),
+                    GsonFactory.getDefaultInstance(),
+                    credential
+                ).setApplicationName("ClassSeek").build()
+
+                val firstStartCal = getFirstOccurrence(schedule)
+                val durationMs = getDurationMs(schedule.startTime, schedule.endTime)
+
+                val event = service.events().get("primary", eventId).execute() ?: return@withContext null
+                
+                event.summary = schedule.className
+                event.location = schedule.location
+                event.description = "Updated via ClassSeek"
+
+                val timeZoneId = TimeZone.getDefault().id
+
+                val startDateTime = DateTime(firstStartCal.time, TimeZone.getDefault())
+                event.start = EventDateTime()
+                    .setDateTime(startDateTime)
+                    .setTimeZone(timeZoneId)
+
+                val endDateTime = DateTime(java.util.Date(firstStartCal.timeInMillis + durationMs), TimeZone.getDefault())
+                event.end = EventDateTime()
+                    .setDateTime(endDateTime)
+                    .setTimeZone(timeZoneId)
+
+                if (schedule.daysOfWeek.isNotEmpty()) {
+                    val daysMap = mapOf(
+                        java.util.Calendar.MONDAY to "MO",
+                        java.util.Calendar.TUESDAY to "TU",
+                        java.util.Calendar.WEDNESDAY to "WE",
+                        java.util.Calendar.THURSDAY to "TH",
+                        java.util.Calendar.FRIDAY to "FR",
+                        java.util.Calendar.SATURDAY to "SA",
+                        java.util.Calendar.SUNDAY to "SU"
+                    )
+                    val byDay = schedule.daysOfWeek.mapNotNull { daysMap[it] }.joinToString(",")
+
+                    val df = SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }
+                    val untilDate = df.format(java.util.Date(schedule.endDate))
+
+                    event.recurrence = listOf("RRULE:FREQ=WEEKLY;BYDAY=$byDay;UNTIL=$untilDate")
+                } else {
+                    event.recurrence = null
+                }
+
+                // Explicitly disable reminders in Google Calendar as per user request
+                event.reminders = Event.Reminders().setUseDefault(false).setOverrides(emptyList())
+
+                service.events().update("primary", eventId, event).execute()
+                eventId
+            } catch (e: Exception) {
+                Log.e("CALENDAR_DEBUG", "updateEventInCalendar: ERROR", e)
+                null
             }
         }
     }
@@ -495,6 +576,7 @@ fun ClassSeekApp(
     var friendRequestStatus by remember { mutableStateOf<String?>(null) }
     var isEditingSchedule by remember { mutableStateOf(false) }
     var initialDateForNewEvent by remember { mutableStateOf<Long?>(null) }
+    var selectedEventToEdit by remember { mutableStateOf<Event?>(null) }
     var pendingFriendRequestUid by remember { mutableStateOf<String?>(null) }
 
     val scope = rememberCoroutineScope()
@@ -510,6 +592,8 @@ fun ClassSeekApp(
 
     var routedChatId by remember { mutableStateOf<String?>(null) }
     var routedChatTitle by remember { mutableStateOf<String?>(null) }
+
+    var reminderPreferences by remember { mutableStateOf<Map<String, List<Int>>>(emptyMap()) }
 
     val profileFriends = remember { mutableStateListOf<UserSearchItem>() }
     val temporaryMarkers = remember { mutableStateListOf<MapPlace>() }
@@ -550,6 +634,7 @@ fun ClassSeekApp(
         firebaseUser = null
         signedInAccount = null
         calendarEvents = emptyList()
+        reminderPreferences = emptyMap()
         userProfile = null
         isEditingProfile = false
         isEditingSchedule = false
@@ -592,6 +677,28 @@ fun ClassSeekApp(
             .addOnFailureListener { e ->
                 Log.e("FCM_DEBUG", "Failed to get current FCM token", e)
             }
+    }
+
+    LaunchedEffect(firebaseUser?.uid) {
+        val uid = firebaseUser?.uid
+        if (uid != null) {
+            db.collection("users")
+                .document(uid)
+                .collection("reminderPreferences")
+                .addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null) {
+                        val prefs = mutableMapOf<String, List<Int>>()
+                        snapshot.documents.forEach { doc ->
+                            val eventId = doc.id
+                            @Suppress("UNCHECKED_CAST")
+                            val minutesList = doc.get("selectedMinutesList") as? List<Long>
+                            val minutes = minutesList?.map { it.toInt() } ?: emptyList()
+                            prefs[eventId] = minutes
+                        }
+                        reminderPreferences = prefs
+                    }
+                }
+        }
     }
 
     LaunchedEffect(firebaseUser?.uid) {
@@ -1314,18 +1421,90 @@ fun ClassSeekApp(
                 null
             }
         )
-    } else if (isAddingEvent) {
+    } else if (isAddingEvent || selectedEventToEdit != null) {
+        val eventId = selectedEventToEdit?.id
+        val recurringEventId = selectedEventToEdit?.recurringEventId
+        
+        val savedReminders = if (eventId != null) {
+            // Check instance ID first, then fallback to series ID if it's a recurring event
+            (reminderPreferences[eventId] ?: reminderPreferences[recurringEventId]) ?: emptyList()
+        } else {
+            emptyList()
+        }
+
         AddEventScreen(
             initialDateMillis = initialDateForNewEvent,
-            onBackClick = { isAddingEvent = false },
+            existingEvent = selectedEventToEdit,
+            initialReminders = savedReminders,
+            onBackClick = { 
+                isAddingEvent = false
+                selectedEventToEdit = null
+            },
             onSaveClick = { schedule ->
                 scope.launch {
                     signedInAccount?.let { account ->
-                        val success = activity?.addEventToCalendar(account, schedule) ?: false
-                        if (success) {
+                        val savedEventId = if (selectedEventToEdit != null) {
+                            activity?.updateEventInCalendar(account, selectedEventToEdit!!.id, schedule)
+                        } else {
+                            activity?.addEventToCalendar(account, schedule)
+                        }
+                        
+                        if (savedEventId != null) {
+                            // Sync reminders to Firestore for ClassSeek notifications
+                            val uid = firebaseUser?.uid
+                            if (uid != null) {
+                                if (schedule.reminders.isNotEmpty()) {
+                                    // Calculate event start time in millis
+                                    val startCal = java.util.Calendar.getInstance()
+                                    startCal.timeInMillis = schedule.startDate
+                                    try {
+                                        val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                                        val date = sdf.parse(schedule.startTime)
+                                        if (date != null) {
+                                            val timeCal = java.util.Calendar.getInstance()
+                                            timeCal.time = date
+                                            startCal.set(java.util.Calendar.HOUR_OF_DAY, timeCal.get(java.util.Calendar.HOUR_OF_DAY))
+                                            startCal.set(java.util.Calendar.MINUTE, timeCal.get(java.util.Calendar.MINUTE))
+                                        }
+                                    } catch (e: Exception) {}
+
+                                    saveRemindersToFirestore(
+                                        uid = uid,
+                                        eventId = savedEventId,
+                                        eventTitle = schedule.className,
+                                        eventTimeMillis = startCal.timeInMillis,
+                                        reminders = schedule.reminders
+                                    )
+                                } else {
+                                    deleteReminderFromFirestore(uid, savedEventId)
+                                }
+                            }
+
                             val events = activity?.getCalendarEvents(account)
                             if (events != null) calendarEvents = events
                             isAddingEvent = false
+                            selectedEventToEdit = null
+                        }
+                    }
+                }
+            },
+            onDeleteClick = {
+                scope.launch {
+                    signedInAccount?.let { account ->
+                        selectedEventToEdit?.id?.let { eventId ->
+                            val success = activity?.deleteEventFromCalendar(account, eventId) ?: false
+                            if (success) {
+                                // Delete reminder from Firestore
+                                val uid = firebaseUser?.uid
+                                if (uid != null) {
+                                    deleteReminderFromFirestore(uid, eventId)
+                                }
+
+                                val events = activity?.getCalendarEvents(account)
+                                if (events != null) calendarEvents = events
+                                selectedEventToEdit = null
+                                isAddingEvent = false
+                            }
                         }
                     }
                 }
@@ -1367,6 +1546,9 @@ fun ClassSeekApp(
                                             }
                                         }
                                     }
+                                },
+                                onEditEventClick = { event ->
+                                    selectedEventToEdit = event
                                 },
                                 chatRepository = repo,
                                 myUid = firebaseUser?.uid ?: ""
