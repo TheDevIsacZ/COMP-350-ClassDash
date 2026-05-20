@@ -448,29 +448,17 @@ fun MapScreen(
                 )
             }
 
-            allMarkers.forEach { place ->
+            // Filter to show only base locations (buildings, services, shared, etc.)
+            // Events and Classes will be badges on these markers.
+            val baseMarkers = allMarkers.filter { it.category != MarkerCategory.CLASS && it.category != MarkerCategory.BOOKMARK }
+
+            baseMarkers.forEach { place ->
                 val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
                 val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
 
-                // Logic to hide location markers if overlapped by specific categories (Bookmarks, Classes)
-                val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers) {
-                    if (place.category == MarkerCategory.BUILDING ||
-                        place.category == MarkerCategory.STUDENT_SERVICE ||
-                        place.category == MarkerCategory.DINING) {
-                        bookmarkMarkers.any { it.location == place.location } ||
-                                scheduleMarkers.any { it.location == place.location }
-                    } else false
-                }
-
-                // Hide building/service name if overlapped, unless filter active or specifically selected
-                val shouldShowName = if (hasOverlappingMarker) {
-                    selectedCategory == place.category || isSelected
-                } else true
-
-                // Hide building/service icon if overlapped, unless category filter used or specifically selected/searched
-                val shouldShowBuildingIcon = if (hasOverlappingMarker) {
-                    selectedCategory == place.category || isSelected
-                } else true
+                // Find events/classes at this specific location to show as badges
+                val classesHere = scheduleMarkers.filter { it.location == place.location }
+                val eventsHere = bookmarkMarkers.filter { it.location == place.location }
 
                 val markerAlpha = if (selectedPlace != null) {
                     if (isSelected) 1.0f else 0.35f
@@ -480,59 +468,96 @@ fun MapScreen(
                     1.0f
                 }
 
-                if (shouldShowBuildingIcon) {
-                    key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
-                        if (place.category == MarkerCategory.SHARED && place.senderId != null) {
-                            val icon = sharedMarkerIcons[place.senderId]
-                            Marker(
-                                state = rememberMarkerState(position = place.location),
-                                icon = icon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
-                                alpha = markerAlpha,
-                                anchor = Offset(0.5f, 0.5f),
-                                title = place.name,
-                                onClick = {
-                                    selectedPlace = place
-                                    true
-                                }
-                            )
-                        } else {
-                            MarkerComposable(
-                                state = rememberMarkerState(position = place.location),
-                                alpha = markerAlpha,
-                                anchor = Offset(0.5f, 1.0f),
-                                onClick = {
-                                    selectedPlace = place
-                                    true
-                                }
-                            ) {
+                key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
+                    if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                        val icon = sharedMarkerIcons[place.senderId]
+                        Marker(
+                            state = rememberMarkerState(position = place.location),
+                            icon = icon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
+                            alpha = markerAlpha,
+                            anchor = Offset(0.5f, 0.5f),
+                            title = place.name,
+                            onClick = {
+                                selectedPlace = place
+                                true
+                            }
+                        )
+                    } else {
+                        MarkerComposable(
+                            state = rememberMarkerState(position = place.location),
+                            alpha = markerAlpha,
+                            anchor = Offset(0.5f, 1.0f),
+                            onClick = {
+                                selectedPlace = place
+                                true
+                            }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    if (shouldShowName) {
-                                        Surface(
-                                            shape = RoundedCornerShape(3.3.dp),
-                                            color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                            modifier = Modifier.padding(bottom = 1.4.dp)
-                                        ) {
-                                            Text(
-                                                text = place.name,
-                                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                                modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
-                                                color = Color.Black
-                                            )
-                                        }
+                                    Surface(
+                                        shape = RoundedCornerShape(3.3.dp),
+                                        color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                                        modifier = Modifier.padding(bottom = 1.4.dp)
+                                    ) {
+                                        Text(
+                                            text = place.name,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                            modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
+                                            color = Color.Black
+                                        )
                                     }
 
-                                    Box(
-                                        modifier = Modifier
-                                            .background(Color.White, CircleShape)
-                                            .border(2.dp, place.category.color, CircleShape)
-                                            .padding(3.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = place.category.icon,
-                                            contentDescription = null,
-                                            tint = place.category.color,
-                                            modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
-                                        )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Box(
+                                            modifier = Modifier
+                                                .background(Color.White, CircleShape)
+                                                .border(2.dp, place.category.color, CircleShape)
+                                                .padding(3.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = place.category.icon,
+                                                contentDescription = null,
+                                                tint = place.category.color,
+                                                modifier = Modifier.size(19.8.dp)
+                                            )
+                                        }
+
+                                        // Overlay badges for Classes (Right) and Events (Left)
+                                        if (classesHere.isNotEmpty()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomEnd)
+                                                    .offset(x = 1.dp, y = 0.dp)
+                                                    .background(Color.White, CircleShape)
+                                                    .border(1.dp, MarkerCategory.CLASS.color, CircleShape)
+                                                    .padding(2.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = MarkerCategory.CLASS.icon,
+                                                    contentDescription = null,
+                                                    tint = MarkerCategory.CLASS.color,
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                            }
+                                        }
+
+                                        if (eventsHere.isNotEmpty()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(if (classesHere.isNotEmpty()) Alignment.BottomStart else Alignment.BottomEnd)
+                                                    .offset(x = if (classesHere.isNotEmpty()) (-1).dp else 1.dp, y = 0.dp)
+                                                    .background(Color.White, CircleShape)
+                                                    .border(1.dp, MarkerCategory.BOOKMARK.color, CircleShape)
+                                                    .padding(2.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = MarkerCategory.BOOKMARK.icon,
+                                                    contentDescription = null,
+                                                    tint = MarkerCategory.BOOKMARK.color,
+                                                    modifier = Modifier.size(10.dp)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -579,6 +604,36 @@ fun MapScreen(
                             }
                         } else if (place.description.isNotEmpty()) {
                             Text(text = place.description, style = MaterialTheme.typography.bodySmall)
+                        }
+
+                        // Add section for classes and events at this location
+                        val classesHere = remember(place, scheduleMarkers) { scheduleMarkers.filter { it.location == place.location } }
+                        val eventsHere = remember(place, bookmarkMarkers, classesHere) {
+                            bookmarkMarkers.filter { it.location == place.location }
+                                .filter { event -> classesHere.none { it.name == event.name } }
+                        }
+
+                        if (classesHere.isNotEmpty() || eventsHere.isNotEmpty()) {
+                            Spacer(Modifier.height(2.dp))
+                            if (classesHere.isNotEmpty()) {
+                                Text("Classes:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MarkerCategory.CLASS.color)
+                                classesHere.forEach { cls ->
+                                    Text(
+                                        text = "• ${cls.name}${if (!cls.eventStart.isNullOrBlank()) " (${cls.eventStart})" else ""}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                            if (eventsHere.isNotEmpty()) {
+                                if (classesHere.isNotEmpty()) Spacer(Modifier.height(2.dp))
+                                Text("Events:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MarkerCategory.BOOKMARK.color)
+                                eventsHere.forEach { ev ->
+                                    Text(
+                                        text = "• ${ev.name}${if (!ev.eventStart.isNullOrBlank()) " (${ev.eventStart})" else ""}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
                         }
                     }
                     Button(onClick = { showShareDialog = true }) {
@@ -729,12 +784,17 @@ fun MapScreen(
                     onValueChange = { newValue ->
                         searchQuery = newValue
                         allMarkers.find { it.name.contains(newValue, ignoreCase = true) }?.let { match ->
-                            selectedPlace = match
+                            // Resolve to base marker if a class or event is found
+                            val finalMatch = if (match.category == MarkerCategory.CLASS || match.category == MarkerCategory.BOOKMARK) {
+                                places.find { it.location == match.location } ?: match
+                            } else match
+
+                            selectedPlace = finalMatch
                             scope.launch {
                                 if (isMapReady) {
-                                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(match.location, 18f))
+                                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(finalMatch.location, 18f))
                                 } else {
-                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(match.location, 18f)
+                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(finalMatch.location, 18f)
                                 }
                             }
                         }
@@ -888,14 +948,19 @@ fun MapScreen(
                                         },
                                         modifier = Modifier.clickable {
                                             scope.launch {
-                                                selectedPlace = place
+                                                // Resolve to base marker if a class or event is clicked in list
+                                                val finalPlace = if (place.category == MarkerCategory.CLASS || place.category == MarkerCategory.BOOKMARK) {
+                                                    places.find { it.location == place.location } ?: place
+                                                } else place
+
+                                                selectedPlace = finalPlace
                                                 if (isMapReady) {
                                                     cameraPositionState.animate(
-                                                        update = CameraUpdateFactory.newLatLngZoom(place.location, 18f),
+                                                        update = CameraUpdateFactory.newLatLngZoom(finalPlace.location, 18f),
                                                         durationMs = 1000
                                                     )
                                                 } else {
-                                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(place.location, 18f)
+                                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(finalPlace.location, 18f)
                                                 }
                                             }
                                             isListVisible = false
