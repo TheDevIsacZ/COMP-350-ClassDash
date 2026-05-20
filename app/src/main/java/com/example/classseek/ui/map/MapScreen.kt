@@ -211,7 +211,8 @@ fun MapScreen(
 
     // Schedule markers derived from user profile classes
     val scheduleMarkers = remember(calendarEvents, userProfile?.classes, places) {
-        userProfile?.classes?.mapNotNull { classInfo ->
+        val classList = userProfile?.classes ?: emptyList()
+        classList.mapNotNull { classInfo ->
             val buildingInput = classInfo.building.lowercase()
 
             // Re-use robust matching logic
@@ -230,10 +231,56 @@ fun MapScreen(
             }
 
             if (match != null) {
-                // Find a corresponding event to get times
-                val originalEvent = calendarEvents.find { it.summary == classInfo.className }
+                // Find a corresponding event to get times - match by Name, Day, and Location
+                val originalEvent = calendarEvents.find { event ->
+                    if (event.summary != classInfo.className) return@find false
+
+                    // 1. Match day of week to distinguish lab/lecture
+                    val eventStart = event.start?.dateTime ?: event.start?.date
+                    val dayMatch = if (eventStart != null) {
+                        val cal = java.util.Calendar.getInstance().apply { timeInMillis = eventStart.value }
+                        val dayOfWeekInt = cal.get(java.util.Calendar.DAY_OF_WEEK)
+                        val dayCodes = when (dayOfWeekInt) {
+                            java.util.Calendar.SUNDAY -> listOf("SU", "S")
+                            java.util.Calendar.MONDAY -> listOf("M")
+                            java.util.Calendar.TUESDAY -> listOf("T")
+                            java.util.Calendar.WEDNESDAY -> listOf("W")
+                            java.util.Calendar.THURSDAY -> listOf("TH", "T")
+                            java.util.Calendar.FRIDAY -> listOf("F")
+                            java.util.Calendar.SATURDAY -> listOf("SA", "S")
+                            else -> emptyList()
+                        }
+                        classInfo.dayOfWeek.split(",").map { it.trim() }.any { it in dayCodes }
+                    } else true
+
+                    // 2. Check location loosely as secondary filter
+                    val eventLoc = event.location?.lowercase() ?: ""
+                    val locationMatch = eventLoc.contains(buildingInput) || buildingInput.contains(eventLoc)
+
+                    dayMatch && locationMatch
+                } ?: calendarEvents.find { it.summary == classInfo.className } // Fallback to first name match
+
+                // Lab detection: Label the session occurring later in the week as "Lab"
+                val sameNameClasses = classList.filter { it.className == classInfo.className }
+                val isLab = if (sameNameClasses.size > 1) {
+                    val sortedByDay = sameNameClasses.sortedWith(compareBy({ item ->
+                        val firstDay = item.dayOfWeek.split(",").firstOrNull()?.trim() ?: ""
+                        when (firstDay) {
+                            "SU" -> 0
+                            "M" -> 1
+                            "T" -> 2
+                            "W" -> 3
+                            "TH" -> 4
+                            "F" -> 5
+                            "SA" -> 6
+                            else -> 7
+                        }
+                    }, { it.startTime }))
+                    classInfo != sortedByDay.firstOrNull()
+                } else false
+
                 MapPlace(
-                    name = classInfo.className,
+                    name = if (isLab) "${classInfo.className} Lab" else classInfo.className,
                     location = match.location,
                     category = MarkerCategory.CLASS,
                     description = "${classInfo.building} ${classInfo.roomNumber}",
@@ -242,7 +289,7 @@ fun MapScreen(
                     eventEnd = originalEvent?.let { formatEventDateTime(it.end) }
                 )
             } else null
-        } ?: emptyList()
+        }
     }
 
     // Include the shared location from DM if it exists
@@ -589,75 +636,121 @@ fun MapScreen(
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .padding(bottom = 80.dp)
-                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .padding(bottom = 92.dp) // Positioned above the bottom-left buttons
+                    .fillMaxWidth(0.96f)
                     .clickable { },
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = place.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Column(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = place.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        )
 
-                        if (place.category == MarkerCategory.SHARED && place.senderId != null) {
-                            val profile = userProfiles[place.senderId]
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(profile?.profilePictureUrl ?: "")
-                                        .allowHardware(false)
-                                        .build(),
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.LightGray)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "Shared by ${profile?.name ?: "Loading..."}",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        } else if (place.description.isNotEmpty()) {
-                            Text(text = place.description, style = MaterialTheme.typography.bodySmall)
-                        }
-
-                        // Add section for classes and events at this location
-                        val classesHere = remember(place, scheduleMarkers) { scheduleMarkers.filter { it.location == place.location } }
-                        val eventsHere = remember(place, bookmarkMarkers, classesHere) {
-                            bookmarkMarkers.filter { it.location == place.location }
-                                .filter { event -> classesHere.none { it.name == event.name } }
-                        }
-
-                        if (classesHere.isNotEmpty() || eventsHere.isNotEmpty()) {
-                            Spacer(Modifier.height(2.dp))
-                            if (classesHere.isNotEmpty()) {
-                                Text("Classes:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MarkerCategory.CLASS.color)
-                                classesHere.forEach { cls ->
-                                    Text(
-                                        text = "• ${cls.name}${if (!cls.eventStart.isNullOrBlank()) " (${cls.eventStart})" else ""}",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            }
-                            if (eventsHere.isNotEmpty()) {
-                                if (classesHere.isNotEmpty()) Spacer(Modifier.height(2.dp))
-                                Text("Events:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MarkerCategory.BOOKMARK.color)
-                                eventsHere.forEach { ev ->
-                                    Text(
-                                        text = "• ${ev.name}${if (!ev.eventStart.isNullOrBlank()) " (${ev.eventStart})" else ""}",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            }
+                        Button(
+                            onClick = { showShareDialog = true },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(36.dp),
+                            shape = RoundedCornerShape(18.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Share", fontSize = 13.sp)
                         }
                     }
-                    Button(onClick = { showShareDialog = true }) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Share")
+
+                    if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                        val profile = userProfiles[place.senderId]
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(profile?.profilePictureUrl ?: "")
+                                    .allowHardware(false)
+                                    .build(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Shared by ${profile?.name ?: "Loading..."}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    } else if (place.description.isNotEmpty()) {
+                        Text(
+                            text = place.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // Add section for classes and events at this location
+                    val classesHere = remember(place, scheduleMarkers) {
+                        scheduleMarkers.filter { it.location == place.location }
+                    }
+                    val eventsHere = remember(place, bookmarkMarkers, classesHere) {
+                        bookmarkMarkers.filter { it.location == place.location }
+                            .filter { event -> classesHere.none { it.name == event.name } }
+                    }
+
+                    if (classesHere.isNotEmpty() || eventsHere.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        if (classesHere.isNotEmpty()) {
+                            Text(
+                                "Classes:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MarkerCategory.CLASS.color
+                            )
+                            classesHere.forEach { cls ->
+                                val roomPart = cls.description.substringAfterLast(" ", "")
+                                val roomDisplay = if (roomPart.isNotEmpty()) "#$roomPart" else ""
+                                Text(
+                                    text = "• ${cls.name} $roomDisplay${if (!cls.eventStart.isNullOrBlank()) " (${cls.eventStart})" else ""}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                        if (eventsHere.isNotEmpty()) {
+                            if (classesHere.isNotEmpty()) Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Events:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MarkerCategory.BOOKMARK.color
+                            )
+                            eventsHere.forEach { ev ->
+                                Text(
+                                    text = "• ${ev.name}${if (!ev.eventStart.isNullOrBlank()) " (${ev.eventStart})" else ""}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1096,13 +1189,32 @@ private fun formatDate(dateTime: com.google.api.client.util.DateTime?): String {
 
 private fun formatEventDateTime(dateTime: EventDateTime?): String {
     if (dateTime == null) return ""
-    return if (dateTime.dateTime != null) {
-        val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
-        sdf.format(Date(dateTime.dateTime.value))
+    val date = if (dateTime.dateTime != null) {
+        Date(dateTime.dateTime.value)
     } else if (dateTime.date != null) {
-        val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-        sdf.format(Date(dateTime.date.value))
-    } else ""
+        Date(dateTime.date.value)
+    } else {
+        return ""
+    }
+
+    val cal = java.util.Calendar.getInstance().apply { time = date }
+    val dayInitial = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
+        java.util.Calendar.SUNDAY -> "S"
+        java.util.Calendar.MONDAY -> "M"
+        java.util.Calendar.TUESDAY -> "T"
+        java.util.Calendar.WEDNESDAY -> "W"
+        java.util.Calendar.THURSDAY -> "T"
+        java.util.Calendar.FRIDAY -> "F"
+        java.util.Calendar.SATURDAY -> "S"
+        else -> ""
+    }
+
+    return if (dateTime.dateTime != null) {
+        val timeSdf = SimpleDateFormat("h:mm a", Locale.getDefault())
+        "$dayInitial ${timeSdf.format(date)}"
+    } else {
+        dayInitial
+    }
 }
 
 suspend fun loadMarkerBitmap(context: Context, url: String?): com.google.android.gms.maps.model.BitmapDescriptor? {
