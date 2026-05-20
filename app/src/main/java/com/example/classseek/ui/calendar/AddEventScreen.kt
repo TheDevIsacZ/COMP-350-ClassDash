@@ -150,7 +150,8 @@ fun AddEventScreen(
                         },
                         enabled = eventName.isNotBlank()
                     ) {
-                        Text("Save", fontWeight = FontWeight.Bold)
+                        Text("Save", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+
                     }
                 }
             )
@@ -167,7 +168,7 @@ fun AddEventScreen(
             OutlinedTextField(
                 value = eventName,
                 onValueChange = { eventName = it },
-                label = { Text("Event Name") },
+                label = { Text("Event name") },
                 placeholder = { Text("e.g. Meeting, Gym, Study") },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -187,7 +188,7 @@ fun AddEventScreen(
                 OutlinedTextField(
                     value = startTime,
                     onValueChange = { },
-                    label = { Text("Start Time") },
+                    label = { Text("Start time") },
                     modifier = Modifier
                         .weight(1f)
                         .pointerInput(Unit) {
@@ -206,7 +207,7 @@ fun AddEventScreen(
                 OutlinedTextField(
                     value = endTime,
                     onValueChange = { },
-                    label = { Text("End Time") },
+                    label = { Text("end Time") },
                     modifier = Modifier
                         .weight(1f)
                         .pointerInput(Unit) {
@@ -314,7 +315,7 @@ fun AddEventScreen(
                     )
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        "Add Notification",
+                        "Add notification",
                         style = MaterialTheme.typography.bodyLarge,
                         color = Color.White
                     )
@@ -735,7 +736,7 @@ fun CustomReminderDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = purpleColor)
+                        Text("Cancel", color = purpleColor, style = MaterialTheme.typography.bodyLarge)
                     }
                     TextButton(
                         onClick = {
@@ -749,7 +750,7 @@ fun CustomReminderDialog(
                             onConfirm(minutes)
                         }
                     ) {
-                        Text("OK", color = purpleColor)
+                        Text("OK", color = purpleColor, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }
