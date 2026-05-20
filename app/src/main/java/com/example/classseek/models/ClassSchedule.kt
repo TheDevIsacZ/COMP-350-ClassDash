@@ -8,5 +8,6 @@ data class ClassSchedule(
     val location: String = "",
     val startDate: Long,    // timestamp
     val endDate: Long,       // timestamp
-    val reminders: List<Int> = emptyList() // list of minutes before event
+    val reminders: List<Int> = emptyList(), // list of minutes before event
+    val reminderUnits: Map<Int, String> = emptyMap() // minutes -> unit label
 )
