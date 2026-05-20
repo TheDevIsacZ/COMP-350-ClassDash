@@ -102,9 +102,18 @@ fun ScheduleEditScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
+                .padding(horizontal = 16.dp)
                 .verticalScroll(scrollState)
         ) {
+            Text(
+                text = "Import from CI Records > Schedule > Download (.ics)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(top = 0.dp, bottom = 8.dp)
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
             Text("Semester Selection", style = MaterialTheme.typography.titleMedium)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 listOf("Fall", "Spring", "Winter").forEach { s ->
