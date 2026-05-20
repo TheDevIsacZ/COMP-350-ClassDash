@@ -201,8 +201,8 @@ fun MapScreen(
                         location = match.location,
                         category = MarkerCategory.BOOKMARK,
                         eventId = event.id,
-                        eventStart = formatEventDateTime(event.start),
-                        eventEnd = formatEventDateTime(event.end),
+                        eventStart = formatEventDateTime(event.start, isClass = false),
+                        eventEnd = formatEventDateTime(event.end, isClass = false),
                         description = event.location ?: ""
                     )
                 } else {
@@ -287,8 +287,8 @@ fun MapScreen(
                     category = MarkerCategory.CLASS,
                     description = "${classInfo.building} ${classInfo.roomNumber}",
                     eventId = originalEvent?.id,
-                    eventStart = originalEvent?.let { formatEventDateTime(it.start) },
-                    eventEnd = originalEvent?.let { formatEventDateTime(it.end) }
+                    eventStart = originalEvent?.let { formatEventDateTime(it.start, isClass = true) },
+                    eventEnd = originalEvent?.let { formatEventDateTime(it.end, isClass = true) }
                 )
             } else null
         }
@@ -729,7 +729,7 @@ fun MapScreen(
                                 "Classes:",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1B5E20) 
+                                color = Color(0xFF2E7D32)
                             )
                             classesHere.forEach { cls ->
                                 val roomPart = cls.description.substringAfterLast(" ", "")
@@ -747,7 +747,7 @@ fun MapScreen(
                                 "Events:",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFBF8F00) 
+                                color = Color(0xFFBF8F00)
                             )
                             eventsHere.forEach { ev ->
                                 Text(
@@ -765,7 +765,7 @@ fun MapScreen(
         if (showShareDialog) {
             val shareSheetState = rememberModalBottomSheetState()
             ModalBottomSheet(
-                onDismissRequest = { 
+                onDismissRequest = {
                     showShareDialog = false
                     shareSearchQuery = ""
                 },
@@ -974,10 +974,10 @@ fun MapScreen(
                             DropdownMenuItem(
                                 text = {
                                     Text (
-                                         text = category.label,
-                                         color = Color.Black
+                                        text = category.label,
+                                        color = Color.Black
                                     )
-                                       },
+                                },
                                 onClick = {
                                     selectedCategory = category
                                     selectedPlace = null
@@ -1011,7 +1011,7 @@ fun MapScreen(
             if (showSuggestions && searchQuery.isNotBlank()) {
                 val suggestions = allMarkers.filter {
                     it.name.contains(searchQuery, ignoreCase = true) ||
-                    it.description.contains(searchQuery, ignoreCase = true)
+                            it.description.contains(searchQuery, ignoreCase = true)
                 }.take(5)
 
                 if (suggestions.isNotEmpty()) {
@@ -1208,7 +1208,7 @@ private fun formatDate(dateTime: com.google.api.client.util.DateTime?): String {
     return sdf.format(date)
 }
 
-private fun formatEventDateTime(dateTime: EventDateTime?): String {
+private fun formatEventDateTime(dateTime: EventDateTime?, isClass: Boolean = true): String {
     if (dateTime == null) return ""
     val date = if (dateTime.dateTime != null) {
         Date(dateTime.dateTime.value)
@@ -1218,23 +1218,34 @@ private fun formatEventDateTime(dateTime: EventDateTime?): String {
         return ""
     }
 
-    val cal = java.util.Calendar.getInstance().apply { time = date }
-    val dayLabel = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
-        java.util.Calendar.SUNDAY -> "SU"
-        java.util.Calendar.MONDAY -> "M"
-        java.util.Calendar.TUESDAY -> "Tu"
-        java.util.Calendar.WEDNESDAY -> "W"
-        java.util.Calendar.THURSDAY -> "TH"
-        java.util.Calendar.FRIDAY -> "F"
-        java.util.Calendar.SATURDAY -> "SA"
-        else -> ""
-    }
+    return if (isClass) {
+        val cal = java.util.Calendar.getInstance().apply { time = date }
+        val dayLabel = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
+            java.util.Calendar.SUNDAY -> "SU"
+            java.util.Calendar.MONDAY -> "M"
+            java.util.Calendar.TUESDAY -> "Tu"
+            java.util.Calendar.WEDNESDAY -> "W"
+            java.util.Calendar.THURSDAY -> "TH"
+            java.util.Calendar.FRIDAY -> "F"
+            java.util.Calendar.SATURDAY -> "SA"
+            else -> ""
+        }
 
-    return if (dateTime.dateTime != null) {
-        val timeSdf = SimpleDateFormat("h:mm a", Locale.getDefault())
-        "$dayLabel ${timeSdf.format(date)}"
+        if (dateTime.dateTime != null) {
+            val timeSdf = SimpleDateFormat("h:mm a", Locale.getDefault())
+            "$dayLabel ${timeSdf.format(date)}"
+        } else {
+            dayLabel
+        }
     } else {
-        dayLabel
+        val dateSdf = SimpleDateFormat("MMM d", Locale.getDefault())
+        val dateStr = dateSdf.format(date)
+        if (dateTime.dateTime != null) {
+            val timeSdf = SimpleDateFormat("h:mm a", Locale.getDefault())
+            "$dateStr ${timeSdf.format(date)}"
+        } else {
+            dateStr
+        }
     }
 }
 
