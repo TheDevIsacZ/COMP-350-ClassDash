@@ -291,6 +291,7 @@ fun ChatScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> },
+    onAddEventToCalendar: (Message) -> Unit = {},
     repo: ChatRepository = remember { ChatRepository(FirebaseFirestore.getInstance()) },
     auth: FirebaseAuth = remember { FirebaseAuth.getInstance() }
 ) {
@@ -1521,31 +1522,7 @@ fun ChatScreen(
                         },
                         seenByProfiles = if (isMine) seenByProfiles else emptyList(),
                         onLocationClick = onLocationClick,
-                        onAddEventToCalendar = { eventMsg ->
-                            if (myUid != null && eventMsg.eventId != null) {
-                                val eventData = hashMapOf(
-                                    "eventId" to eventMsg.eventId,
-                                    "title" to (eventMsg.eventTitle ?: "Event"),
-                                    "start" to (eventMsg.eventStart ?: ""),
-                                    "end" to (eventMsg.eventEnd ?: ""),
-                                    "location" to (eventMsg.eventLocation ?: ""),
-                                    "savedAt" to FieldValue.serverTimestamp()
-                                )
-
-                                db.collection("users")
-                                    .document(myUid)
-                                    .collection("sharedEvents")
-                                    .document(eventMsg.eventId)
-                                    .set(eventData)
-
-                                db.collection("users")
-                                    .document(myUid)
-                                    .update(
-                                        "bookmarkedEventIds",
-                                        FieldValue.arrayUnion(eventMsg.eventId)
-                                    )
-                            }
-                        },
+                        onAddEventToCalendar = onAddEventToCalendar,
                         onGameClick = { gameId ->
                             Log.d("ChatScreen", "Game clicked: $gameId")
                             activeGameId = gameId

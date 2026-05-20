@@ -840,7 +840,7 @@ fun MapScreen(
                                 ListItem(
                                     headlineContent = { Text(chat.title) },
                                     leadingContent = {
-                                        if (chat.type == "dm" && chat.profilePictureUrl.isNotBlank()) {
+                                        if (chat.profilePictureUrl.isNotBlank()) {
                                             AsyncImage(
                                                 model = ImageRequest.Builder(LocalContext.current)
                                                     .data(chat.profilePictureUrl)

@@ -104,6 +104,7 @@ import androidx.compose.material3.Surface
 fun CalendarScreen(
     signedInAccount: GoogleSignInAccount?,
     calendarEvents: List<Event>,
+    schoolEventIds: Set<String> = emptySet(),
     userProfile: UserProfile?,
     onSignInClick: (Intent) -> Unit,
     onAddEventClick: (Long) -> Unit,
@@ -207,7 +208,10 @@ fun CalendarScreen(
                     arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
                 )
             }) {
-                Text("Grant Calendar Permissions")
+                Text(
+                    text = "Grant Calendar Permissions",
+                    color = Color.Black
+                )
             }
         }
     } else if (signedInAccount == null) {
@@ -245,8 +249,13 @@ fun CalendarScreen(
             val filteredEvents = calendarEvents.filter { event ->
                 val eventTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
                 val isUpcoming = eventTime >= todayStart
-                val isStarredMatch = !showStarredOnly || userProfile?.bookmarkedEventIds?.contains(event.id) == true
-                isUpcoming && isStarredMatch
+                val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) == true
+                val isStarredMatch = !showStarredOnly || isBookmarked
+                
+                val isCampusEvent = schoolEventIds.contains(event.id)
+                val shouldHideCampusEvent = userProfile?.hideCampusEvents == true && isCampusEvent && !isBookmarked
+
+                isUpcoming && isStarredMatch && !shouldHideCampusEvent
             }
 
             val groupedEvents = filteredEvents.groupBy { event ->
@@ -569,7 +578,7 @@ fun CalendarScreen(
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
-                                    if (chat.type == "dm" && chat.profilePictureUrl.isNotBlank()) {
+                                    if (chat.profilePictureUrl.isNotBlank()) {
                                         AsyncImage(
                                             model = ImageRequest.Builder(LocalContext.current)
                                                 .data(chat.profilePictureUrl)

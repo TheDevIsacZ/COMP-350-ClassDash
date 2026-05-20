@@ -13,3 +13,6 @@ val Pink40 = Color(0xFF7D5260)
 val Grey = Color(0xFF4E4D52)
 
 val ClassSeekPrimary = Color(0xFF4285F4)
+
+val White = Color.White
+val Black = Color.Black
