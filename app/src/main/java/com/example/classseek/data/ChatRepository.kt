@@ -1356,7 +1356,8 @@ class ChatRepository(
         senderId: String,
         gameType: String,
         initialState: String,
-        opponentId: String
+        opponentId: String,
+        initialStatusMessage: String // Added to allow personalized initial text
     ): String {
         val gameRef = db.collection("games").document()
         val msgRef = chatMessagesRef(chatId).document()
@@ -1364,7 +1365,8 @@ class ChatRepository(
         val now = FieldValue.serverTimestamp()
         val chat = getChatInfo(chatId)
 
-        val messageText = "🎮 Your Turn" // Initial invitation status
+        val messageText = initialStatusMessage
+// ...
 
         val gameData = hashMapOf(
             "type" to gameType,
@@ -1429,7 +1431,9 @@ class ChatRepository(
                         winnerId = snapshot.getString("winnerId"),
                         lastMoveAt = snapshot.getTimestamp("lastMoveAt"),
                         moveHistory = snapshot.get("moveHistory") as? List<String> ?: emptyList(),
-                        messageId = snapshot.getString("messageId") ?: ""
+                        messageId = snapshot.getString("messageId") ?: "",
+                        lastMoveFrom = snapshot.getString("lastMoveFrom"),
+                        lastMoveTo = snapshot.getString("lastMoveTo")
                     )
                     onUpdate(game)
                 } else {
@@ -1442,7 +1446,7 @@ class ChatRepository(
      * Updates the game state and synchronization across the chat and inbox.
      * Uses a single batch for atomic updates to game doc and message doc.
      */
-    suspend fun updateGameState(chatId: String, gameId: String, newState: String, nextTurnUserId: String, move: String, status: String = "active", winnerId: String? = null, statusMessage: String? = null) {
+    suspend fun updateGameState(chatId: String, gameId: String, newState: String, nextTurnUserId: String, move: String, status: String = "active", winnerId: String? = null, statusMessage: String? = null, lastMoveFrom: String? = null, lastMoveTo: String? = null) {
         val gameRef = db.collection("games").document(gameId)
         val gameDoc = gameRef.get().await()
         val messageId = gameDoc.getString("messageId")
@@ -1452,7 +1456,9 @@ class ChatRepository(
             "currentTurn" to nextTurnUserId,
             "lastMoveAt" to FieldValue.serverTimestamp(),
             "moveHistory" to FieldValue.arrayUnion(move),
-            "status" to status
+            "status" to status,
+            "lastMoveFrom" to lastMoveFrom,
+            "lastMoveTo" to lastMoveTo
         )
         if (winnerId != null) {
             updates["winnerId"] = winnerId

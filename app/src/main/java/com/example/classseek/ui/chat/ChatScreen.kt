@@ -1355,12 +1355,17 @@ fun ChatScreen(
                                         val initialFen =
                                             "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
+                                        val myProfile = userProfiles[myUid]
+                                        val myName = myProfile?.displayName?.ifBlank { myProfile.email.substringBefore("@") } ?: "Player"
+                                        val initialStatus = "🎮 $myName's Turn"
+
                                         repo.sendGameMessage(
                                             chatId = chatId,
                                             senderId = myUid,
                                             gameType = "chess",
                                             initialState = initialFen,
-                                            opponentId = opponentId
+                                            opponentId = opponentId,
+                                            initialStatusMessage = initialStatus
                                         )
                                     } catch (e: Exception) {
                                         error = e.message ?: "Failed to start game"
@@ -1389,6 +1394,7 @@ fun ChatScreen(
             chatId = chatId,
             gameId = activeGameId!!,
             myUid = myUid,
+            userProfiles = userProfiles, // Pass the name map
             repo = repo,
             onDismiss = { activeGameId = null }
         )
