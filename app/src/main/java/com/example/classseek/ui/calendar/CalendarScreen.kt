@@ -860,7 +860,7 @@ fun AgendaItem(
                     }) {
                         Icon(
                             imageVector = if (optimisticIsBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = "Bookmark",
+                            contentDescription = if (optimisticIsBookmarked) "Remove bookmark" else "Bookmark",
                             tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray,
                             modifier = Modifier.size(20.dp)
                         )
