@@ -29,6 +29,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +48,8 @@ import coil.request.ImageRequest
 import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
+import com.example.classseek.ui.friends.SearchBar
+import com.example.classseek.ui.theme.AppPrimary
 import com.google.android.gms.location.*
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -109,6 +112,7 @@ fun MapScreen(
     val userProfiles = remember { mutableStateMapOf<String, UserProfile>() }
 
     var searchQuery by remember { mutableStateOf("") }
+    var showSuggestions by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf(MarkerCategory.ALL) }
     var isListVisible by remember { mutableStateOf(false) }
     var selectedPlace by remember { mutableStateOf<MapPlace?>(null) }
@@ -123,6 +127,7 @@ fun MapScreen(
     var showShareDialog by remember { mutableStateOf(false) }
     var myChats by remember { mutableStateOf<List<ChatListItem>>(emptyList()) }
     var selectedChatFilter by remember { mutableStateOf("All") }
+    var shareSearchQuery by remember { mutableStateOf("") }
 
     // State for compass heading
     var heading by remember { mutableStateOf(0f) }
@@ -172,7 +177,13 @@ fun MapScreen(
         val bookmarkedIds = userProfile?.bookmarkedEventIds ?: emptyList()
         calendarEvents.filter { it.id in bookmarkedIds && !it.location.isNullOrEmpty() }
             .mapNotNull { event ->
-                val eventLoc = event.location.lowercase()
+                val rawLoc = event.location.lowercase()
+                val eventLoc = if (rawLoc.contains("bell tower")) {
+                    val roomPart = rawLoc.substringAfter("bell tower").trim()
+                    if (roomPart.startsWith("2")) "west bell tower" else "east bell tower"
+                } else {
+                    rawLoc
+                }
 
                 // 1. Try exact or partial match with building names
                 var match = places.find { place ->
@@ -197,8 +208,8 @@ fun MapScreen(
                         location = match.location,
                         category = MarkerCategory.BOOKMARK,
                         eventId = event.id,
-                        eventStart = formatEventDateTime(event.start),
-                        eventEnd = formatEventDateTime(event.end),
+                        eventStart = formatEventDateTime(event.start, isClass = false),
+                        eventEnd = formatEventDateTime(event.end, isClass = false),
                         description = event.location ?: ""
                     )
                 } else {
@@ -209,8 +220,14 @@ fun MapScreen(
 
     // Schedule markers derived from user profile classes
     val scheduleMarkers = remember(calendarEvents, userProfile?.classes, places) {
-        userProfile?.classes?.mapNotNull { classInfo ->
-            val buildingInput = classInfo.building.lowercase()
+        val classList = userProfile?.classes ?: emptyList()
+        classList.mapNotNull { classInfo ->
+            val rawBuilding = classInfo.building.lowercase()
+            val buildingInput = if (rawBuilding == "bell tower") {
+                if (classInfo.roomNumber.startsWith("2")) "west bell tower" else "east bell tower"
+            } else {
+                rawBuilding
+            }
 
             // Re-use robust matching logic
             var match = places.find { place ->
@@ -228,19 +245,65 @@ fun MapScreen(
             }
 
             if (match != null) {
-                // Find a corresponding event to get times
-                val originalEvent = calendarEvents.find { it.summary == classInfo.className }
+                // Find a corresponding event to get times - match by Name, Day, and Location
+                val originalEvent = calendarEvents.find { event ->
+                    if (event.summary != classInfo.className) return@find false
+
+                    // 1. Match day of week to distinguish lab/lecture
+                    val eventStart = event.start?.dateTime ?: event.start?.date
+                    val dayMatch = if (eventStart != null) {
+                        val cal = java.util.Calendar.getInstance().apply { timeInMillis = eventStart.value }
+                        val dayOfWeekInt = cal.get(java.util.Calendar.DAY_OF_WEEK)
+                        val dayCodes = when (dayOfWeekInt) {
+                            java.util.Calendar.SUNDAY -> listOf("SU", "S")
+                            java.util.Calendar.MONDAY -> listOf("M")
+                            java.util.Calendar.TUESDAY -> listOf("T")
+                            java.util.Calendar.WEDNESDAY -> listOf("W")
+                            java.util.Calendar.THURSDAY -> listOf("TH", "T")
+                            java.util.Calendar.FRIDAY -> listOf("F")
+                            java.util.Calendar.SATURDAY -> listOf("SA", "S")
+                            else -> emptyList()
+                        }
+                        classInfo.dayOfWeek.split(",").map { it.trim() }.any { it in dayCodes }
+                    } else true
+
+                    // 2. Check location loosely as secondary filter
+                    val eventLoc = event.location?.lowercase() ?: ""
+                    val locationMatch = eventLoc.contains(buildingInput) || buildingInput.contains(eventLoc)
+
+                    dayMatch && locationMatch
+                } ?: calendarEvents.find { it.summary == classInfo.className } // Fallback to first name match
+
+                // Lab detection: Label the session occurring later in the week as "Lab"
+                val sameNameClasses = classList.filter { it.className == classInfo.className }
+                val isLab = if (sameNameClasses.size > 1) {
+                    val sortedByDay = sameNameClasses.sortedWith(compareBy({ item ->
+                        val firstDay = item.dayOfWeek.split(",").firstOrNull()?.trim() ?: ""
+                        when (firstDay) {
+                            "SU" -> 0
+                            "M" -> 1
+                            "T" -> 2
+                            "W" -> 3
+                            "TH" -> 4
+                            "F" -> 5
+                            "SA" -> 6
+                            else -> 7
+                        }
+                    }, { it.startTime }))
+                    classInfo != sortedByDay.firstOrNull()
+                } else false
+
                 MapPlace(
-                    name = classInfo.className,
+                    name = if (isLab) "${classInfo.className} Lab" else classInfo.className,
                     location = match.location,
                     category = MarkerCategory.CLASS,
                     description = "${classInfo.building} ${classInfo.roomNumber}",
                     eventId = originalEvent?.id,
-                    eventStart = originalEvent?.let { formatEventDateTime(it.start) },
-                    eventEnd = originalEvent?.let { formatEventDateTime(it.end) }
+                    eventStart = originalEvent?.let { formatEventDateTime(it.start, isClass = true) },
+                    eventEnd = originalEvent?.let { formatEventDateTime(it.end, isClass = true) }
                 )
             } else null
-        } ?: emptyList()
+        }
     }
 
     // Include the shared location from DM if it exists
@@ -332,13 +395,17 @@ fun MapScreen(
         }
     }
 
-    // Handle initial shared location from DM
+    // Handle initial shared location from DM but only pan once per unique shared location
+    var hasPannedToSharedLocation by rememberSaveable(sharedLocation) { mutableStateOf(false) }
+
     LaunchedEffect(sharedLocation, isMapReady) {
-        if (sharedLocation != null) {
+        if (sharedLocation != null && !hasPannedToSharedLocation) {
             if (isMapReady) {
                 cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(sharedLocation, 18f))
+                hasPannedToSharedLocation = true
             } else {
                 cameraPositionState.position = CameraPosition.fromLatLngZoom(sharedLocation, 18f)
+                // Don't set hasPanned to true here because isMapReady is false.
             }
             selectedPlace = incomingSharedMarker.firstOrNull()
         }
@@ -389,7 +456,7 @@ fun MapScreen(
             val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000).build()
             val locationCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
-                    if (userProfile?.shareLocation == false) return
+                    if (currentUserProfile?.shareLocation == false) return
 
                     result.lastLocation?.let { newLoc ->
                         location = newLoc
@@ -406,37 +473,43 @@ fun MapScreen(
 
     // Box to put the map and search bar on
     Box(modifier = modifier.fillMaxSize()) {
-        if (hasPermission && location != null) {
-            val currentLatLng = LatLng(location!!.latitude, location!!.longitude)
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = cameraPositionState,
+            onMapLoaded = { isMapReady = true },
+            properties = MapProperties(
+                mapType = mapType,
+                latLngBoundsForCameraTarget = bounds,
+                minZoomPreference = 14.5f,
+                mapStyleOptions = MapStyleOptions(
+                    if (isDarkTheme) darkMapStyleJson else lightMapStyleJson
+                )
+            ),
+            uiSettings = MapUiSettings(mapToolbarEnabled = false),
+            onMapClick = { selectedPlace = null }
+        ) {
+            val profilePicUrl = currentUserProfile?.profilePictureUrl
+            val userMarkerState = rememberMarkerState()
 
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                onMapLoaded = { isMapReady = true },
-                properties = MapProperties(
-                    mapType = mapType,
-                    latLngBoundsForCameraTarget = bounds,
-                    minZoomPreference = 14.5f,
-                    mapStyleOptions = MapStyleOptions(
-                        if (isDarkTheme) darkMapStyleJson else lightMapStyleJson
-                    )
-                ),
-                uiSettings = MapUiSettings(mapToolbarEnabled = false),
-                onMapClick = { selectedPlace = null }
-            ) {
-                val profilePicUrl = currentUserProfile?.profilePictureUrl
-
-                // Fetch the bitmap whenever the profile picture URL changes
-                LaunchedEffect(profilePicUrl) {
-                    Log.d("MapScreen", "User profilePicUrl updated in MapScreen: '$profilePicUrl'")
-                    if (!profilePicUrl.isNullOrBlank()) {
-                        userMarkerIcon = loadMarkerBitmap(context, profilePicUrl)
-                    }
+            // Update user marker position when location changes
+            LaunchedEffect(location) {
+                location?.let {
+                    userMarkerState.position = LatLng(it.latitude, it.longitude)
                 }
+            }
 
-                // Only draw the marker once the icon is ready OR use a fallback
+            // Fetch the bitmap whenever the profile picture URL changes
+            LaunchedEffect(profilePicUrl) {
+                if (!profilePicUrl.isNullOrBlank()) {
+                    userMarkerIcon = loadMarkerBitmap(context, profilePicUrl)
+                }
+            }
+
+            // User Location Marker - only if location is available
+            if (location != null) {
+                val currentLatLng = LatLng(location!!.latitude, location!!.longitude)
                 Marker(
-                    state = rememberMarkerState(position = currentLatLng),
+                    state = userMarkerState,
                     icon = userMarkerIcon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
                     anchor = Offset(0.5f, 0.5f),
                     title = "My Location",
@@ -445,149 +518,261 @@ fun MapScreen(
                         true
                     }
                 )
+            }
 
-                allMarkers.forEach { place ->
-                    val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
-                    val isInSelectedCategory = selectedCategory == MarkerCategory.ALL || place.category == selectedCategory
+            // Filter to show only base locations (buildings, services, shared, etc.)
+            // Events and Classes will be badges on these markers.
+            val baseMarkers = allMarkers.filter { it.category != MarkerCategory.CLASS && it.category != MarkerCategory.BOOKMARK }
 
-                    // Logic to hide location markers if overlapped by specific categories (Bookmarks, Classes)
-                    val hasOverlappingMarker = remember(place, bookmarkMarkers, scheduleMarkers) {
-                        if (place.category == MarkerCategory.BUILDING ||
-                            place.category == MarkerCategory.STUDENT_SERVICE ||
-                            place.category == MarkerCategory.DINING) {
-                            bookmarkMarkers.any { it.location == place.location } ||
-                                    scheduleMarkers.any { it.location == place.location }
-                        } else false
-                    }
+            baseMarkers.forEach { place ->
+                val isSelected = selectedPlace?.name == place.name && selectedPlace?.location == place.location
 
-                    // Hide building/service name if overlapped, unless filter active or specifically selected
-                    val shouldShowName = if (hasOverlappingMarker) {
-                        selectedCategory == place.category || isSelected
-                    } else true
+                // Find events/classes at this specific location to show as badges
+                val classesHere = scheduleMarkers.filter { it.location == place.location }
+                val eventsHere = bookmarkMarkers.filter { it.location == place.location }
 
-                    // Hide building/service icon if overlapped, unless category filter used or specifically selected/searched
-                    val shouldShowBuildingIcon = if (hasOverlappingMarker) {
-                        selectedCategory == place.category || isSelected
-                    } else true
+                val isInSelectedCategory = selectedCategory == MarkerCategory.ALL ||
+                        place.category == selectedCategory ||
+                        (selectedCategory == MarkerCategory.CLASS && classesHere.isNotEmpty()) ||
+                        (selectedCategory == MarkerCategory.BOOKMARK && eventsHere.isNotEmpty())
 
-                    val markerAlpha = if (selectedPlace != null) {
-                        if (isSelected) 1.0f else 0.35f
-                    } else if (selectedCategory != MarkerCategory.ALL) {
-                        if (isInSelectedCategory) 1.0f else 0.35f
+                val markerAlpha = if (selectedPlace != null) {
+                    if (isSelected) 1.0f else 0.35f
+                } else if (selectedCategory != MarkerCategory.ALL) {
+                    if (isInSelectedCategory) 1.0f else 0.35f
+                } else {
+                    1.0f
+                }
+
+                key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
+                    if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                        val icon = sharedMarkerIcons[place.senderId]
+                        Marker(
+                            state = rememberMarkerState(position = place.location),
+                            icon = icon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
+                            alpha = markerAlpha,
+                            anchor = Offset(0.5f, 0.5f),
+                            title = place.name,
+                            onClick = {
+                                selectedPlace = place
+                                true
+                            }
+                        )
                     } else {
-                        1.0f
-                    }
-
-                    if (shouldShowBuildingIcon) {
-                        key("${place.name}_${place.location.latitude}_${place.location.longitude}_${place.category}") {
-                            if (place.category == MarkerCategory.SHARED && place.senderId != null) {
-                                val icon = sharedMarkerIcons[place.senderId]
-                                Marker(
-                                    state = rememberMarkerState(position = place.location),
-                                    icon = icon ?: com.google.android.gms.maps.model.BitmapDescriptorFactory.defaultMarker(),
-                                    alpha = markerAlpha,
-                                    anchor = Offset(0.5f, 0.5f),
-                                    title = place.name,
-                                    onClick = {
-                                        selectedPlace = place
-                                        true
-                                    }
-                                )
-                            } else {
-                                MarkerComposable(
-                                    state = rememberMarkerState(position = place.location),
-                                    alpha = markerAlpha,
-                                    anchor = Offset(0.5f, 1.0f),
-                                    onClick = {
-                                        selectedPlace = place
-                                        true
-                                    }
+                        // Clickable marker for the icon and badges
+                        MarkerComposable(
+                            state = rememberMarkerState(position = place.location),
+                            alpha = markerAlpha,
+                            anchor = Offset(0.5f, 0.96f), // Adjusted for padding
+                            onClick = {
+                                selectedPlace = place
+                                true
+                            }
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color.White, CircleShape)
+                                        .border(2.dp, place.category.color, CircleShape)
+                                        .padding(3.dp)
                                 ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        if (shouldShowName) {
-                                            Surface(
-                                                shape = RoundedCornerShape(3.3.dp),
-                                                color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
-                                                modifier = Modifier.padding(bottom = 1.4.dp)
-                                            ) {
-                                                Text(
-                                                    text = place.name,
-                                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
-                                                    modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
-                                                    color = Color.Black
-                                                )
-                                            }
-                                        }
+                                    Icon(
+                                        imageVector = place.category.icon,
+                                        contentDescription = null,
+                                        tint = place.category.color,
+                                        modifier = Modifier.size(19.8.dp)
+                                    )
+                                }
 
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color.White, CircleShape)
-                                                .border(2.dp, place.category.color, CircleShape)
-                                                .padding(3.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = place.category.icon,
-                                                contentDescription = null,
-                                                tint = place.category.color,
-                                                modifier = Modifier.size(if (place.category == MarkerCategory.CLASS) 14.dp else 19.8.dp)
-                                            )
-                                        }
+                                // Overlay badges for Classes (Right) and Events (Left)
+                                if (classesHere.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .offset(x = 6.dp, y = 0.dp)
+                                            .background(Color.White, CircleShape)
+                                            .border(1.dp, MarkerCategory.CLASS.color, CircleShape)
+                                            .padding(2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = MarkerCategory.CLASS.icon,
+                                            contentDescription = null,
+                                            tint = MarkerCategory.CLASS.color,
+                                            modifier = Modifier.size(10.dp)
+                                        )
                                     }
                                 }
+
+                                if (eventsHere.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(if (classesHere.isNotEmpty()) Alignment.BottomStart else Alignment.BottomEnd)
+                                            .offset(x = if (classesHere.isNotEmpty()) (-6).dp else 6.dp, y = 0.dp)
+                                            .background(Color.White, CircleShape)
+                                            .border(1.dp, MarkerCategory.BOOKMARK.color, CircleShape)
+                                            .padding(2.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = MarkerCategory.BOOKMARK.icon,
+                                            contentDescription = null,
+                                            tint = MarkerCategory.BOOKMARK.color,
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Separate clickable marker for the name label - Rendered last to be on top
+                        MarkerComposable(
+                            state = rememberMarkerState(position = place.location),
+                            alpha = markerAlpha,
+                            anchor = Offset(0.5f, 2.4f), // Positioned above the icon
+                            zIndex = 1f, // Ensure text is drawn over the icons
+                            onClick = {
+                                selectedPlace = place
+                                true
+                            }
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(3.3.dp),
+                                color = Color.White.copy(alpha = if (isSelected) 0.95f else 0.85f),
+                            ) {
+                                Text(
+                                    text = place.name,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp),
+                                    modifier = Modifier.padding(horizontal = 3.6.dp, vertical = 1.5.dp),
+                                    color = Color.Black
+                                )
                             }
                         }
                     }
                 }
             }
-        } else if (!hasPermission) {
-            Text("Location permission required.", Modifier.align(Alignment.Center))
-        } else {
-            Text("Fetching live location...", Modifier.align(Alignment.Center))
         }
 
         selectedPlace?.let { place ->
             Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .padding(bottom = 80.dp)
-                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .padding(bottom = 92.dp) // Positioned above the bottom-left buttons
+                    .fillMaxWidth(0.96f)
                     .clickable { },
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = place.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Column(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = place.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        )
 
-                        if (place.category == MarkerCategory.SHARED && place.senderId != null) {
-                            val profile = userProfiles[place.senderId]
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(profile?.profilePictureUrl ?: "")
-                                        .allowHardware(false)
-                                        .build(),
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size(24.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.LightGray)
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = "Shared by ${profile?.name ?: "Loading..."}",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        } else if (place.description.isNotEmpty()) {
-                            Text(text = place.description, style = MaterialTheme.typography.bodySmall)
+                        Button(
+                            onClick = { showShareDialog = true },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(36.dp),
+                            shape = RoundedCornerShape(18.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Share", fontSize = 13.sp)
                         }
                     }
-                    Button(onClick = { showShareDialog = true }) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Share")
+
+                    if (place.category == MarkerCategory.SHARED && place.senderId != null) {
+                        val profile = userProfiles[place.senderId]
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current)
+                                    .data(profile?.profilePictureUrl ?: "")
+                                    .allowHardware(false)
+                                    .build(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = "Shared by ${profile?.name ?: "Loading..."}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    } else if (place.description.isNotEmpty()) {
+                        Text(
+                            text = place.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // Add section for classes and events at this location
+                    val classesHere = remember(place, scheduleMarkers) {
+                        scheduleMarkers.filter { it.location == place.location }
+                    }
+                    val eventsHere = remember(place, bookmarkMarkers, classesHere) {
+                        bookmarkMarkers.filter { it.location == place.location }
+                            .filter { event -> classesHere.none { it.name == event.name } }
+                    }
+
+                    if (classesHere.isNotEmpty() || eventsHere.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        if (classesHere.isNotEmpty()) {
+                            Text(
+                                "Classes:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF2E7D32)
+                            )
+                            classesHere.forEach { cls ->
+                                val roomPart = cls.description.substringAfterLast(" ", "")
+                                val roomDisplay = if (roomPart.isNotEmpty()) "#$roomPart" else ""
+                                Text(
+                                    text = "• ${cls.name} $roomDisplay${if (!cls.eventStart.isNullOrBlank()) " (${cls.eventStart})" else ""}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
+                        if (eventsHere.isNotEmpty()) {
+                            if (classesHere.isNotEmpty()) Spacer(Modifier.height(2.dp))
+                            Text(
+                                "Events:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFBF8F00)
+                            )
+                            eventsHere.forEach { ev ->
+                                Text(
+                                    text = "• ${ev.name}${if (!ev.eventStart.isNullOrBlank()) " (${ev.eventStart})" else ""}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -596,7 +781,10 @@ fun MapScreen(
         if (showShareDialog) {
             val shareSheetState = rememberModalBottomSheetState()
             ModalBottomSheet(
-                onDismissRequest = { showShareDialog = false },
+                onDismissRequest = {
+                    showShareDialog = false
+                    shareSearchQuery = ""
+                },
                 sheetState = shareSheetState
             ) {
                 Column(
@@ -608,6 +796,13 @@ fun MapScreen(
                         text = "Share with...",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    SearchBar(
+                        query = shareSearchQuery,
+                        onQueryChange = { shareSearchQuery = it },
+                        placeholder = "Search friends...",
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
 
@@ -643,11 +838,16 @@ fun MapScreen(
                         )
                     }
 
-                    val filteredChats = remember(myChats, selectedChatFilter) {
-                        when (selectedChatFilter) {
+                    val filteredChats = remember(myChats, selectedChatFilter, shareSearchQuery) {
+                        val typeFiltered = when (selectedChatFilter) {
                             "DMs" -> myChats.filter { it.type == "dm" }
                             "Groups" -> myChats.filter { it.type == "group" }
                             else -> myChats
+                        }
+                        if (shareSearchQuery.isBlank()) {
+                            typeFiltered
+                        } else {
+                            typeFiltered.filter { it.title.contains(shareSearchQuery, ignoreCase = true) }
                         }
                     }
 
@@ -659,7 +859,7 @@ fun MapScreen(
                                 ListItem(
                                     headlineContent = { Text(chat.title) },
                                     leadingContent = {
-                                        if (chat.type == "dm" && chat.profilePictureUrl.isNotBlank()) {
+                                        if (chat.profilePictureUrl.isNotBlank()) {
                                             AsyncImage(
                                                 model = ImageRequest.Builder(LocalContext.current)
                                                     .data(chat.profilePictureUrl)
@@ -731,23 +931,24 @@ fun MapScreen(
                     value = searchQuery,
                     onValueChange = { newValue ->
                         searchQuery = newValue
-                        allMarkers.find { it.name.contains(newValue, ignoreCase = true) }?.let { match ->
-                            selectedPlace = match
-                            scope.launch {
-                                if (isMapReady) {
-                                    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(match.location, 18f))
-                                } else {
-                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(match.location, 18f)
-                                }
+                        showSuggestions = newValue.isNotEmpty()
+                    },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Search facilities...", color = Color.DarkGray) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.DarkGray) },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = {
+                                searchQuery = ""
+                                selectedPlace = null
+                                showSuggestions = false
+                            }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear")
                             }
                         }
                     },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Search facilities...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                    trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = ""; selectedPlace = null }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
                     singleLine = true,
-                    shape = RoundedCornerShape(24.dp),
+                    shape = RoundedCornerShape(18.dp),
                     colors = TextFieldDefaults.colors(
                         focusedTextColor = Color.Black,
                         unfocusedTextColor = Color.Black,
@@ -769,7 +970,7 @@ fun MapScreen(
                         onClick = { isFilterMenuExpanded = true },
                         modifier = Modifier.size(55.dp),
                         containerColor = Color.White.copy(alpha = 0.9f),
-                        contentColor = MaterialTheme.colorScheme.primary,
+                        contentColor = AppPrimary,
                         shape = RoundedCornerShape(18.dp),
                         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
                     ) {
@@ -789,10 +990,10 @@ fun MapScreen(
                             DropdownMenuItem(
                                 text = {
                                     Text (
-                                         text = category.label,
-                                         color = Color.Black
+                                        text = category.label,
+                                        color = Color.Black
                                     )
-                                       },
+                                },
                                 onClick = {
                                     selectedCategory = category
                                     selectedPlace = null
@@ -822,21 +1023,79 @@ fun MapScreen(
                 }
             }
 
+            // Search Suggestions Card
+            if (showSuggestions && searchQuery.isNotBlank()) {
+                val suggestions = allMarkers.filter {
+                    it.name.contains(searchQuery, ignoreCase = true) ||
+                            it.description.contains(searchQuery, ignoreCase = true)
+                }.take(5)
+
+                if (suggestions.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(end = 64.dp), // Align with search bar width (approx)
+                        shape = RoundedCornerShape(16.dp),
+                        elevation = CardDefaults.cardElevation(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.95f))
+                    ) {
+                        Column {
+                            suggestions.forEach { place ->
+                                ListItem(
+                                    headlineContent = { Text(place.name, style = MaterialTheme.typography.bodyMedium) },
+                                    supportingContent = { Text(place.category.label, style = MaterialTheme.typography.labelSmall) },
+                                    leadingContent = {
+                                        Icon(
+                                            imageVector = place.category.icon,
+                                            contentDescription = null,
+                                            tint = place.category.color,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    },
+                                    modifier = Modifier.clickable {
+                                        searchQuery = place.name
+                                        showSuggestions = false
+
+                                        // Resolve to base marker if a class or event is found
+                                        val finalMatch = if (place.category == MarkerCategory.CLASS || place.category == MarkerCategory.BOOKMARK) {
+                                            places.find { it.location == place.location } ?: place
+                                        } else place
+
+                                        selectedPlace = finalMatch
+                                        scope.launch {
+                                            if (isMapReady) {
+                                                cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(finalMatch.location, 18f))
+                                            } else {
+                                                cameraPositionState.position = CameraPosition.fromLatLngZoom(finalMatch.location, 18f)
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+
             Spacer(Modifier.height(8.dp))
 
-            FloatingActionButton(
-                onClick = {
-                    if (location != null) {
-                        selectedPlace = MapPlace("Current Location", LatLng(location!!.latitude, location!!.longitude), MarkerCategory.SHARED, "Share your live location")
-                        showShareDialog = true
-                    }
-                },
-                modifier = Modifier.size(48.dp),
-                containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                contentColor = Color.White,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Icon(Icons.Default.MyLocation, contentDescription = "Share Current Location")
+            if (hasPermission && userProfile?.shareLocation != false) {
+                FloatingActionButton(
+                    onClick = {
+                        if (location != null) {
+                            selectedPlace = MapPlace("Current Location", LatLng(location!!.latitude, location!!.longitude), MarkerCategory.SHARED, "Share your live location")
+                            showShareDialog = true
+                        }
+                    },
+                    modifier = Modifier.size(48.dp),
+                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                    contentColor = Color.White,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.MyLocation, contentDescription = "Share Current Location")
+                }
             }
         }
 
@@ -889,14 +1148,19 @@ fun MapScreen(
                                         },
                                         modifier = Modifier.clickable {
                                             scope.launch {
-                                                selectedPlace = place
+                                                // Resolve to base marker if a class or event is clicked in list
+                                                val finalPlace = if (place.category == MarkerCategory.CLASS || place.category == MarkerCategory.BOOKMARK) {
+                                                    places.find { it.location == place.location } ?: place
+                                                } else place
+
+                                                selectedPlace = finalPlace
                                                 if (isMapReady) {
                                                     cameraPositionState.animate(
-                                                        update = CameraUpdateFactory.newLatLngZoom(place.location, 18f),
+                                                        update = CameraUpdateFactory.newLatLngZoom(finalPlace.location, 18f),
                                                         durationMs = 1000
                                                     )
                                                 } else {
-                                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(place.location, 18f)
+                                                    cameraPositionState.position = CameraPosition.fromLatLngZoom(finalPlace.location, 18f)
                                                 }
                                             }
                                             isListVisible = false
@@ -931,7 +1195,7 @@ fun MapScreen(
                             }
                         },
                         containerColor = if (mapType == MapType.SATELLITE) {
-                            MaterialTheme.colorScheme.primary
+                            AppPrimary
                         } else {
                             Color.White
                         },
@@ -960,15 +1224,45 @@ private fun formatDate(dateTime: com.google.api.client.util.DateTime?): String {
     return sdf.format(date)
 }
 
-private fun formatEventDateTime(dateTime: EventDateTime?): String {
+private fun formatEventDateTime(dateTime: EventDateTime?, isClass: Boolean = true): String {
     if (dateTime == null) return ""
-    return if (dateTime.dateTime != null) {
-        val sdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
-        sdf.format(Date(dateTime.dateTime.value))
+    val date = if (dateTime.dateTime != null) {
+        Date(dateTime.dateTime.value)
     } else if (dateTime.date != null) {
-        val sdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-        sdf.format(Date(dateTime.date.value))
-    } else ""
+        Date(dateTime.date.value)
+    } else {
+        return ""
+    }
+
+    return if (isClass) {
+        val cal = java.util.Calendar.getInstance().apply { time = date }
+        val dayLabel = when (cal.get(java.util.Calendar.DAY_OF_WEEK)) {
+            java.util.Calendar.SUNDAY -> "SU"
+            java.util.Calendar.MONDAY -> "M"
+            java.util.Calendar.TUESDAY -> "Tu"
+            java.util.Calendar.WEDNESDAY -> "W"
+            java.util.Calendar.THURSDAY -> "TH"
+            java.util.Calendar.FRIDAY -> "F"
+            java.util.Calendar.SATURDAY -> "SA"
+            else -> ""
+        }
+
+        if (dateTime.dateTime != null) {
+            val timeSdf = SimpleDateFormat("h:mm a", Locale.getDefault())
+            "$dayLabel ${timeSdf.format(date)}"
+        } else {
+            dayLabel
+        }
+    } else {
+        val dateSdf = SimpleDateFormat("MMM d", Locale.getDefault())
+        val dateStr = dateSdf.format(date)
+        if (dateTime.dateTime != null) {
+            val timeSdf = SimpleDateFormat("h:mm a", Locale.getDefault())
+            "$dateStr ${timeSdf.format(date)}"
+        } else {
+            dateStr
+        }
+    }
 }
 
 suspend fun loadMarkerBitmap(context: Context, url: String?): com.google.android.gms.maps.model.BitmapDescriptor? {

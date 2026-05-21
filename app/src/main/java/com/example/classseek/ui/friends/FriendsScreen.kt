@@ -82,12 +82,13 @@ private fun DocumentSnapshot.toUserSearchItem(): UserSearchItem? {
 private fun UserAvatar(
     imageUrl: String,
     label: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    contentDescription: String = "$label profile picture"
 ) {
     if (imageUrl.isNotBlank()) {
         AsyncImage(
             model = imageUrl,
-            contentDescription = "$label profile picture",
+            contentDescription = contentDescription,
             modifier = modifier
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surfaceVariant),
@@ -123,6 +124,7 @@ fun FriendsScreen(
     initialChatTitle: String? = null,
     onInitialChatConsumed: (() -> Unit)? = null,
     onNavigateToProfile: ((String) -> Unit)? = null,
+    onOpenChat: ((String, String) -> Unit)? = null,
     onLocationClick: (LatLng, String, String) -> Unit = { _, _, _ -> }
 ) {
     var currentScreen by remember { mutableStateOf(FriendsNavigation.MAIN) }
@@ -142,6 +144,19 @@ fun FriendsScreen(
     var sentRequestUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var favoriteFriendUids by remember { mutableStateOf<Set<String>>(emptySet()) }
     var chatToDelete by remember { mutableStateOf<ChatListItem?>(null) }
+
+    fun openChat(chatId: String, chatTitle: String) {
+        if (onOpenChat != null) {
+            activeChatId = null
+            activeChatTitle = null
+            currentScreen = FriendsNavigation.MAIN
+            onOpenChat(chatId, chatTitle)
+        } else {
+            activeChatId = chatId
+            activeChatTitle = chatTitle
+            currentScreen = FriendsNavigation.CHAT
+        }
+    }
 
     BackHandler(enabled = currentScreen != FriendsNavigation.MAIN) {
         when (currentScreen) {
@@ -172,9 +187,7 @@ fun FriendsScreen(
 
     LaunchedEffect(initialChatId) {
         if (initialChatId != null) {
-            activeChatId = initialChatId
-            activeChatTitle = initialChatTitle ?: "Chat"
-            currentScreen = FriendsNavigation.CHAT
+            openChat(initialChatId, initialChatTitle ?: "Chat")
             onInitialChatConsumed?.invoke()
         }
     }
@@ -276,9 +289,7 @@ fun FriendsScreen(
                     pendingRequests = pendingRequests,
                     chats = chats,
                     onChatClick = { chat ->
-                        activeChatId = chat.id
-                        activeChatTitle = chat.title
-                        currentScreen = FriendsNavigation.CHAT
+                        openChat(chat.id, chat.title)
                     },
                     onDeleteChat = { chat ->
                         chatToDelete = chat
@@ -315,9 +326,7 @@ fun FriendsScreen(
                         selectedUserForAction = user
                     },
                     onGroupCreated = { groupTitle, chatId ->
-                        activeChatId = chatId
-                        activeChatTitle = groupTitle
-                        currentScreen = FriendsNavigation.CHAT
+                        openChat(chatId, groupTitle)
                     },
                     repo = repo,
                     auth = auth,
@@ -371,10 +380,9 @@ fun FriendsScreen(
                         selectedUserForAction = null
                         scope.launch {
                             try {
-                                val chatId = repo.openOrCreateDm(myUid, targetUser.uid, targetUser.displayName)
-                                activeChatId = chatId
-                                activeChatTitle = targetUser.displayName
-                                currentScreen = FriendsNavigation.CHAT
+                                val chatTitle = targetUser.displayName.ifBlank { targetUser.email }
+                                val chatId = repo.openOrCreateDm(myUid, targetUser.uid, chatTitle)
+                                openChat(chatId, chatTitle)
                             } catch (_: Exception) {
                             }
                         }
@@ -984,7 +992,12 @@ fun ChatListItemRow(
             UserAvatar(
                 imageUrl = chat.profilePictureUrl,
                 label = chat.title,
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier.size(56.dp),
+                contentDescription = if (chat.type == "group") {
+                    "${chat.title} group image"
+                } else {
+                    "${chat.title} profile picture"
+                }
             )
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -1049,7 +1062,7 @@ fun SearchBar(
     TextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { Text(placeholder, color = Color.Gray) },
+        placeholder = { Text(placeholder, color = Color.DarkGray) },
         trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
         modifier = modifier
             .fillMaxWidth()
@@ -1067,7 +1080,7 @@ fun SearchBar(
             unfocusedIndicatorColor = Color.Transparent,
         ),
         leadingIcon = {
-            Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray)
+            Icon(Icons.Default.Search, contentDescription = null, tint = Color.DarkGray)
         },
         singleLine = true
     )

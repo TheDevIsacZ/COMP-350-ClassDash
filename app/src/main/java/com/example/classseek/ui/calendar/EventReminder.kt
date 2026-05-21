@@ -10,3 +10,9 @@ data class EventReminder(
     val notificationSent: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+data class UserReminderPreference(
+    val eventId: String = "",
+    val selectedMinutes: Int = 15,
+    val lastUpdated: Long = System.currentTimeMillis()
+)

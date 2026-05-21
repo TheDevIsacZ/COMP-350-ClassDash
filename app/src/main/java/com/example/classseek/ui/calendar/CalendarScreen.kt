@@ -29,12 +29,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -79,6 +79,8 @@ import com.example.classseek.data.ChatListItem
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.UserProfile
 import com.example.classseek.ui.friends.SearchBar
+import com.example.classseek.ui.calendar.UserReminderPreference
+import com.example.classseek.ui.theme.AppPrimary
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -102,10 +104,12 @@ import androidx.compose.material3.Surface
 fun CalendarScreen(
     signedInAccount: GoogleSignInAccount?,
     calendarEvents: List<Event>,
+    schoolEventIds: Set<String> = emptySet(),
     userProfile: UserProfile?,
     onSignInClick: (Intent) -> Unit,
     onAddEventClick: (Long) -> Unit,
     onDeleteEventClick: (String) -> Unit,
+    onEditEventClick: (Event) -> Unit,
     chatRepository: ChatRepository,
     myUid: String
 ) {
@@ -118,9 +122,8 @@ fun CalendarScreen(
     var showStarredOnly by remember { mutableStateOf(false) }
     var showChatPicker by remember { mutableStateOf(false) }
     var selectedEventForSharing by remember { mutableStateOf<Event?>(null) }
-    var showReminderDialog by remember { mutableStateOf(false) }
-    var selectedEventForReminder by remember { mutableStateOf<Event?>(null) }
     var userReminders by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    var reminderPreferences by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     var hasCalendarPermission by remember {
         mutableStateOf(
@@ -166,6 +169,27 @@ fun CalendarScreen(
         }
     }
 
+    LaunchedEffect(signedInAccount?.email) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            FirebaseFirestore.getInstance()
+                .collection("users")
+                .document(uid)
+                .collection("reminderPreferences")
+                .addSnapshotListener { snapshot, _ ->
+                    if (snapshot != null) {
+                        val prefs = mutableMapOf<String, Int>()
+                        snapshot.documents.forEach { doc ->
+                            val eventId = doc.id
+                            val minutes = doc.getLong("selectedMinutes")?.toInt() ?: 15
+                            prefs[eventId] = minutes
+                        }
+                        reminderPreferences = prefs
+                    }
+                }
+        }
+    }
+
     if (!hasCalendarPermission) {
         Column(
             modifier = Modifier
@@ -175,7 +199,7 @@ fun CalendarScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(Icons.Default.DateRange, contentDescription = "Calendar Icon", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.DateRange, contentDescription = "Calendar Icon", modifier = Modifier.size(64.dp), tint = AppPrimary)
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Calendar access is required to sync your schedule.", style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(16.dp))
@@ -184,7 +208,10 @@ fun CalendarScreen(
                     arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
                 )
             }) {
-                Text("Grant Calendar Permissions")
+                Text(
+                    text = "Grant Calendar Permissions",
+                    color = Color.Black
+                )
             }
         }
     } else if (signedInAccount == null) {
@@ -196,7 +223,7 @@ fun CalendarScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Icon(Icons.Default.AccountCircle, contentDescription = "Sign In Icon", modifier = Modifier.size(64.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Default.AccountCircle, contentDescription = "Sign In Icon", modifier = Modifier.size(64.dp), tint = AppPrimary)
             Spacer(modifier = Modifier.height(16.dp))
             Text(text = "Sign in to Google to view your events.", style = MaterialTheme.typography.bodyLarge)
             Spacer(modifier = Modifier.height(16.dp))
@@ -222,9 +249,14 @@ fun CalendarScreen(
             val filteredEvents = calendarEvents.filter { event ->
                 val eventTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
                 val isUpcoming = eventTime >= todayStart
-                val isStarredMatch = !showStarredOnly || userProfile?.bookmarkedEventIds?.contains(event.id) == true
-                isUpcoming && isStarredMatch
-            }
+                val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) == true
+                val isStarredMatch = !showStarredOnly || isBookmarked
+                
+                val isCampusEvent = schoolEventIds.contains(event.id)
+                val shouldHideCampusEvent = userProfile?.hideCampusEvents == true && isCampusEvent && !isBookmarked
+
+                isUpcoming && isStarredMatch && !shouldHideCampusEvent
+            }.sortedBy { it.start?.dateTime?.value ?: it.start?.date?.value ?: 0L }
 
             val groupedEvents = filteredEvents.groupBy { event ->
                 formatDate(event.start?.dateTime ?: event.start?.date)
@@ -313,7 +345,7 @@ fun CalendarScreen(
                         Text(
                             text = todayLabel,
                             style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = AppPrimary,
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
                         if (groupedEvents[todayLabel] == null) {
@@ -332,18 +364,18 @@ fun CalendarScreen(
                             AgendaItem(
                                 event = event,
                                 userProfile = userProfile,
+                                isSchoolEvent = schoolEventIds.contains(event.id),
+                                isClassEvent = event.id?.startsWith("virtual_") == true,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onEditClick = { onEditEventClick(event) },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
                     }
 
                     val futureDateLabels = groupedEvents.keys
@@ -359,7 +391,7 @@ fun CalendarScreen(
                             Text(
                                 text = dateLabel,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = AppPrimary,
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
@@ -367,18 +399,18 @@ fun CalendarScreen(
                             AgendaItem(
                                 event = event,
                                 userProfile = userProfile,
+                                isSchoolEvent = schoolEventIds.contains(event.id),
+                                isClassEvent = event.id?.startsWith("virtual_") == true,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onEditClick = { onEditEventClick(event) },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
                     }
                 }
             }
@@ -390,7 +422,7 @@ fun CalendarScreen(
         val eventsForSelectedDate = calendarEvents.filter { event ->
             val eventStartTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
             formatDate(DateTime(eventStartTime)) == dateLabel
-        }
+        }.sortedBy { it.start?.dateTime?.value ?: it.start?.date?.value ?: 0L }
 
         ModalBottomSheet(
             onDismissRequest = { showBottomSheet = false },
@@ -438,15 +470,14 @@ fun CalendarScreen(
                             AgendaItem(
                                 event = event,
                                 userProfile = userProfile,
+                                isSchoolEvent = schoolEventIds.contains(event.id),
+                                isClassEvent = event.id?.startsWith("virtual_") == true,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
+                                onEditClick = { onEditEventClick(event) },
                                 onShareClick = {
                                     selectedEventForSharing = event
                                     showChatPicker = true
-                                },
-                                onSetReminder = {
-                                    selectedEventForReminder = event
-                                    showReminderDialog = true
                                 }
                             )
                         }
@@ -555,7 +586,7 @@ fun CalendarScreen(
                             ListItem(
                                 headlineContent = { Text(chat.title) },
                                 leadingContent = {
-                                    if (chat.type == "dm" && chat.profilePictureUrl.isNotBlank()) {
+                                    if (chat.profilePictureUrl.isNotBlank()) {
                                         AsyncImage(
                                             model = ImageRequest.Builder(LocalContext.current)
                                                 .data(chat.profilePictureUrl)
@@ -607,53 +638,6 @@ fun CalendarScreen(
         }
     }
 
-    if (showReminderDialog && selectedEventForReminder != null) {
-        ReminderDialog(
-            eventTitle = selectedEventForReminder?.summary ?: "Untitled Event",
-            onDismiss = {
-                showReminderDialog = false
-                selectedEventForReminder = null
-            },
-            onSetReminder = { minutes ->
-                val uid = FirebaseAuth.getInstance().currentUser?.uid
-                val event = selectedEventForReminder
-                if (uid != null && event != null) {
-                    val eventTimeMillis = event.start?.dateTime?.value
-                        ?: event.start?.date?.value
-                        ?: System.currentTimeMillis()
-
-                    // For testing: set reminder to NOW so it triggers immediately
-                    val testReminderTime = System.currentTimeMillis() - 60000  // 1 minute ago
-
-                    val reminderData = hashMapOf(
-                        "eventId" to (event.id ?: "test"),
-                        "eventTitle" to (event.summary ?: "Test Event"),
-                        "eventTime" to eventTimeMillis,
-                        "reminderMinutes" to minutes,
-                        "reminderTime" to testReminderTime,
-                        "notificationSent" to false,
-                    )
-
-                    Log.d("REMINDER_DEBUG", "Saving reminder: $reminderData")
-
-                    FirebaseFirestore.getInstance()
-                        .collection("users")
-                        .document(uid)
-                        .collection("reminders")
-                        .document(event.id ?: "test")
-                        .set(reminderData)
-                        .addOnSuccessListener {
-                            Log.d("REMINDER_DEBUG", "✅ Reminder saved successfully!")
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e("REMINDER_DEBUG", "❌ Failed to save reminder: ${e.message}", e)
-                        }
-                }
-                showReminderDialog = false
-                selectedEventForReminder = null
-            }
-        )
-    }
 }
 
 @Composable
@@ -779,7 +763,7 @@ private fun CalendarDayCell(
 
     Box(
         modifier = modifier.height(44.dp).padding(2.dp).clip(CircleShape)
-            .background(when { isSelected -> MaterialTheme.colorScheme.primary; hasEvent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.18f); else -> Color.Transparent })
+            .background(when { isToday -> AppPrimary; hasEvent -> AppPrimary.copy(alpha = 0.18f); else -> Color.Transparent })
             .clickable { onDateSelected(dayMillis) },
         contentAlignment = Alignment.Center
     ) {
@@ -787,9 +771,9 @@ private fun CalendarDayCell(
             Text(text = cal.get(JavaCalendar.DAY_OF_MONTH).toString(),
 
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal)
+                fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal)
             if (hasEvent) Box(modifier = Modifier.size(4.dp).clip(CircleShape)
-                .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary))
+                .background(if (isToday) MaterialTheme.colorScheme.onPrimary else AppPrimary))
             else Spacer(modifier = Modifier.height(4.dp))
         }
     }
@@ -813,45 +797,23 @@ private fun dayKey(millis: Long): String {
     return "${cal.get(JavaCalendar.YEAR)}-${cal.get(JavaCalendar.MONTH)}-${cal.get(JavaCalendar.DAY_OF_MONTH)}"
 }
 
-@Composable
-fun ReminderDialog(eventTitle: String, onDismiss: () -> Unit, onSetReminder: (Int) -> Unit) {
-    var selectedMinutes by remember { mutableStateOf(15) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Set Reminder for") },
-        text = {
-            Column {
-                Text(eventTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Remind me:", style = MaterialTheme.typography.labelLarge)
-                Spacer(modifier = Modifier.height(8.dp))
-                listOf(0 to "At time of event", 5 to "5 minutes before", 15 to "15 minutes before",
-                    30 to "30 minutes before", 60 to "1 hour before", 120 to "2 hours before", 1440 to "1 day before"
-                ).forEach { (minutes, label) ->
-                    Row(modifier = Modifier.fillMaxWidth().clickable { selectedMinutes = minutes }.padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(selected = selectedMinutes == minutes, onClick = { selectedMinutes = minutes })
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(label, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSetReminder(selectedMinutes) }) { Text("Set Reminder") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
-    )
-}
 
 @Composable
 fun AgendaItem(
-    event: Event, userProfile: UserProfile?, canDelete: Boolean = false,
-    onDeleteClick: () -> Unit = {}, onShareClick: () -> Unit = {}, onSetReminder: (Event) -> Unit = {}
+    event: Event, userProfile: UserProfile?,
+    isSchoolEvent: Boolean = false,
+    isClassEvent: Boolean = false,
+    canDelete: Boolean = false,
+    onDeleteClick: () -> Unit = {}, onEditClick: () -> Unit = {}, onShareClick: () -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
-    val eventColor = Color(0xFF4285F4)
-    var showMenu by remember { mutableStateOf(false) }
+    val lineColor = when {
+        isSchoolEvent -> Color(0xFFB43232)
+        isClassEvent -> Color(0xFF6650a4)
+        else -> Color(0xFF4285F4)
+    }
+    val backgroundColor = Color(0xFF4285F4).copy(alpha = 0.1f)
     val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) ?: false
     var optimisticIsBookmarked by remember(event.id, isBookmarked) { mutableStateOf(isBookmarked) }
 
@@ -866,14 +828,21 @@ fun AgendaItem(
                 if (endTime.isNotEmpty()) Text(endTime, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Box(modifier = Modifier.weight(1f).background(eventColor.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Box(modifier = Modifier.weight(1f).background(backgroundColor, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.width(4.dp).height(24.dp).background(eventColor, RoundedCornerShape(2.dp)))
+                    Box(modifier = Modifier.width(4.dp).height(24.dp).background(lineColor, RoundedCornerShape(2.dp)))
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                         if (!event.location.isNullOrEmpty()) Text(event.location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+
+                    if (canDelete || isSchoolEvent || isClassEvent) {
+                        IconButton(onClick = onEditClick) {
+                            Icon(Icons.Default.Edit, "Edit event", tint = AppPrimary, modifier = Modifier.size(20.dp))
+                        }
+                    }
+
                     IconButton(onClick = {
                         val uid = FirebaseAuth.getInstance().currentUser?.uid
                         if (uid != null) {
@@ -883,7 +852,7 @@ fun AgendaItem(
 
                             if (wasBookmarked) {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayRemove(event.id))
-                                FirebaseFirestore.getInstance().collection("users").document(uid).collection("reminders").document(event.id ?: "").delete()
+                                deleteReminderFromFirestore(uid, event.id ?: "")
                             } else {
                                 ref.update("bookmarkedEventIds", FieldValue.arrayUnion(event.id))
                             }
@@ -891,24 +860,13 @@ fun AgendaItem(
                     }) {
                         Icon(
                             imageVector = if (optimisticIsBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = "Bookmark",
-                            tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray
+                            contentDescription = if (optimisticIsBookmarked) "Remove bookmark" else "Bookmark",
+                            tint = if (optimisticIsBookmarked) Color(0xFFFFD700) else Color.Gray,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
-                    IconButton(onClick = { onSetReminder(event) }) {
-                        Icon(Icons.Default.Notifications, "Set Reminder", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                    }
                     IconButton(onClick = onShareClick) {
-                        Icon(Icons.Default.Share, "Share event", tint = MaterialTheme.colorScheme.primary)
-                    }
-
-                    if (canDelete) {
-                        Box {
-                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, "More options") }
-                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("Delete") }, onClick = { showMenu = false; onDeleteClick() })
-                            }
-                        }
+                        Icon(Icons.Default.Share, "Share event", tint = AppPrimary, modifier = Modifier.size(20.dp))
                     }
                 }
             }

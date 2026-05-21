@@ -10,6 +10,8 @@ import com.google.firebase.firestore.Query
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 import java.security.MessageDigest
+import com.google.firebase.storage.FirebaseStorage
+import com.google.firebase.storage.StorageMetadata
 
 data class ChatListItem(
     val id: String = "",
@@ -37,7 +39,16 @@ data class Message(
     val eventStart: String? = null,
     val eventEnd: String? = null,
     val eventLocation: String? = null,
-    val eventId: String? = null
+    val eventId: String? = null,
+    val gameId: String? = null,
+    val gameType: String? = null,
+    val imageUrl: String? = null,
+    val imagePath: String? = null,
+    val imageContentType: String? = null,
+    val imageSizeBytes: Long? = null,
+    val imageWidth: Int? = null,
+    val imageHeight: Int? = null
+
 )
 
 data class ReadReceiptState(
@@ -61,11 +72,13 @@ data class ChatInfo(
     val type: String,
     val title: String,
     val createdBy: String,
-    val memberIds: List<String>
+    val memberIds: List<String>,
+    val profilePictureUrl: String = ""
 )
 
 class ChatRepository(
-    private val db: FirebaseFirestore
+    private val db: FirebaseFirestore,
+    private val storage: FirebaseStorage = FirebaseStorage.getInstance()
 ) {
     private val chats = db.collection("chats")
     private val users = db.collection("users")
@@ -129,6 +142,27 @@ class ChatRepository(
         )
     }
 
+    private fun buildChatInboxPreviewDoc(
+        chat: ChatInfo,
+        lastMessageText: String?,
+        lastMessageAt: Any?
+    ): Map<String, Any?> {
+        val doc = mutableMapOf<String, Any?>(
+            "chatId" to chat.id,
+            "title" to chat.title,
+            "type" to chat.type,
+            "lastMessageText" to lastMessageText,
+            "lastMessageAt" to lastMessageAt,
+            "hidden" to false
+        )
+
+        if (chat.type == "group" && chat.profilePictureUrl.isNotBlank()) {
+            doc["profilePictureUrl"] = chat.profilePictureUrl
+        }
+
+        return doc
+    }
+
     private suspend fun syncDmInboxMetadata(
         chatId: String,
         uidA: String,
@@ -165,7 +199,12 @@ class ChatRepository(
             type = doc.getString("type") ?: "dm",
             title = doc.getString("title") ?: "Chat",
             createdBy = doc.getString("createdBy") ?: "",
-            memberIds = (doc.get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty()
+            memberIds = (doc.get("memberIds") as? List<*>)?.filterIsInstance<String>().orEmpty(),
+            profilePictureUrl = doc.getString("photoURL")
+                ?.trim()
+                .orEmpty()
+                .ifBlank { doc.getString("profilePictureUrl")?.trim().orEmpty() }
+                .ifBlank { doc.getString("groupImageUrl")?.trim().orEmpty() }
         )
     }
 
@@ -320,6 +359,7 @@ class ChatRepository(
             "lastMessageAt" to null,
             "lastMessageText" to null,
             "lastMessageSenderId" to null,
+            "photoURL" to "",
             "hidden" to false
         )
 
@@ -345,6 +385,7 @@ class ChatRepository(
                     "chatId" to chatId,
                     "title" to finalTitle,
                     "type" to "group",
+                    "profilePictureUrl" to "",
                     "lastMessageText" to null,
                     "lastMessageAt" to null,
                     "hidden" to false
@@ -410,6 +451,63 @@ class ChatRepository(
         return doc.getString("role")
     }
 
+    suspend fun updateGroupChatIcon(
+        chatId: String,
+        actingUid: String,
+        imageBytes: ByteArray,
+        imageWidth: Int,
+        imageHeight: Int
+    ): String {
+        if (imageBytes.isEmpty()) throw Exception("Image is empty")
+
+        val chat = getChatInfo(chatId)
+        if (chat.type != "group") throw Exception("Not a group chat")
+        if (!chat.memberIds.contains(actingUid)) {
+            throw Exception("Only group members can edit the group image")
+        }
+
+        val role = getMyRole(chatId, actingUid)?.trim()?.lowercase()
+        if (role != "owner" && role != "cohost") {
+            throw Exception("Only the group owner or cohosts can edit the group image")
+        }
+
+        val imagePath = "chatImages/$chatId/group_icon_${System.currentTimeMillis()}.jpg"
+        val storageRef = storage.reference.child(imagePath)
+
+        val metadata = StorageMetadata.Builder()
+            .setContentType("image/jpeg")
+            .setCustomMetadata("chatId", chatId)
+            .setCustomMetadata("updatedBy", actingUid)
+            .setCustomMetadata("purpose", "groupIcon")
+            .build()
+
+        storageRef.putBytes(imageBytes, metadata).await()
+        val downloadUrl = storageRef.downloadUrl.await().toString()
+
+        val batch = db.batch()
+        batch.set(
+            chatRef(chatId),
+            mapOf("photoURL" to downloadUrl),
+            SetOptions.merge()
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                mapOf(
+                    "chatId" to chatId,
+                    "title" to chat.title,
+                    "type" to "group",
+                    "profilePictureUrl" to downloadUrl
+                ),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return downloadUrl
+    }
+
     private suspend fun getUserDisplayName(uid: String): String {
         val doc = users.document(uid).get().await()
 
@@ -470,14 +568,7 @@ class ChatRepository(
                     )
                 }
             } else {
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to trimmed,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                )
+                buildChatInboxPreviewDoc(chat, trimmed, now)
             }
 
             batch.set(userInboxRef(uid).document(chatId), inboxDoc, SetOptions.merge())
@@ -546,14 +637,7 @@ class ChatRepository(
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to title,
-                    "type" to "group",
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat.copy(title = title), systemText, now),
                 SetOptions.merge()
             )
         }
@@ -619,14 +703,7 @@ class ChatRepository(
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to "group",
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, systemText, now),
                 SetOptions.merge()
             )
         }
@@ -681,14 +758,7 @@ class ChatRepository(
         updatedMemberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to "group",
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, systemText, now),
                 SetOptions.merge()
             )
         }
@@ -785,14 +855,74 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to trimmed,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, trimmed, now),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
+    }
+
+    suspend fun sendImageMessage(
+        chatId: String,
+        senderId: String,
+        imageBytes: ByteArray,
+        imageWidth: Int,
+        imageHeight: Int
+    ): String {
+        if (imageBytes.isEmpty()) throw Exception("Image is empty")
+
+        val msgRef = chatMessagesRef(chatId).document()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
+
+        val imagePath = "chatImages/$chatId/${msgRef.id}.jpg"
+        val storageRef = storage.reference.child(imagePath)
+
+        val metadata = StorageMetadata.Builder()
+            .setContentType("image/jpeg")
+            .setCustomMetadata("chatId", chatId)
+            .setCustomMetadata("messageId", msgRef.id)
+            .setCustomMetadata("senderId", senderId)
+            .build()
+
+        storageRef.putBytes(imageBytes, metadata).await()
+        val downloadUrl = storageRef.downloadUrl.await().toString()
+
+        val previewText = "📷 Photo"
+        val batch = db.batch()
+
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "image",
+                "text" to previewText,
+                "imageUrl" to downloadUrl,
+                "imagePath" to imagePath,
+                "imageContentType" to "image/jpeg",
+                "imageSizeBytes" to imageBytes.size,
+                "imageWidth" to imageWidth,
+                "imageHeight" to imageHeight,
+                "createdAt" to now,
+                "replyToMessageId" to null
+            )
+        )
+
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to previewText,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                buildChatInboxPreviewDoc(chat, previewText, now),
                 SetOptions.merge()
             )
         }
@@ -840,14 +970,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to text,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, text, now),
                 SetOptions.merge()
             )
         }
@@ -980,14 +1103,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to systemText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, systemText, now),
                 SetOptions.merge()
             )
         }
@@ -1015,7 +1131,16 @@ class ChatRepository(
             eventStart = getString("eventStart"),
             eventEnd = getString("eventEnd"),
             eventLocation = getString("eventLocation"),
-            eventId = getString("eventId")
+            eventId = getString("eventId"),
+            gameId = getString("gameId"),
+            gameType = getString("gameType"),
+            imageUrl = getString("imageUrl"),
+            imagePath = getString("imagePath"),
+            imageContentType = getString("imageContentType"),
+            imageSizeBytes = getLong("imageSizeBytes"),
+            imageWidth = getLong("imageWidth")?.toInt(),
+            imageHeight = getLong("imageHeight")?.toInt()
+
         )
     }
 
@@ -1025,7 +1150,9 @@ class ChatRepository(
             title = getString("title") ?: "Chat",
             type = getString("type") ?: "dm",
             otherUserUid = getString("otherUserUid"),
-            profilePictureUrl = getString("profilePictureUrl") ?: "",
+            profilePictureUrl = getString("profilePictureUrl")
+                ?: getString("groupImageUrl")
+                ?: "",
             lastMessageText = getString("lastMessageText"),
             lastMessageAt = getTimestamp("lastMessageAt"),
             hidden = getBoolean("hidden") ?: false
@@ -1201,14 +1328,7 @@ class ChatRepository(
         chat.memberIds.forEach { uid ->
             batch.set(
                 userInboxRef(uid).document(chatId),
-                mapOf(
-                    "chatId" to chatId,
-                    "title" to chat.title,
-                    "type" to chat.type,
-                    "lastMessageText" to messageText,
-                    "lastMessageAt" to now,
-                    "hidden" to false
-                ),
+                buildChatInboxPreviewDoc(chat, messageText, now),
                 SetOptions.merge()
             )
         }
@@ -1225,5 +1345,144 @@ class ChatRepository(
 
         val doc = dmThreads.document(dmKey).get().await()
         return doc.getString("chatId")
+    }
+
+    /**
+     * Initializes and sends a new Game Invitation.
+     * Links the game state with a specific chat bubble for status tracking.
+     */
+    suspend fun sendGameMessage(
+        chatId: String,
+        senderId: String,
+        gameType: String,
+        initialState: String,
+        opponentId: String,
+        initialStatusMessage: String // Added to allow personalized initial text
+    ): String {
+        val gameRef = db.collection("games").document()
+        val msgRef = chatMessagesRef(chatId).document()
+        val batch = db.batch()
+        val now = FieldValue.serverTimestamp()
+        val chat = getChatInfo(chatId)
+
+        val messageText = initialStatusMessage
+// ...
+
+        val gameData = hashMapOf(
+            "type" to gameType,
+            "playerWhite" to senderId,
+            "playerBlack" to opponentId,
+            "currentTurn" to senderId, // White (sender) starts first
+            "state" to initialState,
+            "status" to "active",
+            "lastMoveAt" to now,
+            "moveHistory" to emptyList<String>(),
+            "messageId" to msgRef.id // Store the link to the chat bubble for updates
+        )
+        batch.set(gameRef, gameData)
+
+        // Create the game message in the chat thread
+        batch.set(
+            msgRef,
+            mapOf(
+                "senderId" to senderId,
+                "type" to "game",
+                "text" to messageText,
+                "gameId" to gameRef.id,
+                "gameType" to gameType,
+                "createdAt" to now
+            )
+        )
+
+        // Update thread and inbox previews for all participants
+        batch.update(
+            chatRef(chatId),
+            mapOf(
+                "lastMessageAt" to now,
+                "lastMessageText" to messageText,
+                "lastMessageSenderId" to senderId
+            )
+        )
+
+        chat.memberIds.forEach { uid ->
+            batch.set(
+                userInboxRef(uid).document(chatId),
+                buildChatInboxPreviewDoc(chat, messageText, now),
+                SetOptions.merge()
+            )
+        }
+
+        batch.commit().await()
+        return msgRef.id
+    }
+
+    fun listenToGame(gameId: String, onUpdate: (com.example.classseek.models.GameState?) -> Unit) : ListenerRegistration {
+        return db.collection("games").document(gameId)
+            .addSnapshotListener { snapshot, _ ->
+                if (snapshot != null && snapshot.exists()) {
+                    val game = com.example.classseek.models.GameState(
+                        id = snapshot.id,
+                        type = snapshot.getString("type") ?: "",
+                        playerWhite = snapshot.getString("playerWhite") ?: "",
+                        playerBlack = snapshot.getString("playerBlack") ?: "",
+                        currentTurn = snapshot.getString("currentTurn") ?: "",
+                        state = snapshot.getString("state") ?: "",
+                        status = snapshot.getString("status") ?: "active",
+                        winnerId = snapshot.getString("winnerId"),
+                        lastMoveAt = snapshot.getTimestamp("lastMoveAt"),
+                        moveHistory = snapshot.get("moveHistory") as? List<String> ?: emptyList(),
+                        messageId = snapshot.getString("messageId") ?: "",
+                        lastMoveFrom = snapshot.getString("lastMoveFrom"),
+                        lastMoveTo = snapshot.getString("lastMoveTo")
+                    )
+                    onUpdate(game)
+                } else {
+                    onUpdate(null)
+                }
+            }
+    }
+
+    /**
+     * Updates the game state and synchronization across the chat and inbox.
+     * Uses a single batch for atomic updates to game doc and message doc.
+     */
+    suspend fun updateGameState(chatId: String, gameId: String, newState: String, nextTurnUserId: String, move: String, status: String = "active", winnerId: String? = null, statusMessage: String? = null, lastMoveFrom: String? = null, lastMoveTo: String? = null) {
+        val gameRef = db.collection("games").document(gameId)
+        val gameDoc = gameRef.get().await()
+        val messageId = gameDoc.getString("messageId")
+
+        val updates = hashMapOf(
+            "state" to newState,
+            "currentTurn" to nextTurnUserId,
+            "lastMoveAt" to FieldValue.serverTimestamp(),
+            "moveHistory" to FieldValue.arrayUnion(move),
+            "status" to status,
+            "lastMoveFrom" to lastMoveFrom,
+            "lastMoveTo" to lastMoveTo
+        )
+        if (winnerId != null) {
+            updates["winnerId"] = winnerId
+        }
+        
+        // Use a batch to ensure the game board and the chat bubble text update simultaneously
+        val batch = db.batch()
+        batch.update(gameRef, updates)
+        
+        if (statusMessage != null && messageId != null) {
+            // Update the text in the specific chat bubble (e.g., "Opponent's Turn")
+            batch.update(chatMessagesRef(chatId).document(messageId), "text", statusMessage)
+            // Update the thread's last message for the inbox preview
+            batch.update(chatRef(chatId), "lastMessageText", statusMessage)
+        }
+        
+        batch.commit().await()
+
+        // Sync individual user inbox documents (cannot be batched easily with chat updates)
+        if (statusMessage != null) {
+            val chatInfo = getChatInfo(chatId)
+            chatInfo.memberIds.forEach { uid ->
+                userInboxRef(uid).document(chatId).update("lastMessageText", statusMessage)
+            }
+        }
     }
 }
