@@ -1356,7 +1356,8 @@ class ChatRepository(
         senderId: String,
         gameType: String,
         initialState: String,
-        opponentId: String
+        opponentId: String,
+        initialStatusMessage: String // Added to allow personalized initial text
     ): String {
         val gameRef = db.collection("games").document()
         val msgRef = chatMessagesRef(chatId).document()
@@ -1364,7 +1365,8 @@ class ChatRepository(
         val now = FieldValue.serverTimestamp()
         val chat = getChatInfo(chatId)
 
-        val messageText = "🎮 Your Turn" // Initial invitation status
+        val messageText = initialStatusMessage
+// ...
 
         val gameData = hashMapOf(
             "type" to gameType,

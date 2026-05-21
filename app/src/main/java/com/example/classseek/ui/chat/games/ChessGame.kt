@@ -5,8 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,18 +18,16 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.classseek.data.ChatRepository
 import com.example.classseek.models.GameState
-import com.example.classseek.ui.theme.AppPrimary
 import kotlinx.coroutines.launch
 import com.github.bhlangonijr.chesslib.Board
 import com.github.bhlangonijr.chesslib.Square
 import com.github.bhlangonijr.chesslib.move.Move
 import com.github.bhlangonijr.chesslib.Piece
-
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import android.media.AudioManager
-import android.view.SoundEffectConstants
+import com.example.classseek.ui.chat.ChatUserProfile
 
 /**
  * Full-screen Chess Game Overlay.
@@ -41,6 +38,7 @@ fun ChessGameOverlay(
     chatId: String,
     gameId: String,
     myUid: String,
+    userProfiles: Map<String, ChatUserProfile>, // Added to fetch personalized names
     repo: ChatRepository,
     onDismiss: () -> Unit
 ) {
@@ -57,6 +55,22 @@ fun ChessGameOverlay(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val audioManager = remember { context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager }
+
+    // Helper to get personalized name
+    fun getDisplayName(uid: String): String {
+        val profile = userProfiles[uid]
+        return when {
+            profile?.displayName?.isNotBlank() == true -> profile.displayName
+            profile?.email?.isNotBlank() == true -> profile.email.substringBefore("@")
+            else -> "Player"
+        }
+    }
+
+    // Helper to get possessive name (e.g. Isac's)
+    fun getPossessiveName(uid: String): String {
+        val name = getDisplayName(uid)
+        return if (name.endsWith("s")) "$name'" else "$name's"
+    }
 
     // Listen to real-time updates for this specific game
     DisposableEffect(gameId) {
@@ -135,11 +149,11 @@ fun ChessGameOverlay(
                                     val status = if (isMated || isDraw) "finished" else "active"
                                     val winnerId = if (isMated) game.currentTurn else null
 
-                                    // Status message displayed in the chat bubble and inbox
+                                    // Status message displayed in the chat bubble and inbox (Personalized names)
                                     val statusMessage = when {
-                                        isMated -> "🏆 Checkmate! ${if (winnerId == myUid) "You" else "Opponent"} won."
+                                        isMated -> "🏆 ${getDisplayName(winnerId ?: "")} won."
                                         isDraw -> "🤝 Game Over: Draw."
-                                        else -> if (nextTurn == myUid) "🎮 Your Turn" else "🎮 Opponent's Turn"
+                                        else -> "🎮 ${getPossessiveName(nextTurn)} Turn"
                                     }
 
                                     // Push all updates to Firestore in a single atomic batch
@@ -172,7 +186,7 @@ fun ChessGameOverlay(
                                 .padding(horizontal = 12.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
-                            androidx.compose.foundation.lazy.LazyRow(
+                            LazyRow(
                                 modifier = Modifier.fillMaxSize(),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -213,20 +227,22 @@ fun ChessGameOverlay(
                     if (gameStatus == "finished") {
                         val resultText = when {
                             game.winnerId == myUid -> "You Win! 🏆"
-                            game.winnerId != null -> "Opponent Wins!"
+                            game.winnerId != null -> "${getDisplayName(game.winnerId)} Wins!"
                             else -> "Draw! 🤝"
                         }
                         Text(
                             text = resultText,
                             style = MaterialTheme.typography.headlineSmall,
-                            color = AppPrimary,
+                            color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )
                     } else {
+                        val turnName = getDisplayName(game.currentTurn)
+                        val turnStatus = if (game.currentTurn == myUid) "Your Turn" else "$turnName's Turn"
                         Text(
-                            text = if (isMyTurn) "Your Turn" else "Opponent's Turn",
+                            text = turnStatus,
                             style = MaterialTheme.typography.bodyLarge,
-                            color = if (isMyTurn) AppPrimary else MaterialTheme.colorScheme.onSurface
+                            color = if (isMyTurn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                     }
 
@@ -416,19 +432,13 @@ private const val SOUND_CAPTURE = AudioManager.FX_KEYPRESS_STANDARD
 
 // Extension to get SAN move
 fun Board.boardToSan(move: Move): String {
-    // kchesslib doesn't have a direct san(move) method in all versions, 
-    // but move.toString() usually returns UCI. 
-    // Let's use a simple manual SAN generator logic for common cases 
-    // or rely on the library if available.
-    // In kchesslib, we can use the move's SAN from the board history after doing it.
-    val san = this.backup.last()?.move?.toString() ?: move.toString()
-    // Check for mate/check in the library state
+    val san = this.backup.last().move.toString()
     return if (this.isMated) "$san#" else if (this.isKingAttacked) "$san+" else san
 }
 
 fun pieceToUnicode(piece: Piece): String {
     return when (piece) {
-        Piece.WHITE_PAWN -> "♟"
+        Piece.WHITE_PAWN -> "♟" // Using filled black character for white piece, colored via Compose
         Piece.WHITE_ROOK -> "♜"
         Piece.WHITE_KNIGHT -> "♞"
         Piece.WHITE_BISHOP -> "♝"
