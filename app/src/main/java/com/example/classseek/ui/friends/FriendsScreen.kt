@@ -1062,7 +1062,7 @@ fun SearchBar(
     TextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { Text(placeholder, color = Color.Gray) },
+        placeholder = { Text(placeholder, color = Color.DarkGray) },
         trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear") } },
         modifier = modifier
             .fillMaxWidth()
@@ -1080,7 +1080,7 @@ fun SearchBar(
             unfocusedIndicatorColor = Color.Transparent,
         ),
         leadingIcon = {
-            Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray)
+            Icon(Icons.Default.Search, contentDescription = null, tint = Color.DarkGray)
         },
         singleLine = true
     )
