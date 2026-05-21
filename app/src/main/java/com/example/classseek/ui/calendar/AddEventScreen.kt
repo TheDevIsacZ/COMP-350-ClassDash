@@ -45,7 +45,8 @@ fun AddEventScreen(
     initialReminderUnits: Map<Int, String> = emptyMap(),
     onBackClick: () -> Unit,
     onSaveClick: (ClassSchedule) -> Unit,
-    onDeleteClick: (() -> Unit)? = null
+    onDeleteClick: (() -> Unit)? = null,
+    isRestricted: Boolean = false
 ) {
     var eventName by remember { mutableStateOf(existingEvent?.summary ?: "") }
     var location by remember { mutableStateOf(existingEvent?.location ?: "") }
@@ -81,26 +82,50 @@ fun AddEventScreen(
         onBackClick()
     }
     
-    val initialStartMillis = existingEvent?.start?.dateTime?.value 
-        ?: existingEvent?.start?.date?.value 
-        ?: initialDateMillis 
-        ?: System.currentTimeMillis()
-        
-    val initialEndMillis = existingEvent?.recurrence?.firstOrNull { it.startsWith("RRULE:") }?.let { rrule ->
-        val until = rrule.split(";").firstOrNull { it.startsWith("UNTIL=") }?.substringAfter("UNTIL=")
-        if (until != null) {
-            try {
-                SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }.parse(until)?.time
-            } catch (e: Exception) {
-                null
+    val initialStartMillis = remember(existingEvent, initialDateMillis) {
+        val raw = existingEvent?.start?.dateTime?.value 
+            ?: existingEvent?.start?.date?.value 
+            ?: initialDateMillis 
+            ?: System.currentTimeMillis()
+            
+        if (existingEvent?.start?.dateTime == null) {
+            val cal = if (existingEvent?.start?.date != null) {
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = raw }
+            } else {
+                Calendar.getInstance().apply { timeInMillis = raw }
             }
-        } else null
-    } ?: (initialStartMillis + 1000L * 60 * 60 * 24 * 7)
+            Calendar.getInstance().apply {
+                clear()
+                set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+            }.timeInMillis
+        } else {
+            raw
+        }
+    }
+        
+    val initialEndMillis = remember(existingEvent, initialStartMillis) {
+        existingEvent?.recurrence?.firstOrNull { it.startsWith("RRULE:") }?.let { rrule ->
+            val until = rrule.split(";").firstOrNull { it.startsWith("UNTIL=") }?.substringAfter("UNTIL=")
+            if (until != null) {
+                try {
+                    SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.parse(until)?.let { date ->
+                        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { time = date }
+                        Calendar.getInstance().apply {
+                            clear()
+                            set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                        }.timeInMillis
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            } else null
+        } ?: (initialStartMillis + 1000L * 60 * 60 * 24 * 7)
+    }
 
-    var startDate by remember { mutableStateOf(initialStartMillis) }
-    var endDate by remember { mutableStateOf(initialEndMillis) }
+    var startDate by remember(initialStartMillis) { mutableStateOf(initialStartMillis) }
+    var endDate by remember(initialEndMillis) { mutableStateOf(initialEndMillis) }
 
     var showStartDatePicker by remember { mutableStateOf(false) }
     var showEndDatePicker by remember { mutableStateOf(false) }
@@ -177,14 +202,18 @@ fun AddEventScreen(
                 onValueChange = { eventName = it },
                 label = { Text("Event name") },
                 placeholder = { Text("e.g. Meeting, Gym, Study") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRestricted,
+                readOnly = isRestricted
             )
 
             OutlinedTextField(
                 value = location,
                 onValueChange = { location = it },
                 label = { Text("Location (Optional)") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRestricted,
+                readOnly = isRestricted
             )
 
             HorizontalDivider()
@@ -199,17 +228,19 @@ fun AddEventScreen(
                     modifier = Modifier
                         .weight(1f)
                         .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    if (event.changes.any { it.pressed }) {
-                                        showStartTimePicker = true
+                            if (!isRestricted) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        if (event.changes.any { it.pressed }) {
+                                            showStartTimePicker = true
+                                        }
                                     }
                                 }
                             }
                         },
                     readOnly = true,
-                    enabled = true
+                    enabled = !isRestricted
                 )
                 OutlinedTextField(
                     value = endTime,
@@ -218,23 +249,26 @@ fun AddEventScreen(
                     modifier = Modifier
                         .weight(1f)
                         .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    if (event.changes.any { it.pressed }) {
-                                        showEndTimePicker = true
+                            if (!isRestricted) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        if (event.changes.any { it.pressed }) {
+                                            showEndTimePicker = true
+                                        }
                                     }
                                 }
                             }
                         },
                     readOnly = true,
-                    enabled = true
+                    enabled = !isRestricted
                 )
             }
 
             OutlinedCard(
-                onClick = { showStartDatePicker = true },
-                modifier = Modifier.fillMaxWidth()
+                onClick = { if (!isRestricted) showStartDatePicker = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRestricted
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -249,57 +283,67 @@ fun AddEventScreen(
                 }
             }
 
-            HorizontalDivider()
+            if (!isRestricted) {
+                HorizontalDivider()
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    days.forEachIndexed { index, day ->
-                        val dayValue = dayValues[index]
-                        val isSelected = selectedDays.contains(dayValue)
-                        
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) AppPrimary else MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable {
-                                    selectedDays = if (isSelected) {
-                                        selectedDays - dayValue
-                                    } else {
-                                        selectedDays + dayValue
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = day,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        days.forEachIndexed { index, day ->
+                            val dayValue = dayValues[index]
+                            val isSelected = selectedDays.contains(dayValue)
+
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) AppPrimary else MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable {
+                                        selectedDays = if (isSelected) {
+                                            selectedDays - dayValue
+                                        } else {
+                                            selectedDays + dayValue
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = day,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            if (selectedDays.isNotEmpty()) {
-                OutlinedCard(
-                    onClick = { showEndDatePicker = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                if (selectedDays.isNotEmpty()) {
+                    OutlinedCard(
+                        onClick = { showEndDatePicker = true },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.DateRange, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Repeat Until", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
-                            Text(formatDate(endDate), style = MaterialTheme.typography.bodyLarge)
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.DateRange,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    "Repeat Until",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                Text(formatDate(endDate), style = MaterialTheme.typography.bodyLarge)
+                            }
                         }
                     }
                 }
@@ -456,7 +500,7 @@ fun AddEventScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            if (existingEvent != null) {
+            if (existingEvent != null && !isRestricted) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
@@ -478,12 +522,26 @@ fun AddEventScreen(
     }
 
     if (showStartDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = startDate)
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = remember(startDate) {
+                val cal = Calendar.getInstance().apply { timeInMillis = startDate }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    clear()
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                }.timeInMillis
+            }
+        )
         DatePickerDialog(
             onDismissRequest = { showStartDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { startDate = it }
+                    datePickerState.selectedDateMillis?.let { utcMillis ->
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+                        startDate = Calendar.getInstance().apply {
+                            clear()
+                            set(utcCal.get(Calendar.YEAR), utcCal.get(Calendar.MONTH), utcCal.get(Calendar.DAY_OF_MONTH))
+                        }.timeInMillis
+                    }
                     showStartDatePicker = false
                 }) { Text("OK") }
             },
@@ -516,12 +574,26 @@ fun AddEventScreen(
     }
 
     if (showEndDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = endDate)
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = remember(endDate) {
+                val cal = Calendar.getInstance().apply { timeInMillis = endDate }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    clear()
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                }.timeInMillis
+            }
+        )
         DatePickerDialog(
             onDismissRequest = { showEndDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { endDate = it }
+                    datePickerState.selectedDateMillis?.let { utcMillis ->
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+                        endDate = Calendar.getInstance().apply {
+                            clear()
+                            set(utcCal.get(Calendar.YEAR), utcCal.get(Calendar.MONTH), utcCal.get(Calendar.DAY_OF_MONTH))
+                        }.timeInMillis
+                    }
                     showEndDatePicker = false
                 }) { Text("OK") }
             },
