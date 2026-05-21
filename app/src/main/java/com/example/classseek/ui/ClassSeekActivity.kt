@@ -604,7 +604,7 @@ fun ClassSeekApp(
     var userProfile by remember { mutableStateOf<UserProfile?>(null) }
     var isLoadingProfile by remember { mutableStateOf(true) }
 
-    var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.PROFILE) }
+    var currentDestination by rememberSaveable { mutableStateOf(AppDestinations.CALENDAR) }
     var isAddingEvent by remember { mutableStateOf(false) }
     var isEditingProfile by remember { mutableStateOf(false) }
     var viewOtherUserId by remember { mutableStateOf<String?>(null) }

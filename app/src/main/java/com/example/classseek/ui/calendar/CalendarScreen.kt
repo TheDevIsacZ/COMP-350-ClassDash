@@ -256,7 +256,7 @@ fun CalendarScreen(
                 val shouldHideCampusEvent = userProfile?.hideCampusEvents == true && isCampusEvent && !isBookmarked
 
                 isUpcoming && isStarredMatch && !shouldHideCampusEvent
-            }
+            }.sortedBy { it.start?.dateTime?.value ?: it.start?.date?.value ?: 0L }
 
             val groupedEvents = filteredEvents.groupBy { event ->
                 formatDate(event.start?.dateTime ?: event.start?.date)
@@ -364,6 +364,8 @@ fun CalendarScreen(
                             AgendaItem(
                                 event = event,
                                 userProfile = userProfile,
+                                isSchoolEvent = schoolEventIds.contains(event.id),
+                                isClassEvent = event.id?.startsWith("virtual_") == true,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onEditClick = { onEditEventClick(event) },
@@ -373,6 +375,7 @@ fun CalendarScreen(
                                 }
                             )
                         }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
                     }
 
                     val futureDateLabels = groupedEvents.keys
@@ -396,6 +399,8 @@ fun CalendarScreen(
                             AgendaItem(
                                 event = event,
                                 userProfile = userProfile,
+                                isSchoolEvent = schoolEventIds.contains(event.id),
+                                isClassEvent = event.id?.startsWith("virtual_") == true,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onEditClick = { onEditEventClick(event) },
@@ -405,6 +410,7 @@ fun CalendarScreen(
                                 }
                             )
                         }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
                     }
                 }
             }
@@ -416,7 +422,7 @@ fun CalendarScreen(
         val eventsForSelectedDate = calendarEvents.filter { event ->
             val eventStartTime = event.start?.dateTime?.value ?: event.start?.date?.value ?: 0L
             formatDate(DateTime(eventStartTime)) == dateLabel
-        }
+        }.sortedBy { it.start?.dateTime?.value ?: it.start?.date?.value ?: 0L }
 
         ModalBottomSheet(
             onDismissRequest = { showBottomSheet = false },
@@ -464,6 +470,8 @@ fun CalendarScreen(
                             AgendaItem(
                                 event = event,
                                 userProfile = userProfile,
+                                isSchoolEvent = schoolEventIds.contains(event.id),
+                                isClassEvent = event.id?.startsWith("virtual_") == true,
                                 canDelete = signedInAccount?.email != null && event.organizer?.email == signedInAccount.email,
                                 onDeleteClick = { event.id?.let { onDeleteEventClick(it) } },
                                 onEditClick = { onEditEventClick(event) },
@@ -792,12 +800,20 @@ private fun dayKey(millis: Long): String {
 
 @Composable
 fun AgendaItem(
-    event: Event, userProfile: UserProfile?, canDelete: Boolean = false,
+    event: Event, userProfile: UserProfile?,
+    isSchoolEvent: Boolean = false,
+    isClassEvent: Boolean = false,
+    canDelete: Boolean = false,
     onDeleteClick: () -> Unit = {}, onEditClick: () -> Unit = {}, onShareClick: () -> Unit = {}
 ) {
     val startTime = formatTime(event.start?.dateTime)
     val endTime = formatTime(event.end?.dateTime)
-    val eventColor = Color(0xFF4285F4)
+    val lineColor = when {
+        isSchoolEvent -> Color(0xFFB43232)
+        isClassEvent -> Color(0xFF6650a4)
+        else -> Color(0xFF4285F4)
+    }
+    val backgroundColor = Color(0xFF4285F4).copy(alpha = 0.1f)
     val isBookmarked = userProfile?.bookmarkedEventIds?.contains(event.id) ?: false
     var optimisticIsBookmarked by remember(event.id, isBookmarked) { mutableStateOf(isBookmarked) }
 
@@ -812,9 +828,9 @@ fun AgendaItem(
                 if (endTime.isNotEmpty()) Text(endTime, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(modifier = Modifier.width(12.dp))
-            Box(modifier = Modifier.weight(1f).background(eventColor.copy(alpha = 0.1f), RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Box(modifier = Modifier.weight(1f).background(backgroundColor, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.width(4.dp).height(24.dp).background(eventColor, RoundedCornerShape(2.dp)))
+                    Box(modifier = Modifier.width(4.dp).height(24.dp).background(lineColor, RoundedCornerShape(2.dp)))
                     Spacer(modifier = Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(event.summary ?: "(No Title)", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
