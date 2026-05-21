@@ -763,7 +763,7 @@ private fun CalendarDayCell(
 
     Box(
         modifier = modifier.height(44.dp).padding(2.dp).clip(CircleShape)
-            .background(when { isSelected -> AppPrimary; hasEvent -> AppPrimary.copy(alpha = 0.18f); else -> Color.Transparent })
+            .background(when { isToday -> AppPrimary; hasEvent -> AppPrimary.copy(alpha = 0.18f); else -> Color.Transparent })
             .clickable { onDateSelected(dayMillis) },
         contentAlignment = Alignment.Center
     ) {
@@ -771,9 +771,9 @@ private fun CalendarDayCell(
             Text(text = cal.get(JavaCalendar.DAY_OF_MONTH).toString(),
 
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Normal)
+                fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal)
             if (hasEvent) Box(modifier = Modifier.size(4.dp).clip(CircleShape)
-                .background(if (isSelected) MaterialTheme.colorScheme.onPrimary else AppPrimary))
+                .background(if (isToday) MaterialTheme.colorScheme.onPrimary else AppPrimary))
             else Spacer(modifier = Modifier.height(4.dp))
         }
     }
