@@ -837,7 +837,7 @@ fun AgendaItem(
                         if (!event.location.isNullOrEmpty()) Text(event.location, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
 
-                    if (canDelete) {
+                    if (canDelete || isSchoolEvent || isClassEvent) {
                         IconButton(onClick = onEditClick) {
                             Icon(Icons.Default.Edit, "Edit event", tint = AppPrimary, modifier = Modifier.size(20.dp))
                         }

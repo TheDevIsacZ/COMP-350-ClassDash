@@ -45,7 +45,8 @@ fun AddEventScreen(
     initialReminderUnits: Map<Int, String> = emptyMap(),
     onBackClick: () -> Unit,
     onSaveClick: (ClassSchedule) -> Unit,
-    onDeleteClick: (() -> Unit)? = null
+    onDeleteClick: (() -> Unit)? = null,
+    isRestricted: Boolean = false
 ) {
     var eventName by remember { mutableStateOf(existingEvent?.summary ?: "") }
     var location by remember { mutableStateOf(existingEvent?.location ?: "") }
@@ -201,14 +202,18 @@ fun AddEventScreen(
                 onValueChange = { eventName = it },
                 label = { Text("Event name") },
                 placeholder = { Text("e.g. Meeting, Gym, Study") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRestricted,
+                readOnly = isRestricted
             )
 
             OutlinedTextField(
                 value = location,
                 onValueChange = { location = it },
                 label = { Text("Location (Optional)") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRestricted,
+                readOnly = isRestricted
             )
 
             HorizontalDivider()
@@ -223,17 +228,19 @@ fun AddEventScreen(
                     modifier = Modifier
                         .weight(1f)
                         .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    if (event.changes.any { it.pressed }) {
-                                        showStartTimePicker = true
+                            if (!isRestricted) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        if (event.changes.any { it.pressed }) {
+                                            showStartTimePicker = true
+                                        }
                                     }
                                 }
                             }
                         },
                     readOnly = true,
-                    enabled = true
+                    enabled = !isRestricted
                 )
                 OutlinedTextField(
                     value = endTime,
@@ -242,23 +249,26 @@ fun AddEventScreen(
                     modifier = Modifier
                         .weight(1f)
                         .pointerInput(Unit) {
-                            awaitPointerEventScope {
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    if (event.changes.any { it.pressed }) {
-                                        showEndTimePicker = true
+                            if (!isRestricted) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        if (event.changes.any { it.pressed }) {
+                                            showEndTimePicker = true
+                                        }
                                     }
                                 }
                             }
                         },
                     readOnly = true,
-                    enabled = true
+                    enabled = !isRestricted
                 )
             }
 
             OutlinedCard(
-                onClick = { showStartDatePicker = true },
-                modifier = Modifier.fillMaxWidth()
+                onClick = { if (!isRestricted) showStartDatePicker = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isRestricted
             ) {
                 Row(
                     modifier = Modifier.padding(16.dp),
@@ -273,57 +283,67 @@ fun AddEventScreen(
                 }
             }
 
-            HorizontalDivider()
+            if (!isRestricted) {
+                HorizontalDivider()
 
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    days.forEachIndexed { index, day ->
-                        val dayValue = dayValues[index]
-                        val isSelected = selectedDays.contains(dayValue)
-                        
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(if (isSelected) AppPrimary else MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable {
-                                    selectedDays = if (isSelected) {
-                                        selectedDays - dayValue
-                                    } else {
-                                        selectedDays + dayValue
-                                    }
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = day,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp
-                            )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Repeats weekly on:", style = MaterialTheme.typography.titleSmall)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        days.forEachIndexed { index, day ->
+                            val dayValue = dayValues[index]
+                            val isSelected = selectedDays.contains(dayValue)
+
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) AppPrimary else MaterialTheme.colorScheme.surfaceVariant)
+                                    .clickable {
+                                        selectedDays = if (isSelected) {
+                                            selectedDays - dayValue
+                                        } else {
+                                            selectedDays + dayValue
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = day,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
                         }
                     }
                 }
-            }
 
-            if (selectedDays.isNotEmpty()) {
-                OutlinedCard(
-                    onClick = { showEndDatePicker = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                if (selectedDays.isNotEmpty()) {
+                    OutlinedCard(
+                        onClick = { showEndDatePicker = true },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.DateRange, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text("Repeat Until", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
-                            Text(formatDate(endDate), style = MaterialTheme.typography.bodyLarge)
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.DateRange,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    "Repeat Until",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                                Text(formatDate(endDate), style = MaterialTheme.typography.bodyLarge)
+                            }
                         }
                     }
                 }
@@ -480,7 +500,7 @@ fun AddEventScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            if (existingEvent != null) {
+            if (existingEvent != null && !isRestricted) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,

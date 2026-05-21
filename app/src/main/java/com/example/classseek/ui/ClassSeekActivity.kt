@@ -1572,11 +1572,16 @@ fun ClassSeekApp(
             emptyMap()
         }
 
+        val isRestricted = selectedEventToEdit?.let { event ->
+            schoolEventIds.contains(event.id) || event.id?.startsWith("virtual_") == true
+        } ?: false
+
         AddEventScreen(
             initialDateMillis = initialDateForNewEvent,
             existingEvent = selectedEventToEdit,
             initialReminders = savedReminders,
             initialReminderUnits = savedUnits,
+            isRestricted = isRestricted,
             onBackClick = { 
                 isAddingEvent = false
                 selectedEventToEdit = null
@@ -1584,7 +1589,9 @@ fun ClassSeekApp(
             onSaveClick = { schedule ->
                 scope.launch {
                     signedInAccount?.let { account ->
-                        val savedEventId = if (selectedEventToEdit != null) {
+                        val savedEventId = if (isRestricted) {
+                            selectedEventToEdit?.id
+                        } else if (selectedEventToEdit != null) {
                             activity?.updateEventInCalendar(account, selectedEventToEdit!!.id, schedule)
                         } else {
                             activity?.addEventToCalendar(account, schedule)
