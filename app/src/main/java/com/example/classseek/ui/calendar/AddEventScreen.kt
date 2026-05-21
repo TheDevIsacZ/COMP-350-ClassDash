@@ -81,26 +81,50 @@ fun AddEventScreen(
         onBackClick()
     }
     
-    val initialStartMillis = existingEvent?.start?.dateTime?.value 
-        ?: existingEvent?.start?.date?.value 
-        ?: initialDateMillis 
-        ?: System.currentTimeMillis()
-        
-    val initialEndMillis = existingEvent?.recurrence?.firstOrNull { it.startsWith("RRULE:") }?.let { rrule ->
-        val until = rrule.split(";").firstOrNull { it.startsWith("UNTIL=") }?.substringAfter("UNTIL=")
-        if (until != null) {
-            try {
-                SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("UTC")
-                }.parse(until)?.time
-            } catch (e: Exception) {
-                null
+    val initialStartMillis = remember(existingEvent, initialDateMillis) {
+        val raw = existingEvent?.start?.dateTime?.value 
+            ?: existingEvent?.start?.date?.value 
+            ?: initialDateMillis 
+            ?: System.currentTimeMillis()
+            
+        if (existingEvent?.start?.dateTime == null) {
+            val cal = if (existingEvent?.start?.date != null) {
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = raw }
+            } else {
+                Calendar.getInstance().apply { timeInMillis = raw }
             }
-        } else null
-    } ?: (initialStartMillis + 1000L * 60 * 60 * 24 * 7)
+            Calendar.getInstance().apply {
+                clear()
+                set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+            }.timeInMillis
+        } else {
+            raw
+        }
+    }
+        
+    val initialEndMillis = remember(existingEvent, initialStartMillis) {
+        existingEvent?.recurrence?.firstOrNull { it.startsWith("RRULE:") }?.let { rrule ->
+            val until = rrule.split(";").firstOrNull { it.startsWith("UNTIL=") }?.substringAfter("UNTIL=")
+            if (until != null) {
+                try {
+                    SimpleDateFormat("yyyyMMdd'T'HHmmss'Z'", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.parse(until)?.let { date ->
+                        val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { time = date }
+                        Calendar.getInstance().apply {
+                            clear()
+                            set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                        }.timeInMillis
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            } else null
+        } ?: (initialStartMillis + 1000L * 60 * 60 * 24 * 7)
+    }
 
-    var startDate by remember { mutableStateOf(initialStartMillis) }
-    var endDate by remember { mutableStateOf(initialEndMillis) }
+    var startDate by remember(initialStartMillis) { mutableStateOf(initialStartMillis) }
+    var endDate by remember(initialEndMillis) { mutableStateOf(initialEndMillis) }
 
     var showStartDatePicker by remember { mutableStateOf(false) }
     var showEndDatePicker by remember { mutableStateOf(false) }
@@ -478,12 +502,26 @@ fun AddEventScreen(
     }
 
     if (showStartDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = startDate)
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = remember(startDate) {
+                val cal = Calendar.getInstance().apply { timeInMillis = startDate }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    clear()
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                }.timeInMillis
+            }
+        )
         DatePickerDialog(
             onDismissRequest = { showStartDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { startDate = it }
+                    datePickerState.selectedDateMillis?.let { utcMillis ->
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+                        startDate = Calendar.getInstance().apply {
+                            clear()
+                            set(utcCal.get(Calendar.YEAR), utcCal.get(Calendar.MONTH), utcCal.get(Calendar.DAY_OF_MONTH))
+                        }.timeInMillis
+                    }
                     showStartDatePicker = false
                 }) { Text("OK") }
             },
@@ -516,12 +554,26 @@ fun AddEventScreen(
     }
 
     if (showEndDatePicker) {
-        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = endDate)
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = remember(endDate) {
+                val cal = Calendar.getInstance().apply { timeInMillis = endDate }
+                Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    clear()
+                    set(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH))
+                }.timeInMillis
+            }
+        )
         DatePickerDialog(
             onDismissRequest = { showEndDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
-                    datePickerState.selectedDateMillis?.let { endDate = it }
+                    datePickerState.selectedDateMillis?.let { utcMillis ->
+                        val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply { timeInMillis = utcMillis }
+                        endDate = Calendar.getInstance().apply {
+                            clear()
+                            set(utcCal.get(Calendar.YEAR), utcCal.get(Calendar.MONTH), utcCal.get(Calendar.DAY_OF_MONTH))
+                        }.timeInMillis
+                    }
                     showEndDatePicker = false
                 }) { Text("OK") }
             },
