@@ -1370,44 +1370,68 @@ fun ClassSeekApp(
             onAddEventToCalendar = { eventMsg ->
                 if (firebaseUser?.uid != null && eventMsg.eventId != null) {
                     val currentUid = firebaseUser!!.uid
-                    
+
                     scope.launch {
                         signedInAccount?.let { account ->
                             val googleEvent = Event().apply {
                                 summary = eventMsg.eventTitle ?: "Shared Event"
                                 location = eventMsg.eventLocation
                                 description = "Added from ClassSeek chat"
-                                
+
                                 val fullSdf = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
                                 val dateSdf = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-                                
+
                                 start = EventDateTime().apply {
-                                    val date = try { fullSdf.parse(eventMsg.eventStart ?: "") } 
-                                              catch (e: Exception) { try { dateSdf.parse(eventMsg.eventStart ?: "") } catch (e: Exception) { null } }
+                                    val date = try {
+                                        fullSdf.parse(eventMsg.eventStart ?: "")
+                                    } catch (e: Exception) {
+                                        try {
+                                            dateSdf.parse(eventMsg.eventStart ?: "")
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                    }
                                     if (date != null) {
-                                        val cal = java.util.Calendar.getInstance().apply { time = date }
+                                        val cal =
+                                            java.util.Calendar.getInstance().apply { time = date }
                                         if (cal.get(java.util.Calendar.YEAR) == 1970) {
-                                            cal.set(java.util.Calendar.YEAR, java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+                                            cal.set(
+                                                java.util.Calendar.YEAR,
+                                                java.util.Calendar.getInstance()
+                                                    .get(java.util.Calendar.YEAR)
+                                            )
                                         }
                                         dateTime = DateTime(cal.time)
                                     }
                                 }
-                                
+
                                 end = EventDateTime().apply {
-                                    val date = try { fullSdf.parse(eventMsg.eventEnd ?: "") } 
-                                              catch (e: Exception) { try { dateSdf.parse(eventMsg.eventEnd ?: "") } catch (e: Exception) { null } }
+                                    val date = try {
+                                        fullSdf.parse(eventMsg.eventEnd ?: "")
+                                    } catch (e: Exception) {
+                                        try {
+                                            dateSdf.parse(eventMsg.eventEnd ?: "")
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                    }
                                     if (date != null) {
-                                        val cal = java.util.Calendar.getInstance().apply { time = date }
+                                        val cal =
+                                            java.util.Calendar.getInstance().apply { time = date }
                                         if (cal.get(java.util.Calendar.YEAR) == 1970) {
-                                            cal.set(java.util.Calendar.YEAR, java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+                                            cal.set(
+                                                java.util.Calendar.YEAR,
+                                                java.util.Calendar.getInstance()
+                                                    .get(java.util.Calendar.YEAR)
+                                            )
                                         }
                                         dateTime = DateTime(cal.time)
                                     }
                                 }
                             }
-                            
+
                             val successId = activity?.addEventToGoogleCalendar(account, googleEvent)
-                            
+
                             if (successId != null) {
                                 val eventData = hashMapOf(
                                     "eventId" to successId,
@@ -1424,11 +1448,15 @@ fun ClassSeekApp(
                                     .document(successId)
                                     .set(eventData)
 
+                                // Bookmark BOTH the new calendar event AND the original shared event
                                 db.collection("users")
                                     .document(currentUid)
                                     .update(
                                         "bookmarkedEventIds",
-                                        FieldValue.arrayUnion(successId)
+                                        FieldValue.arrayUnion(
+                                            successId,
+                                            eventMsg.eventId
+                                        )  // Combine both in one call
                                     )
 
                                 val result = activity?.getCalendarEvents(account)
