@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -37,12 +38,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -1660,6 +1663,30 @@ private fun MessageRow(
     onAddEventToCalendar: (Message) -> Unit = {},
     onGameClick: (String) -> Unit = {}
 ) {
+    // Add state for tracking if event is bookmarked
+    var isEventBookmarked by remember(msg.eventId) { mutableStateOf(false) }
+    val db = remember { FirebaseFirestore.getInstance() }
+    val currentUser = remember { FirebaseAuth.getInstance().currentUser }
+    val scope = rememberCoroutineScope()
+
+    // Set up a real-time listener for bookmark status
+    DisposableEffect(msg.eventId, currentUser?.uid) {
+        if (msg.type == "event" && msg.eventId != null && currentUser?.uid != null) {
+            val userDocRef = db.collection("users").document(currentUser.uid)
+
+            val listener = userDocRef.addSnapshotListener { snapshot, _ ->
+                val bookmarkedIds = snapshot?.get("bookmarkedEventIds") as? List<String> ?: emptyList()
+                isEventBookmarked = bookmarkedIds.contains(msg.eventId)
+            }
+
+            onDispose {
+                listener.remove()
+            }
+        } else {
+            onDispose { }
+        }
+    }
+
     if (msg.type == "system") {
         Box(
             modifier = Modifier.fillMaxWidth(),
@@ -1678,9 +1705,14 @@ private fun MessageRow(
                 )
             }
         }
-
         return
     }
+
+    // Theme-aware colors
+    val bookmarkBackgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+    val bookmarkBorderColor = MaterialTheme.colorScheme.primary
+    val bookmarkBadgeColor = MaterialTheme.colorScheme.primary
+    val bookmarkTextColor = MaterialTheme.colorScheme.primary
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1704,10 +1736,16 @@ private fun MessageRow(
                 Surface(
                     tonalElevation = 1.dp,
                     shape = MaterialTheme.shapes.medium,
-                    color = if (msg.type == "location") {
-                        MaterialTheme.colorScheme.primaryContainer
+                    color = when {
+                        msg.type == "location" -> MaterialTheme.colorScheme.primaryContainer
+                        msg.type == "event" && isEventBookmarked -> bookmarkBackgroundColor
+                        msg.type == "event" -> MaterialTheme.colorScheme.surface
+                        else -> MaterialTheme.colorScheme.surface
+                    },
+                    border = if (msg.type == "event" && isEventBookmarked) {
+                        BorderStroke(1.5.dp, bookmarkBorderColor)
                     } else {
-                        MaterialTheme.colorScheme.surface
+                        null
                     },
                     modifier = if (msg.type == "game") {
                         Modifier.clickable { msg.gameId?.let { onGameClick(it) } }
@@ -1723,16 +1761,13 @@ private fun MessageRow(
                                     contentDescription = null,
                                     tint = AppPrimary
                                 )
-
                                 Spacer(Modifier.width(8.dp))
-
                                 Column {
                                     Text(
                                         text = msg.locationName ?: "Shared Location",
                                         style = MaterialTheme.typography.bodyLarge,
                                         fontWeight = FontWeight.Bold
                                     )
-
                                     Text(
                                         text = "Tap to view on map",
                                         style = MaterialTheme.typography.bodySmall,
@@ -1747,36 +1782,100 @@ private fun MessageRow(
                                 }
                             }
                         } else if (msg.type == "event") {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "📅 ${msg.eventTitle ?: "Event"}",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    // Event header with bookmark indicator
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = "📅 ${msg.eventTitle ?: "Event"}",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+
+                                        // Bookmark indicator badge with theme-aware colors
+                                        if (isEventBookmarked) {
+                                            Surface(
+                                                shape = RoundedCornerShape(12.dp),
+                                                color = bookmarkBadgeColor.copy(alpha = 0.15f),
+                                                border = BorderStroke(0.5.dp, bookmarkBadgeColor.copy(alpha = 0.5f))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Bookmark,
+                                                        contentDescription = "Bookmarked",
+                                                        modifier = Modifier.size(12.dp),
+                                                        tint = bookmarkBadgeColor
+                                                    )
+                                                    Spacer(modifier = Modifier.width(4.dp))
+                                                    Text(
+                                                        text = "Saved",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = bookmarkBadgeColor,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
 
                                     if (!msg.eventStart.isNullOrBlank()) {
-                                        Text(
-                                            "🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}",
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                "🕒 ${msg.eventStart} → ${msg.eventEnd ?: ""}",
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
                                     }
 
                                     if (!msg.eventLocation.isNullOrBlank()) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                "📍 ${msg.eventLocation}",
+                                                style = MaterialTheme.typography.bodySmall
+                                            )
+                                        }
+                                    }
+
+                                    // Shared by indicator
+                                    if (!isMine) {
+                                        Spacer(modifier = Modifier.height(4.dp))
                                         Text(
-                                            "📍 ${msg.eventLocation}",
-                                            style = MaterialTheme.typography.bodySmall
+                                            text = "Shared by $senderLabel",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
                                 }
 
-                                if (!isMine && msg.eventId != null) {
-                                    IconButton(onClick = { onAddEventToCalendar(msg) }) {
-                                        Icon(
-                                            imageVector = Icons.Default.BookmarkAdd,
-                                            contentDescription = "Add to Calendar",
-                                            tint = AppPrimary
-                                        )
+                                // Action buttons
+                                Column(
+                                    horizontalAlignment = Alignment.End
+                                ) {
+                                    // Add to Calendar button (only for received messages)
+                                    if (!isMine && msg.eventId != null) {
+                                        IconButton(
+                                            onClick = { onAddEventToCalendar(msg) },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.BookmarkAdd,
+                                                contentDescription = "Add to Calendar",
+                                                tint = if (isEventBookmarked) bookmarkBadgeColor else MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1794,15 +1893,12 @@ private fun MessageRow(
                                         .padding(4.dp)
                                         .clip(RoundedCornerShape(4.dp))
                                 )
-
                                 Spacer(Modifier.height(4.dp))
-
                                 Text(
                                     text = if (msg.gameType == "chess") "Chess Board" else "Game",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold
                                 )
-
                                 Text(
                                     text = msg.text ?: "Tap to Play",
                                     style = MaterialTheme.typography.bodySmall,
@@ -1832,7 +1928,6 @@ private fun MessageRow(
                 }
 
                 Spacer(Modifier.height(2.dp))
-
                 Text(
                     text = senderLabel,
                     style = MaterialTheme.typography.labelSmall
@@ -1847,7 +1942,6 @@ private fun MessageRow(
 
                 if (isMine && seenByProfiles.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
-
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -1861,7 +1955,6 @@ private fun MessageRow(
                                 modifier = Modifier.size(18.dp)
                             )
                         }
-
                         if (seenByProfiles.size > 6) {
                             Text(
                                 text = "+${seenByProfiles.size - 6}",
