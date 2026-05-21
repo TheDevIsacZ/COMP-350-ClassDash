@@ -125,6 +125,8 @@ fun ChessGameOverlay(
                         playerWhite = game.playerWhite,
                         legalMoves = legalMoves,
                         isCheck = chessBoard.isKingAttacked,
+                        lastMoveFrom = game.lastMoveFrom,
+                        lastMoveTo = game.lastMoveTo,
                         onMove = { move ->
                             // Haptic feedback (Tactile "thump" on piece placement)
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -165,7 +167,9 @@ fun ChessGameOverlay(
                                         move = sanMove,
                                         status = status,
                                         winnerId = winnerId,
-                                        statusMessage = statusMessage
+                                        statusMessage = statusMessage,
+                                        lastMoveFrom = move.from.toString().lowercase(),
+                                        lastMoveTo = move.to.toString().lowercase()
                                     )
                                 } catch (e: Exception) {
                                     android.util.Log.e("ChessGame", "Failed to update game state", e)
@@ -309,9 +313,12 @@ fun ChessBoard(
     playerWhite: String,
     legalMoves: List<Move>,
     isCheck: Boolean,
+    lastMoveFrom: String?,
+    lastMoveTo: String?,
     onMove: (Move) -> Unit
 ) {
     val isWhite = myUid == playerWhite
+// ...
     val isMyTurn = currentTurn == myUid
     val sideToMove = board.sideToMove
 
@@ -346,6 +353,10 @@ fun ChessBoard(
                     val isSelected = selectedSquare == square
                     val isHighlighted = highlightedSquares.contains(square)
                     
+                    // Logic for highlighting the last move
+                    val isLastMove = lastMoveFrom == square.toString().lowercase() || 
+                                     lastMoveTo == square.toString().lowercase()
+
                     // Logic for King in Check red glow - triggers when the engine detects an attack on the active King
                     val isKingInCheck = isCheck && 
                         ((sideToMove == com.github.bhlangonijr.chesslib.Side.WHITE && piece == Piece.WHITE_KING) ||
@@ -354,6 +365,7 @@ fun ChessBoard(
                     val bgColor = when {
                         isKingInCheck -> Color.Red.copy(alpha = 0.7f) // Visual alert for Check
                         isSelected -> Color(0xFFF7F769) // Yellow selection highlight
+                        isLastMove -> Color(0xFFF7F769).copy(alpha = 0.5f) // Subtle yellow for last move
                         isLight -> Color(0xFFDEB887) // Classic wooden theme (Light)
                         else -> Color(0xFF8B4513)    // Classic wooden theme (Dark)
                     }

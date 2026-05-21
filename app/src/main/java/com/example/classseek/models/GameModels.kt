@@ -13,5 +13,7 @@ data class GameState(
     val winnerId: String? = null,
     val lastMoveAt: Timestamp? = null,
     val moveHistory: List<String> = emptyList(),
-    val messageId: String = "" // Added to track which chat bubble to update
+    val messageId: String = "", // Added to track which chat bubble to update
+    val lastMoveFrom: String? = null, // e.g., "e2"
+    val lastMoveTo: String? = null    // e.g., "e4"
 )
