@@ -1622,11 +1622,11 @@ fun ClassSeekApp(
                                         signedInAccount?.let { account ->
                                             val success = activity?.deleteEventFromCalendar(account, eventId) ?: false
                                             if (success) {
-                                            val result = activity?.getCalendarEvents(account)
-                                            if (result != null) {
-                                                calendarEvents = result.events
-                                                schoolEventIds = result.schoolEventIds
-                                            }
+                                                val result = activity?.getCalendarEvents(account)
+                                                if (result != null) {
+                                                    calendarEvents = result.events
+                                                    schoolEventIds = result.schoolEventIds
+                                                }
                                             }
                                         }
                                     }
@@ -1699,30 +1699,70 @@ fun ClassSeekApp(
                         }
 
                         AppDestinations.FRIENDS -> {
-                            FriendsScreen(
-                                friends = profileFriends,
-                                initialChatId = routedChatId ?: pendingNotificationChatId,
-                                initialChatTitle = routedChatTitle ?: pendingNotificationChatTitle,
-                                onInitialChatConsumed = {
-                                    consumeRoutedChat()
-                                    consumePendingNotificationChat()
-                                },
-                                onNavigateToProfile = { uid ->
-                                    viewOtherUserId = uid
-                                },
-                                onOpenChat = { chatId, chatTitle ->
-                                    routedChatId = chatId
-                                    routedChatTitle = chatTitle
-                                    currentDestination = AppDestinations.FRIENDS
-                                },
-                                onLocationClick = { latLng, name, senderId ->
-                                    sharedLocationToView = latLng
-                                    sharedLocationNameToView = name
-                                    sharedLocationByUidToView = senderId
-                                    currentDestination = AppDestinations.MAP
-                                },
-                                auth = auth
-                            )
+                            val chatIdToOpen = routedChatId ?: pendingNotificationChatId
+                            val chatTitleToOpen = routedChatTitle ?: pendingNotificationChatTitle
+
+                            if (chatIdToOpen != null) {
+                                // Show chat screen directly
+                                ChatScreen(
+                                    chatId = chatIdToOpen,
+                                    title = chatTitleToOpen ?: "Chat",
+                                    onBack = {
+                                        routedChatId = null
+                                        routedChatTitle = null
+                                        pendingNotificationChatId = null
+                                        pendingNotificationChatTitle = null
+                                        consumeRoutedChat()
+                                        consumePendingNotificationChat()
+                                    },
+                                    onLocationClick = { latLng, name, senderId ->
+                                        sharedLocationToView = latLng
+                                        sharedLocationNameToView = name
+                                        sharedLocationByUidToView = senderId
+                                        currentDestination = AppDestinations.MAP
+                                    },
+                                    onAddEventToCalendar = { message ->
+                                        message.eventId?.let { eventId ->
+                                            val event = sharedEvents.find { it.id == eventId }
+                                            event?.let {
+                                                scope.launch {
+                                                    signedInAccount?.let { account ->
+                                                        activity?.addEventToGoogleCalendar(account, it)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    repo = repo,
+                                    auth = auth
+                                )
+                            } else {
+                                FriendsScreen(
+                                    friends = profileFriends,
+                                    initialChatId = routedChatId ?: pendingNotificationChatId,
+                                    initialChatTitle = routedChatTitle ?: pendingNotificationChatTitle,
+                                    onInitialChatConsumed = {
+                                        consumeRoutedChat()
+                                        consumePendingNotificationChat()
+                                    },
+                                    onNavigateToProfile = { uid ->
+                                        viewOtherUserId = uid
+                                    },
+                                    onOpenChat = { chatId, chatTitle ->
+                                        routedChatId = chatId
+                                        routedChatTitle = chatTitle
+                                        // Force recomposition
+                                        currentDestination = AppDestinations.FRIENDS
+                                    },
+                                    onLocationClick = { latLng, name, senderId ->
+                                        sharedLocationToView = latLng
+                                        sharedLocationNameToView = name
+                                        sharedLocationByUidToView = senderId
+                                        currentDestination = AppDestinations.MAP
+                                    },
+                                    auth = auth
+                                )
+                            }
                         }
 
                         AppDestinations.MAP -> {

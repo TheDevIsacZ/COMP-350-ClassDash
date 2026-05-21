@@ -37,8 +37,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Image
@@ -1787,7 +1788,7 @@ private fun MessageRow(
                                     )
                                 }
                             }
-                        } else if (msg.type == "event") {
+                        } else     if (msg.type == "event") {
                             Row(
                                 verticalAlignment = Alignment.Top,
                                 modifier = Modifier.fillMaxWidth()
@@ -1869,15 +1870,29 @@ private fun MessageRow(
                                 Column(
                                     horizontalAlignment = Alignment.End
                                 ) {
-                                    // Add to Calendar button (only for received messages)
-                                    if (!isMine && msg.eventId != null) {
+                                    // Bookmark toggle button (works for both received and own messages)
+                                    if (msg.eventId != null) {
                                         IconButton(
-                                            onClick = { onAddEventToCalendar(msg) },
+                                            onClick = {
+                                                val uid = currentUser?.uid
+                                                if (uid != null) {
+                                                    scope.launch {
+                                                        val ref = db.collection("users").document(uid)
+                                                        if (isEventBookmarked) {
+                                                            // Remove bookmark
+                                                            ref.update("bookmarkedEventIds", FieldValue.arrayRemove(msg.eventId))
+                                                        } else {
+                                                            // Add bookmark
+                                                            ref.update("bookmarkedEventIds", FieldValue.arrayUnion(msg.eventId))
+                                                        }
+                                                    }
+                                                }
+                                            },
                                             modifier = Modifier.size(32.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.BookmarkAdd,
-                                                contentDescription = "Add to Calendar",
+                                                imageVector = if (isEventBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                                contentDescription = if (isEventBookmarked) "Remove from saved" else "Save event",
                                                 tint = if (isEventBookmarked) bookmarkBadgeColor else MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(20.dp)
                                             )
